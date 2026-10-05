@@ -1,0 +1,5 @@
+name = HasFile Probe (test)
+author = McPuppetFace
+description = A test mod for the voice-chat sidecar: checks every frame whether a few signal files exist and reports it through the savegame, so probes/hasfileprobe/probe.py can measure whether a helper program can signal the game by creating and deleting files. Also plays sound files that appear after the level loaded. Not for the Workshop.
+tags = Gameplay
+version = 2

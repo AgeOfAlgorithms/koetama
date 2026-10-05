@@ -1,0 +1,5 @@
+name = Voice Probe (test)
+author = McPuppetFace
+description = A test mod for voice chat: plays a spoken sentence that probes/voiceprobe/probe.py feeds in as short sound files while the level runs, cut and stitched in several ways, so you can judge how voice played by the game would sound. Not for the Workshop.
+tags = Gameplay
+version = 2

@@ -1,0 +1,5 @@
+name = Save Probe (test)
+author = McPuppetFace
+description = A test mod for the voice-chat sidecar: writes a frame counter into the savegame and marks the log, so probes/saveprobe/watch.py can measure how fast the game puts savegame.mod keys on disk. Not for the Workshop.
+tags = Gameplay
+version = 2

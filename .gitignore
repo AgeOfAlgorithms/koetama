@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# this project: generated data (benchmark clips and reports, the exported language detector, test output)
+export/

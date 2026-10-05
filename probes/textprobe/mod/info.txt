@@ -1,0 +1,5 @@
+name = Text Probe (test)
+author = McPuppetFace
+description = A test mod for voice chat: reads text from small files that probes/textprobe/probe.py writes while the level runs (a prefab's description and tag, an image's size), to see whether a helper program can pass text into the game. Not for the Workshop.
+tags = Gameplay
+version = 2
