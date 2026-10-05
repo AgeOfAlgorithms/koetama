@@ -73,7 +73,7 @@ def main():
                     time.sleep(0.001)
         write()
         env = dict(os.environ, SAVEPROBE_DIR=td, HFP_MODS=mods, HF_HUB_DISABLE_SYMLINKS_WARNING='1', PYTHONIOENCODING='utf-8')
-        p = subprocess.Popen([sys.executable, '-u', os.path.join(HERE, 'helper.py'), '--volume', '0', '--mic-wav', wav,
+        p = subprocess.Popen([sys.executable, '-u', os.path.join(HERE, 'teardown_helper.py'), '--volume', '0', '--mic-wav', wav,
                               '--seconds', str(int(dur + 40))], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, encoding='utf-8', errors='replace')
         msgs = []                                   # (time, kind, utt, text)

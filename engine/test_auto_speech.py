@@ -1,4 +1,4 @@
-"""The in-game auto test (helper.py --auto-speech) against a fake game: what the game would receive - live words
+"""The in-game auto test (teardown_helper.py --auto-speech) against a fake game: what the game would receive - live words
 and finished lines - for each recorded line, in real time. Checks every line arrives, live words first.
 
     C:/Users/user/miniconda3/envs/pcvoice/python.exe engine/test_auto_speech.py
@@ -17,7 +17,7 @@ XML = ('<registry version="2.1.0">\n<savegame><mod><local-proximity-chat>\n<pcvx
 
 def main():
     sys.path.insert(0, HERE)
-    import helper
+    import teardown_helper as helper
     n_items = len(helper.auto_speech_items())
     with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as mods:
         save = os.path.join(td, 'savegame.xml')
@@ -36,7 +36,7 @@ def main():
         env = dict(os.environ, SAVEPROBE_DIR=td, HFP_MODS=mods, HF_HUB_DISABLE_SYMLINKS_WARNING='1', PYTHONIOENCODING='utf-8')
         log = os.path.join(td, 'helper.log')
         logf = open(log, 'w', encoding='utf-8')
-        p = subprocess.Popen([sys.executable, '-u', os.path.join(HERE, 'helper.py'), '--volume', '0', '--auto-speech', '--seconds', '400'],
+        p = subprocess.Popen([sys.executable, '-u', os.path.join(HERE, 'teardown_helper.py'), '--volume', '0', '--auto-speech', '--seconds', '400'],
                              env=env, stdout=logf, stderr=subprocess.STDOUT)
         msgs, t0 = [], time.time()
         while time.time() - t0 < 390:

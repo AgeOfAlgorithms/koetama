@@ -13,10 +13,10 @@ What it does:
     sends the game the live words while you talk and the finished line after; the game shows the live words
     over your head and says the line in the chat. The language: the game's "Language I speak" (or --lang)
 
-    python engine/helper.py            # start it, then play; in the game: Enter, Voice
-    python engine/helper.py --demo     # no game needed: one voice walks a circle around you
-    python engine/helper.py --list     # sound devices;  --device N / --mic-device N pick one
-    python engine/helper.py --transcribe some.wav --lang ru   # a recording through the pipeline
+    python engine/teardown_helper.py            # start it, then play; in the game: Enter, Voice
+    python engine/teardown_helper.py --demo     # no game needed: one voice walks a circle around you
+    python engine/teardown_helper.py --list     # sound devices;  --device N / --mic-device N pick one
+    python engine/teardown_helper.py --transcribe some.wav --lang ru   # a recording through the pipeline
 
 Needs numpy, scipy, sounddevice and sherpa-onnx (conda env "pcvoice", pip only). Ctrl+C stops it.
 """

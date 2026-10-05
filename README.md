@@ -38,7 +38,7 @@ A helper program that gives a game proximity voice chat and speech-to-text, runn
 
 3. Start the helper, then start a Teardown level with the mod on:
 
-       python engine/helper.py
+       python engine/teardown_helper.py
 
 The speech models download automatically the first time they're needed: Parakeet about 670 MB, GigaAM 225 MB,
 SenseVoice 240 MB.

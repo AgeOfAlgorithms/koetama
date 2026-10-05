@@ -1,7 +1,7 @@
 """REPLACED by asr.py (2026-10-04); kept for test_helper.py's detector tests and the Whisper comparison.
 The helper's ears (first PROTOTYPE): the microphone, a speech detector that cuts what is said into
 utterances, and a transcriber (a small Whisper model through faster-whisper, on the CPU, on this machine;
-nothing is sent anywhere). helper.py turns each transcript into a chat line.
+nothing is sent anywhere). teardown_helper.py turns each transcript into a chat line.
 """
 import math
 import queue

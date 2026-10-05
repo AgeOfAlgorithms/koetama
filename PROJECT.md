@@ -12,7 +12,7 @@ engine is its own project, decoupled from the chat mod; it may serve other games
 | path | what |
 |---|---|
 | `engine/asr.py` | speech to text: Silero VAD, the rolling passes (Parakeet v3 / GigaAM v3 / SenseVoice by language), "auto" language (SpeechBrain detector + stitching) |
-| `engine/helper.py` | the program: the game link (feed reader, `Link` files), the voice mixer, the microphone, the CLI |
+| `engine/teardown_helper.py` | the program: the game link (feed reader, `Link` files), the voice mixer, the microphone, the CLI |
 | `engine/speech.py` | the first speech detector + faster-whisper path (kept: test_helper and bench/lid.py use it) |
 | `engine/export_lid.py` | builds the language detector's ONNX file (env pclid) |
 | `engine/make_notices.py`, `engine/licenses/` | writes THIRD_PARTY_NOTICES.txt (every model and package, full license texts) |
@@ -34,7 +34,7 @@ engine is its own project, decoupled from the chat mod; it may serve other games
 
     P=C:/Users/user/miniconda3/envs/pcvoice/python.exe
     $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
-    $P engine/helper.py                  # the helper (Teardown running, a level with the mod)
+    $P engine/teardown_helper.py                  # the helper (Teardown running, a level with the mod)
     C:/Users/user/miniconda3/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
     $P engine/make_notices.py            # after any model or package change
 
@@ -99,7 +99,7 @@ hooks: `PC.voiceTick`, `PC.voiceDraw`, `PC.voiceDummyCommand`, `PC.voiceOn`; cha
   rising across the buffer (to `voiceBufferMuffle` 0.85) or from a wall (through 0.75, a way round 0.3). An
   empty list once = off (also written at start over a feed left on by an earlier session).
 - Voice page: a "Voice volume" slider while there are voices (`savegame.mod.pcvxvol`, sent in the feed).
-- The helper prototype: `engine/helper.py` (Python: numpy, scipy, sounddevice from conda-forge
+- The helper prototype: `engine/teardown_helper.py` (Python: numpy, scipy, sounddevice from conda-forge
   `python-sounddevice`): reads the feed (shared-read polling, 5 ms; a feed already in the file at start is
   ignored until it changes), mixes at 48 kHz stereo: constant-power pan from the azimuth (x cos elevation),
   behind a little duller and quieter, a two-pole low-pass for the muffle (16 kHz -> 400 Hz), every value
@@ -140,8 +140,8 @@ the benchmark's two-pass design in the helper, and live words in the game.**
   `SECOND = {ru: GigaAM v3 CTC, zh: SenseVoice, es: Parakeet v3, en: Parakeet v3}`, else Nemotron's text; a
   short line (< 1.2 s, or Nemotron heard nothing) goes to Parakeet in the European languages. `auto`: the
   second pass from the transcript's script (Cyrillic -> ru, CJK -> zh). `Microphone` at 16 kHz (WASAPI
-  auto-convert); `WavMicrophone` = a recording played as the microphone (`helper.py --mic-wav f.wav`).
-  `helper.py --transcribe f.wav --lang ru` runs a file through it. Whisper (speech.py) is no longer used.
+  auto-convert); `WavMicrophone` = a recording played as the microphone (`teardown_helper.py --mic-wav f.wav`).
+  `teardown_helper.py --transcribe f.wav --lang ru` runs a file through it. Whisper (speech.py) is no longer used.
 - Measured offline (test_asr.py: the benchmark clips streamed as from a microphone, 50 ms blocks): errors clean /
   room en 0.0 / 1.9, ru 9.1 / 5.5, zh 4.9 / 8.8, es 0.0 / 2.6, de 0.0 / 19.6; 8 of 8 one-word callouts right
   (Parakeet); hiss: no line; ~0.27 s CPU per s of audio. A long pause inside a sentence splits it into two lines.
@@ -154,7 +154,7 @@ the benchmark's two-pass design in the helper, and live words in the game.**
   private; the user: "whispering should behave the same as the rest", 2026-10-05) -> a bubble with the words
   so far (the end, after "…") instead of the "..." within the mode's words range, "..." in its buffer; the
   finished line (`server.pc_say` with voice) clears it, so does 4 s without news; the speaker sees
-  "Speaking: <words>" above the hint. `helper.py --auto` now sends each test line as live words first.
+  "Speaking: <words>" above the hint. `teardown_helper.py --auto` now sends each test line as live words first.
 - Tests: test_proxchat.lua 378, test_helper.py 60, test_asr.py 46, test_e2e.py 4 (fake game + the real helper
   with a recording as the microphone: 11 live messages, 4 lines, in order).
 
@@ -194,7 +194,7 @@ GigaAM, zh/yue/ja/ko SenseVoice, else Parakeet), the finished line by one more p
 lines, 0.2-0.6 s per line. Cutting by MODEL instead of by language (Parakeet writes all the European ones) was
 tried: 17 % (Parakeet decides one language per clip and drops the other) - cut by language. All models for
 auto: Parakeet + GigaAM + SenseVoice + the detector ~1.5 GB.
-`helper.py --auto-speech`: 22 recorded lines (export/asrbench/lid, from lid.py prep) through the REAL pipeline
+`teardown_helper.py --auto-speech`: 22 recorded lines (export/asrbench/lid, from lid.py prep) through the REAL pipeline
 in real time, each in its own language (mixed ones "auto"): 4 English sentences, 4 one-word callouts, 3 ru,
 2 zh, es, de, 7 mixed (2-3 languages). `test_auto_speech.py` (fake game): 22 played, 21 lines arrive, sentences
 with live words first; "Run!" (room) came out empty; one-word lines have no live words (done before the first
@@ -294,7 +294,7 @@ single player, local mod):
 
 **Step 2 built (2026-10-04; offline tests pass - mod 363 checks, helper 56): what you say becomes a chat
 line. The TEXT PATH is verified in-game** (single player, local mod, the user remote over Moonlight with no
-microphone: `helper.py --auto` sent 7 lines; log.txt shows each `Spawning: MOD/../pcvx_t<n>.xml` 8 s apart, all
+microphone: `teardown_helper.py --auto` sent 7 lines; log.txt shows each `Spawning: MOD/../pcvx_t<n>.xml` 8 s apart, all
 acked and deleted; the user: "they all arrived fine", Russian and Chinese shown, the long line in pieces, a line
 said after switching the chat to Yell came out as a yell). Not yet seen: the "disconnected" line, the tags'
 exact wording, a real microphone and the speech model in a session. `--type` (keys typed into the helper's
@@ -327,7 +327,7 @@ console) never reached the helper over Moonlight, neither by reading stdin nor b
   `pip install numpy scipy sounddevice faster-whisper`). With conda-forge's numpy / scipy (MKL +
   llvm-openmp) in the same env the first `transcribe` killed the process (exit 127, no message): the
   wheel's own OpenMP runtime against conda's. Run: `C:/Users/user/miniconda3/envs/pcvoice/python.exe
-  engine/helper.py`. The model (~145 MB) is in `~/.cache/huggingface`.
+  engine/teardown_helper.py`. The model (~145 MB) is in `~/.cache/huggingface`.
 - Open: the helper's files (for a local mod) are in Documents/Teardown/mods, which OneDrive syncs here (a
   transcript is a file there for a moment); the game's sound from loudspeakers reaches the microphone and
   is transcribed too (headphones); does a read of savegame.xml at the wrong moment ever make the game's own

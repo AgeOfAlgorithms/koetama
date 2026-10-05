@@ -11,7 +11,7 @@ import tempfile
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import helper as H          # noqa: E402
+import teardown_helper as H          # noqa: E402
 import speech as S          # noqa: E402
 
 FAILED = NCHECK = 0

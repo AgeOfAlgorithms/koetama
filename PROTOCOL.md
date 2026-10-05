@@ -55,6 +55,6 @@ began, so a listener who arrives (or leaves) mid-sentence gets only the words sa
 ## Another game
 
 The engine (`engine/asr.py`: speech detection, speech to text, language detection) knows nothing about the
-game. Everything game-specific is in `engine/helper.py`: the feed reader, the `Link` class that writes the
+game. Everything game-specific is in `engine/teardown_helper.py`: the feed reader, the `Link` class that writes the
 files, and the mixer. Another game would need its own link (a localhost socket, a named pipe, shared
 memory, ...) speaking the same messages.
