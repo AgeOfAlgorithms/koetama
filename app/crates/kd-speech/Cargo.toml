@@ -1,7 +1,23 @@
 [package]
 name = "kd-speech"
+description = "Kotodama: speech to text - the models, the speech detector, the language stitching, live words, test microphones"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [dependencies]
+kd-common.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sherpa-onnx.workspace = true
+ort.workspace = true
+# (a direct dependency only so this crate's build.rs runs after sherpa-onnx-sys's, which puts its DLLs in
+#  target/<profile>/ - build.rs copies them next to the test binaries; same version and link mode as sherpa-onnx's)
+sherpa-onnx-sys = { version = "=1.13.8", default-features = false, features = ["shared"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+hound.workspace = true

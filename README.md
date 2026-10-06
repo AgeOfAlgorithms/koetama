@@ -5,11 +5,12 @@ your game. It plays the other players' voices placed where they stand: louder wh
 behind walls. It also writes what you say as you say it, in many languages, so the game can show your words in
 speech bubbles and a chat history. A spoken line can even open a door.
 
-Everything runs on your own PC: no audio or text is sent to any service. **Status:** early prototype (version 0.1).
+Everything runs on your own PC: no audio or text is sent to any service. **Status:** early prototype (version 0.2:
+the app is written in Rust; the first version was Python).
 
 ## Games
 
-Pick the game in Kotodama's window. Each game is a small module in [`engine/games/`](engine/games/).
+Pick the game in Kotodama's window. Each game is a small module in [`app/crates/kd-games`](app/crates/kd-games/).
 
 | Game | What it needs |
 |---|---|
@@ -51,36 +52,42 @@ runs through Proton; Kotodama finds its files inside Teardown's Proton folder.
 
 ## Run from source
 
-Python 3.12 with pip packages:
+Kotodama is a Rust program ([`app/`](app/)): a few small crates, listed in [`app/DESIGN.md`](app/DESIGN.md). It needs
+Rust (stable; on Windows the MSVC build tools).
 
-    pip install numpy sounddevice sherpa-onnx onnxruntime huggingface_hub psutil
-    python engine/kotodama.py                 # the window
-    python engine/teardown_helper.py --help   # the command line, with test modes (no microphone needed)
+    cd app
+    cargo run -p kotodama                       # the window
+    cargo run -p kotodama -- --cli --help       # the command line, with test modes (no microphone needed)
 
-The language detector is built once with `python engine/export_lid.py`. That needs torch, speechbrain and onnx, in a
-separate environment if you like.
+The speech engine is [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with ONNX Runtime; its libraries download
+with the first build. The language detector is built once with `python engine/export_lid.py` (needs torch,
+speechbrain and onnx, in a separate environment if you like) and found in `export/lid/`.
+
+The first version was Python ([`engine/`](engine/)). It stays as the reference the Rust app is tested against:
+`app/fixtures/make_fixtures.py` writes its answers, and the Rust tests compare. The benchmarks behind every model
+choice are in [`bench/`](bench/).
 
 ## Build
 
-    pip install nuitka ordered-set zstandard
     python build.py          # dist/Kotodama/ and, on Windows with Inno Setup 6, dist/Kotodama-Setup-<version>.exe
 
-[Nuitka](https://nuitka.net) compiles the Python into a native program. Unlike self-unpacking Python executables,
-which antivirus programs often flag, it doesn't unpack itself at runtime. GitHub Actions builds Windows and Linux on
-every push ([`.github/workflows/build.yml`](.github/workflows/build.yml)); a `v<version>` tag makes a draft release.
+The installed app is one program (`Kotodama.exe`, with the C runtime built in), the speech engine's two libraries
+(`sherpa-onnx-c-api.dll`, `onnxruntime.dll`) and the language detector: about 120 MB, a 90 MB installer. GitHub
+Actions builds Windows and Linux on every push ([`.github/workflows/build.yml`](.github/workflows/build.yml)); a
+`v<version>` tag makes a draft release.
 
 `Kotodama --selftest` checks that a build's native parts load: the window, sound, sherpa-onnx, the shipped language
-detector and HTTPS for the model downloads. CI runs it on each build, and on Windows also on the installed copy,
-before it uninstalls it again. The installer takes `/VERYSILENT` for an install without questions; add `/RELAUNCH=1`
-to start Kotodama afterwards (the updater does).
+detector, HTTPS for the model downloads and the update check. CI runs it on each build, and on Windows also on the
+installed copy, before it uninstalls it again. The installer takes `/VERYSILENT` for an install without questions;
+add `/RELAUNCH=1` to start Kotodama afterwards (the updater does).
 
 ## Tests
 
-    python engine/test_app.py        # the updater, finding games, the runtime, the mixer's filter
-    python engine/test_helper.py     # the Teardown link, the mixer, word times
-    python engine/test_asr.py        # the speech models on recorded lines (needs export/ from bench/)
-    python engine/test_e2e.py        # a fake game, end to end (KOTODAMA_EXE=<the built exe>: the build instead)
-    python engine/test_auto_speech.py
+    cd app
+    cargo test --workspace                          # each part against the Python reference's answers
+    cargo test --workspace -- --include-ignored     # + the real speech models and the sound devices (this PC)
+    python engine/test_e2e.py                       # with KOTODAMA_EXE=dist/Kotodama/Kotodama.exe: a fake game,
+                                                    # the built app end to end
 
 ## License
 

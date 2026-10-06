@@ -1,0 +1,375 @@
+{
+ "cases": [
+  {
+   "starts": [
+    1
+   ],
+   "lives": [
+    {
+     "utt": 1,
+     "text": "Hello. Can anyone",
+     "times": [
+      0.32,
+      1.28,
+      1.6
+     ]
+    }
+   ],
+   "finals": [
+    {
+     "utt": 1,
+     "text": "Hello. Can anyone hear me?",
+     "used": "parakeet",
+     "lang": "en",
+     "times": [
+      0.32,
+      1.28,
+      1.6,
+      2.08,
+      2.56
+     ],
+     "speech": 2.3,
+     "passes": 2,
+     "live": "Hello. Can anyone"
+    }
+   ],
+   "every": 1.0,
+   "name": "en01",
+   "lang": "en",
+   "parts": [
+    [
+     "clips/en01_room.wav",
+     0.0,
+     null
+    ]
+   ],
+   "took": 0.94,
+   "dur": 5.28
+  },
+  {
+   "starts": [
+    1
+   ],
+   "lives": [
+    {
+     "utt": 1,
+     "text": "There is something in the",
+     "times": [
+      0.32,
+      0.8,
+      1.04,
+      1.36,
+      1.52
+     ]
+    },
+    {
+     "utt": 1,
+     "text": "There is something in the basement. Do not",
+     "times": [
+      0.32,
+      0.8,
+      1.04,
+      1.36,
+      1.52,
+      1.76,
+      2.4,
+      2.72
+     ]
+    },
+    {
+     "utt": 1,
+     "text": "There is something in the basement. Do not go down there alone.",
+     "times": [
+      0.32,
+      0.8,
+      1.04,
+      1.36,
+      1.52,
+      1.76,
+      2.4,
+      2.72,
+      2.96,
+      3.2,
+      3.44,
+      3.68
+     ]
+    },
+    {
+     "utt": 1,
+     "text": "There is something in the basement. Do not go down there alone. I found the key",
+     "times": [
+      0.32,
+      0.8,
+      1.04,
+      1.36,
+      1.52,
+      1.76,
+      2.4,
+      2.72,
+      2.96,
+      3.2,
+      3.44,
+      3.68,
+      4.32,
+      4.48,
+      4.72,
+      4.8
+     ]
+    }
+   ],
+   "finals": [
+    {
+     "utt": 1,
+     "text": "There is something in the basement. Do not go down there alone. I found the key behind the painting in the great hall.",
+     "used": "parakeet",
+     "lang": "en",
+     "times": [
+      0.32,
+      0.8,
+      1.04,
+      1.44,
+      1.6,
+      1.76,
+      2.4,
+      2.72,
+      2.96,
+      3.2,
+      3.44,
+      3.68,
+      4.32,
+      4.48,
+      4.72,
+      4.88,
+      5.12,
+      5.36,
+      5.44,
+      5.84,
+      6.0,
+      6.08,
+      6.56
+     ],
+     "speech": 6.449999999999985,
+     "passes": 5,
+     "live": "There is something in the basement. Do not go down there alone. I found the key"
+    }
+   ],
+   "every": 2.0,
+   "name": "en04+en02 (one long line)",
+   "lang": "en",
+   "parts": [
+    [
+     "clips/en04_room.wav",
+     0.0,
+     4.32
+    ],
+    [
+     "clips/en02_room.wav",
+     0.4,
+     null
+    ]
+   ],
+   "took": 2.66,
+   "dur": 8.65
+  },
+  {
+   "starts": [
+    1
+   ],
+   "lives": [
+    {
+     "utt": 1,
+     "text": "Я нашел ключ",
+     "times": [
+      0.6,
+      0.8,
+      1.24
+     ]
+    },
+    {
+     "utt": 1,
+     "text": "Я нашел ключ за картиной в большом",
+     "times": [
+      0.6,
+      0.8,
+      1.24,
+      1.68,
+      1.84,
+      2.4,
+      2.52
+     ]
+    }
+   ],
+   "finals": [
+    {
+     "utt": 1,
+     "text": "Я нашел ключ за картиной в большом зале",
+     "used": "gigaam",
+     "lang": "ru",
+     "times": [
+      0.64,
+      0.84,
+      1.28,
+      1.68,
+      1.84,
+      2.4,
+      2.52,
+      3.0
+     ],
+     "speech": 3.049999999999997,
+     "passes": 3,
+     "live": "Я нашел ключ за картиной в большом"
+    }
+   ],
+   "every": 1.0,
+   "name": "ru02",
+   "lang": "ru",
+   "parts": [
+    [
+     "clips/ru02_room.wav",
+     0.0,
+     null
+    ]
+   ],
+   "took": 0.93,
+   "dur": 5.38
+  },
+  {
+   "starts": [
+    1
+   ],
+   "lives": [
+    {
+     "utt": 1,
+     "text": "等等我我正在下",
+     "times": [
+      0.42,
+      0.72,
+      0.96,
+      1.2,
+      1.32,
+      1.56,
+      1.74
+     ]
+    }
+   ],
+   "finals": [
+    {
+     "utt": 1,
+     "text": "等等我我正在下楼梯。",
+     "used": "sensevoice",
+     "lang": "zh",
+     "times": [
+      0.42,
+      0.72,
+      0.96,
+      1.2,
+      1.32,
+      1.56,
+      1.74,
+      1.98,
+      2.1,
+      3.54
+     ],
+     "speech": 2.3,
+     "passes": 2,
+     "live": "等等我我正在下"
+    }
+   ],
+   "every": 1.0,
+   "name": "zh03",
+   "lang": "zh",
+   "parts": [
+    [
+     "clips/zh03_room.wav",
+     0.0,
+     null
+    ]
+   ],
+   "took": 0.53,
+   "dur": 4.52
+  },
+  {
+   "starts": [
+    1
+   ],
+   "lives": [
+    {
+     "utt": 1,
+     "text": "I think the monster is in the",
+     "times": [
+      0.0,
+      0.32,
+      0.56,
+      0.72,
+      1.12,
+      1.28,
+      1.44
+     ]
+    },
+    {
+     "utt": 1,
+     "text": "I think the monster is in the basement. Давайте",
+     "times": [
+      0.0,
+      0.32,
+      0.56,
+      0.72,
+      1.12,
+      1.28,
+      1.44,
+      1.52,
+      2.03
+     ]
+    }
+   ],
+   "finals": [
+    {
+     "utt": 1,
+     "text": "I think the monster is in the basement. Давайте пойдем туда вместе",
+     "used": "en+ru",
+     "lang": "ru",
+     "times": [
+      0.0,
+      0.32,
+      0.56,
+      0.72,
+      1.12,
+      1.28,
+      1.44,
+      1.52,
+      2.03,
+      2.47,
+      2.87,
+      3.19
+     ],
+     "speech": 3.649999999999995,
+     "passes": 3,
+     "live": "I think the monster is in the basement. Давайте"
+    }
+   ],
+   "every": 1.0,
+   "name": "mixed_08 auto",
+   "lang": "auto",
+   "parts": [
+    [
+     "lid/mixed_08.wav",
+     0.0,
+     null
+    ]
+   ],
+   "took": 1.75,
+   "dur": 4.92
+  }
+ ],
+ "timing": {
+  "load": {
+   "parakeet": 3.99,
+   "gigaam": 1.69,
+   "sensevoice": 1.85,
+   "langid": 0.49
+  },
+  "parakeet_pass_6s": 0.636,
+  "lid_window": 0.0274,
+  "audio_s": 7.65
+ }
+}

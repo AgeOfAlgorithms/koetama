@@ -3,15 +3,27 @@
 **Kotodama** (the user's pick, 2026-10-06; Japanese "word spirit") is the app behind proximity voice chat in games:
 it plays the other players' voices (mixed by the game's distances, directions and walls) and turns what the
 player says into text - live words while they talk, the finished line after - on the player's own PC (CPU only,
-nothing sent anywhere). Games are modules (`engine/games/`), picked in the app's window; the first is Teardown,
+nothing sent anywhere). Games are modules (`app/crates/kd-games`), picked in the app's window; the first is Teardown,
 through the mod Proximity Babble Chat (repo teardown-mods, folder `proxchat/`; the mod's side is `voice.lua`). The
 link: PROTOCOL.md. Moved out of the mod's repo on 2026-10-05 (the user: its own project, decoupled from the chat mod,
 for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026 AgeOfAlgorithms" as the mod's.
 
 ## Layout
 
+The app is Rust (`app/`, since 2026-10-06: the user asked for the rewrite - a smaller download, less memory, a plain
+native program); `engine/` is the Python version it was ported from, kept as the reference and for the tools.
+
 | path | what |
 |---|---|
+| `app/DESIGN.md` | the crates, their interfaces, which Python each replaces |
+| `app/crates/kotodama` | the program: the window (egui), `--cli` (teardown_helper.py's flags), `--selftest`, the runtime, the microphone, settings |
+| `app/crates/kd-common` | names and folders, word units and times (as the game's voice.lua), model downloads, the Feed |
+| `app/crates/kd-audio` | the voice mixer, the muffle low-pass, wav, resampling (rubato), sound devices (cpal; the audio thread at MMCSS priority) |
+| `app/crates/kd-speech` | speech to text through sherpa-onnx (shared libraries) and the language detector through ort (the same onnxruntime.dll): VAD, rolling passes, LocalAgreement, "auto" stitching, the recording microphones |
+| `app/crates/kd-games` | the Game trait, Steam, the Teardown link (feed reader, message files, test voices) |
+| `app/crates/kd-update` | updates from GitHub Releases (a 404 = no release yet) |
+| `app/fixtures/` | the Python reference's answers (make_fixtures.py, make_speech_fixtures.py) the Rust tests compare against |
+| `app/.cargo/config.toml` | the C runtime built into the exe (no VC++ redistributable needed) |
 | `engine/kotodama.py` | the app's window (tkinter): game picker, connection state, microphone / speakers / volume, what it hears, updates, licenses; `--cli` = the command line |
 | `engine/runtime.py` | the running app, game-independent: the game module, the mixer and its output, the speech to text, the microphone (open only while the game wants it) |
 | `engine/games/` | one module per game (`base.Game`: locate, start/stop, on_feed, send, test clips); `teardown.py`: the savegame feed + files link (Windows, and Linux through Proton) |
@@ -24,17 +36,21 @@ for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026
 | `engine/teardown_helper.py` | the command line for Teardown with the test modes (--auto-speech, --mic-wav, --transcribe, --auto, --type, --demo) |
 | `engine/speech.py` | the first speech detector + faster-whisper path (kept: test_helper and bench/lid.py use it; not in the app) |
 | `engine/export_lid.py` | builds the language detector's ONNX file (env pclid; CI too) |
-| `engine/make_notices.py`, `engine/licenses/` | writes THIRD_PARTY_NOTICES.txt (every model and package, full license texts) |
+| `engine/make_notices.py`, `engine/licenses/` | writes THIRD_PARTY_NOTICES.txt: the models, sherpa-onnx + ONNX Runtime, every Rust crate in the program (cargo metadata, Windows + Linux), full license texts |
 | `engine/make_dummy_lines.py` | the mod's voice dummies' lines with word times (PC.VDUMMY_LINES) |
 | `engine/test_*.py` | test_app (updater, Steam, games, runtime, filter), test_helper (link, mixer, VAD, word times), test_asr (the models on the benchmark clips), test_e2e (a fake game), test_auto_speech (22 recorded lines in real time) |
-| `build.py`, `installer/kotodama.iss` | the build: Nuitka standalone folder, ASIO DLLs removed, the detector + notices added; Inno Setup installer (per user); SHA256SUMS.txt |
-| `.github/workflows/build.yml` | CI: Windows (installer) and Linux (tar.gz, with libportaudio.so.2) on every push to main; a v<version> tag: a DRAFT release |
+| `build.py`, `installer/kotodama.iss` | the build: cargo (release), the exe + sherpa-onnx-c-api + onnxruntime libraries, the detector + notices; Inno Setup installer (per user); SHA256SUMS.txt |
+| `.github/workflows/build.yml` | CI: cargo tests, then Windows (installer, selftest, install/uninstall check) and Linux (tar.gz, selftest under xvfb) on every push to main that changes the app; a v<version> tag: a DRAFT release |
 | `bench/` | the benchmarks behind every model choice (reports in `export/asrbench/*.md`) |
 | `probes/` | the in-game feasibility probes (each a tiny Teardown mod + a Python side) |
 | `export/`, `build/`, `dist/` | generated, git-ignored |
 
 ## Environments (conda, conda-forge only; pip inside)
 
+- Rust: rustup stable (installed 2026-10-06, not on PATH by default: `$HOME/.cargo/bin`), MSVC: Visual Studio 2022
+  Build Tools (C++ workload). sherpa-onnx's prebuilt shared libraries download on the first build (into the target
+  folder); kd-speech's build.rs copies them next to the test binaries (System32 has an older onnxruntime.dll that
+  Windows would load first otherwise).
 - `pcvoice`: the app and its tests - python 3.12 + pip only (numpy, sounddevice, sherpa-onnx, onnxruntime,
   huggingface_hub, psutil; nuitka for builds; faster-whisper, scipy, opencc, pillow for old paths / tests only).
   Never conda's numpy/scipy here (MKL/OpenMP clash killed the process).
@@ -44,14 +60,20 @@ for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026
 
 ## Commands (from the repo root)
 
+    export PATH="$HOME/.cargo/bin:$PATH"
+    (cd app && cargo run -p kotodama)     # the app (Rust); -- --cli ... for the command line
+    (cd app && cargo test --workspace)    # the Rust tests (-- --include-ignored: + the real models and devices)
+    python build.py                       # dist/Kotodama/ + dist/Kotodama-Setup-<v>.exe
+    $P app/fixtures/make_fixtures.py --real   # the Python reference's answers again (after a Python change)
+
+The Python reference:
+
     P=C:/Users/user/miniconda3/envs/pcvoice/python.exe
     $P engine/kotodama.py                 # the app
     $P engine/test_app.py ; $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
     $P engine/teardown_helper.py          # the command line (Teardown running, a level with the mod)
-    $P build.py                           # dist/Kotodama/ + dist/Kotodama-Setup-<v>.exe (Inno Setup: per-user winget install)
-    dist/Kotodama/Kotodama.exe --selftest # the build's window, sound, ONNX, detector, HTTPS load (CI runs it)
+    dist/Kotodama/Kotodama.exe --selftest # the build's window, sound, ONNX, detector, HTTPS, updates (CI runs it)
     KOTODAMA_EXE=dist/Kotodama/Kotodama.exe $P engine/test_e2e.py   # the built exe end to end
-    KOTODAMA_DEBUG=1 $P build.py          # a build whose errors go to %TEMP%/kotodama.err.txt (a window that won't open)
     C:/Users/user/miniconda3/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
     $P engine/make_notices.py             # after any model or package change
 
@@ -77,7 +99,14 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
   an empty model cache (it downloaded Parakeet itself, 644 MB); --selftest; the installer: silent install, the installed
   selftest, an update with /RELAUNCH=1 while Kotodama runs (old closed, new started), uninstall (user data kept).
   Not yet: the window with Teardown running, a real update from a published release (needs a v0.1.1 release).
-- Packaging lessons: a conda Python keeps its modules' DLLs in Library/bin, which Nuitka misses (build.py CONDA_DLLS;
+- The Rust port (2026-10-06): every crate matches the Python on the fixtures (text, mixer to 5e-7, feed/link files
+  byte-identical, stitching, LocalAgreement, the real models' transcripts / times / detector / mixed lines, the
+  Listener end to end); the Python test_e2e.py passes against the Rust exe; selftest + installer cycle pass. Not yet:
+  in-game with Teardown, Linux (CI builds it), a real update from one release to the next. Python 0.1 was never
+  released: the first release is the Rust 0.2.
+- Idle memory of the window ~180 MB (most of it the OpenGL driver; egui with glow). The detector is 86 MB of the
+  123 MB install: an int8 copy (~22 MB) would need the accuracy checked again (bench/lidtune.py).
+- (Python packaging, before the port) a conda Python keeps its modules' DLLs in Library/bin, which Nuitka misses (build.py CONDA_DLLS;
   tcl86t needs zlib1.dll - without it the window silently failed to open while --cli worked). huggingface_hub broke in
   the compiled build (lazy imports): models come through engine/fetch.py. PowerShell's Start-Process -Wait also waits
   for the children (a relaunched Kotodama): use WaitForExit() when testing the relaunch.

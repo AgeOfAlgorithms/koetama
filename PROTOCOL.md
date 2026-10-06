@@ -71,21 +71,21 @@ therefore fills chunk by chunk; the finished line replaces it.
 
 ## Adding a game
 
-Kotodama's engine knows no game. Speech detection, speech to text and the language detector are in `engine/asr.py`,
-and the voice mixer is in `engine/audio.py`. Each game is a module in `engine/games/`: a class derived from
-`games.base.Game`, listed in `games/__init__.py` `GAMES`, which puts it in the window's game picker. A module is only
-the game's link:
+Kotodama's engine knows no game. Speech detection, speech to text and the language detector are the crate
+`kd-speech`, and the voice mixer is `kd-audio` (in `app/crates/`). Each game is a module in the crate `kd-games`: a
+type implementing the `Game` trait, listed in `games()` (`kd-games/src/lib.rs`), which puts it in the window's game
+picker. A module is only the game's link:
 
 | Part | What a game module does |
 |---|---|
-| `id`, `name`, `needs` | Its settings key, the name in the picker, and what players need in the game ("the X mod"). |
-| `locate()` | Is the game installed here, and where (`engine/steam.py` finds Steam games, their Workshop folders and, on Linux, their Proton prefix). |
+| `id()`, `name()`, `needs()` | Its settings key, the name in the picker, and what players need in the game ("the X mod"). |
+| `locate()` | Is the game installed here, and where (`kd_games::steam` finds Steam games, their Workshop folders and, on Linux, their Proton prefix). |
 | `start()` / `stop()` | Begin and end the link: tell the game Kotodama runs, read its state in a thread of its own. |
-| `on_feed(feed)` | Call it with each new state from the game: `vol`, `speakers` ({id: src, talk, gain, az, el, muffle}), `mic`, `lang`, `live`, as in Teardown's feed above. The mixer plays the speakers from it. |
+| the feed | Hand each new state from the game to the `FeedSink` it was made with: `vol`, `speakers` ({id: src, talk, gain, az, el, muffle}), `mic`, `lang`, `live`, as in Teardown's feed above (`kd_common::feed::Feed`). The mixer plays the speakers from it. `feed()` returns the latest. |
 | `send(kind, utt, text, times, t0)` | Hand the game what the player said: kinds `s` (started talking), `l` (live words, only growing), `f` (the finished line), with each unit's start time. |
-| `test_clips()`, `speaker_name()` | Recorded voices for the game's test speakers (optional). |
+| `test_voices()`, `speaker_name()` | Recorded voices (wav files) for the game's test speakers (optional). |
 
 How the game and Kotodama talk is up to the game: Teardown's mods can only use the save file and files next to
 the mod, but a game that can open a localhost socket, a named pipe or shared memory can use that. The messages stay
-the same. `engine/runtime.py` drives any module: the mixer, the output, the microphone (open only while the
-module's feed asks for it) and the speech to text.
+the same. The program's runtime (`app/crates/kotodama/src/runtime.rs`) drives any module: the mixer, the output, the
+microphone (open only while the module's feed asks for it) and the speech to text.

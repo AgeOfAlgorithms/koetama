@@ -1,7 +1,19 @@
 [package]
 name = "kd-audio"
+description = "Kotodama: the voice mixer, the muffle low-pass, wav files, resampling, sound devices"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+kd-common.workspace = true
+cpal.workspace = true
+rubato.workspace = true
+hound.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+realfft = "3.5"
