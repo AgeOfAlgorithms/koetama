@@ -43,7 +43,7 @@
      null
     ]
    ],
-   "took": 0.94,
+   "took": 0.81,
    "dur": 5.28
   },
   {
@@ -115,6 +115,31 @@
       4.72,
       4.8
      ]
+    },
+    {
+     "utt": 1,
+     "text": "There is something in the basement. Do not go down there alone. I found the key behind the painting",
+     "times": [
+      0.32,
+      0.8,
+      1.04,
+      1.36,
+      1.52,
+      1.76,
+      2.4,
+      2.72,
+      2.96,
+      3.2,
+      3.44,
+      3.68,
+      4.32,
+      4.48,
+      4.72,
+      4.8,
+      5.12,
+      5.36,
+      5.44
+     ]
     }
    ],
    "finals": [
@@ -149,11 +174,11 @@
       6.56
      ],
      "speech": 6.449999999999985,
-     "passes": 5,
-     "live": "There is something in the basement. Do not go down there alone. I found the key"
+     "passes": 6,
+     "live": "There is something in the basement. Do not go down there alone. I found the key behind the painting"
     }
    ],
-   "every": 2.0,
+   "every": 1.0,
    "name": "en04+en02 (one long line)",
    "lang": "en",
    "parts": [
@@ -168,7 +193,7 @@
      null
     ]
    ],
-   "took": 2.66,
+   "took": 2.55,
    "dur": 8.65
   },
   {
@@ -230,7 +255,7 @@
      null
     ]
    ],
-   "took": 0.93,
+   "took": 0.76,
    "dur": 5.38
   },
   {
@@ -285,7 +310,7 @@
      null
     ]
    ],
-   "took": 0.53,
+   "took": 0.4,
    "dur": 4.52
   },
   {
@@ -357,19 +382,19 @@
      null
     ]
    ],
-   "took": 1.75,
+   "took": 1.4,
    "dur": 4.92
   }
  ],
  "timing": {
   "load": {
-   "parakeet": 3.99,
-   "gigaam": 1.69,
-   "sensevoice": 1.85,
-   "langid": 0.49
+   "parakeet": 2.53,
+   "gigaam": 1.05,
+   "sensevoice": 1.2,
+   "langid": 0.28
   },
-  "parakeet_pass_6s": 0.636,
-  "lid_window": 0.0274,
+  "parakeet_pass_6s": 0.5,
+  "lid_window": 0.0186,
   "audio_s": 7.65
  }
 }

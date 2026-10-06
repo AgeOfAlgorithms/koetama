@@ -33,7 +33,7 @@ MODELS
    license:  Apache License 2.0 (text below). Trained on VoxLingua107 by Joergen Valk and Tanel Alumae, Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/ (https://cs.taltech.ee/staff/tanel.alumae/data/voxlingua107/)
    source:   https://huggingface.co/speechbrain/lang-id-voxlingua107-ecapa
    used for: finding which language is spoken ("Auto")
-   changes:  Exported to ONNX by the voice helper's authors (engine/export_lid.py): the same weights, the feature step rewritten without complex numbers; checked to give the same results.
+   changes:  Exported to ONNX by the voice helper's authors (engine/export_lid.py): the same weights, the feature step rewritten without complex numbers, the weights stored as 16-bit floats (half the file; computed as before); checked to give the same results.
 
 5. Silero VAD v5
    by:       Silero Team

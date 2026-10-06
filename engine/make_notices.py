@@ -53,7 +53,8 @@ MODELS = [
                  '(https://cs.taltech.ee/staff/tanel.alumae/data/voxlingua107/)', text='Apache-2.0.txt',
          source='https://huggingface.co/speechbrain/lang-id-voxlingua107-ecapa', use='finding which language is spoken ("Auto")',
          changes='Exported to ONNX by the voice helper\'s authors (engine/export_lid.py): the same weights, '
-                 'the feature step rewritten without complex numbers; checked to give the same results.'),
+                 'the feature step rewritten without complex numbers, the weights stored as 16-bit floats (half the file; '
+                 'computed as before); checked to give the same results.'),
     dict(name='Silero VAD v5', by='Silero Team', license='MIT', text='silero-vad.txt', source='https://github.com/snakers4/silero-vad',
          use='finding where speech starts and ends',
          changes='The ONNX file as published by the sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx/releases).'),

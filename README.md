@@ -72,7 +72,7 @@ choice are in [`bench/`](bench/).
     python build.py          # dist/Kotodama/ and, on Windows with Inno Setup 6, dist/Kotodama-Setup-<version>.exe
 
 The installed app is one program (`Kotodama.exe`, with the C runtime built in), the speech engine's two libraries
-(`sherpa-onnx-c-api.dll`, `onnxruntime.dll`) and the language detector: about 120 MB, a 90 MB installer. GitHub
+(`sherpa-onnx-c-api.dll`, `onnxruntime.dll`) and the language detector: about 90 MB, a 52 MB installer. GitHub
 Actions builds Windows and Linux on every push ([`.github/workflows/build.yml`](.github/workflows/build.yml)); a
 `v<version>` tag makes a draft release.
 

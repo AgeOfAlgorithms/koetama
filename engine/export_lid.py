@@ -4,8 +4,11 @@ PyTorch. Replaces NVIDIA AmberNet (NGC terms: no redistribution).
 
     <conda>/envs/pclid/python.exe engine/export_lid.py
 
-(env pclid: torch CPU + speechbrain + onnx + onnxruntime.) Writes export/lid/voxlingua107-ecapa.onnx and
-voxlingua107-ecapa.json (the language codes), then checks the ONNX file against SpeechBrain itself on real
+(env pclid: torch CPU + speechbrain + onnx + onnxruntime.) Writes export/lid/voxlingua107-ecapa.fp32.onnx (86 MB),
+then voxlingua107-ecapa.onnx - the one the app ships (43 MB): the same model with its weights STORED as float16, cast
+back to float32 when it loads, so it computes as the float32 one, at its speed (bench/lidquant.py, 2026-10-06: the
+same language on every benchmark recording, 99.9 % of 1 s windows; int8 lost a third of the one-word callouts) - and
+voxlingua107-ecapa.json (the language codes). Then it checks both files against SpeechBrain itself on real
 recordings of several lengths.
 
 torch.stft makes complex tensors, which the ONNX exporter cannot take: the STFT here is two convolutions (cosine and
@@ -60,6 +63,26 @@ class LangId(torch.nn.Module):
         return self.classify(emb).squeeze(1)              # [1, 107] log-probabilities
 
 
+def fp16_storage(src, dst):
+    """the ONNX model at src, its float32 weights (1024+ values) stored as float16 with a Cast back to float32 in
+    front of their use: half the file; onnxruntime folds the casts when it loads, so it runs in float32 as before"""
+    import onnx
+    from onnx import helper, numpy_helper, TensorProto
+    m = onnx.load(src)
+    g = m.graph
+    casts = []
+    for t in list(g.initializer):
+        if t.data_type == TensorProto.FLOAT and int(np.prod(t.dims)) >= 1024:
+            h = numpy_helper.from_array(numpy_helper.to_array(t).astype(np.float16), t.name + '_fp16')
+            g.initializer.remove(t)
+            g.initializer.append(h)
+            casts.append(helper.make_node('Cast', [h.name], [t.name], to=TensorProto.FLOAT, name=t.name + '_cast'))
+    for c in reversed(casts):
+        g.node.insert(0, c)
+    onnx.save(m, dst)
+    return len(casts)
+
+
 def main():
     from speechbrain.inference.classifiers import EncoderClassifier
     from speechbrain.utils.fetching import LocalStrategy
@@ -71,16 +94,23 @@ def main():
     sb.eval()
     codes = [lab.split(':')[0].strip() for lab in sb.hparams.label_encoder.decode_ndim(list(range(107)))]
     model = LangId(sb).eval()
+    full = os.path.join(OUT, NAME + '.fp32.onnx')
     path = os.path.join(OUT, NAME + '.onnx')
     with torch.no_grad():
-        torch.onnx.export(model, (torch.zeros(1, 16000),), path, input_names=['audio'], output_names=['logprobs'],
+        torch.onnx.export(model, (torch.zeros(1, 16000),), full, input_names=['audio'], output_names=['logprobs'],
                           dynamic_axes={'audio': {1: 'samples'}}, opset_version=17, dynamo=False)
+    n = fp16_storage(full, path)
     json.dump(dict(source=SOURCE, license='Apache-2.0 (model), CC-BY-4.0 (VoxLingua107 data)', rate=16000, labels=codes),
               open(os.path.join(OUT, NAME + '.json'), 'w', encoding='utf-8'), indent=1)
-    print('wrote %s (%.0f MB)' % (path, os.path.getsize(path) / 1e6))
+    print('wrote %s (%.0f MB) and %s (%.0f MB: %d weights stored as float16)' % (
+        full, os.path.getsize(full) / 1e6, path, os.path.getsize(path) / 1e6, n))
 
-    # the check: real recordings (the benchmark's), cut to several lengths; SpeechBrain itself against the ONNX file
-    sess = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
+    # the check: real recordings (the benchmark's), cut to several lengths; SpeechBrain itself against both ONNX files
+    sess = ort.InferenceSession(full, providers=['CPUExecutionProvider'])
+    half = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
+    y = np.random.default_rng(0).standard_normal((1, 16000)).astype(np.float32) * 0.1
+    d = float(np.abs(sess.run(None, {'audio': y})[0] - half.run(None, {'audio': y})[0]).max())
+    print('the float16-stored file runs (largest log-probability difference from float32 on noise: %.4f)' % d)
     items_path = os.path.join(ROOT, 'export', 'asrbench', 'lid', 'items.json')
     if not os.path.exists(items_path):                  # (CI, a fresh clone: the benchmark's recordings are not here)
         print('no benchmark recordings (export/asrbench/lid): the check against SpeechBrain is skipped')
@@ -88,6 +118,7 @@ def main():
     items = json.load(open(items_path, encoding='utf-8'))
     import wave
     worst, same, n = 0.0, 0, 0
+    worst16, same16 = 0.0, 0
     for it in items[::9][:24]:
         w = wave.open(it['path'])
         x = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
@@ -98,9 +129,15 @@ def main():
             got = sess.run(None, {'audio': y[None]})[0][0]
             worst = max(worst, float(np.abs(ref - got).max()))
             same += int(ref.argmax() == got.argmax())
+            g16 = half.run(None, {'audio': y[None]})[0][0]
+            worst16 = max(worst16, float(np.abs(ref - g16).max()))
+            top2 = np.sort(ref)[-2:]
+            # (a near tie in SpeechBrain itself - its top two within 0.05 - may go either way in float16)
+            same16 += int(ref.argmax() == g16.argmax() or top2[1] - top2[0] < 0.05)
             n += 1
     print('checked %d cuts: the same top language in %d, largest log-probability difference %.5f' % (n, same, worst))
-    ok = same == n and worst < 1e-3
+    print('  the float16-stored file: the same top language in %d, largest difference %.4f' % (same16, worst16))
+    ok = same == n and worst < 1e-3 and same16 == n and worst16 < 0.1
     print('OK' if ok else 'MISMATCH')
     return 0 if ok else 1
 
