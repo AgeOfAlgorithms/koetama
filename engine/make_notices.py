@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LIC = os.path.join(HERE, 'licenses')
 OUT = os.path.join(os.path.dirname(HERE), 'THIRD_PARTY_NOTICES.txt')   # (the repo root)
 
-RUNTIME = ['numpy', 'scipy', 'sounddevice', 'sherpa-onnx', 'onnxruntime', 'huggingface_hub', 'psutil']
+RUNTIME = ['numpy', 'sounddevice', 'sherpa-onnx', 'onnxruntime', 'huggingface_hub', 'psutil']   # (what Kotodama runs on)
 EXCLUDE = ['_sounddevice_data/portaudio-binaries/*-asio.dll']
 ALLOWED = ['MIT', 'BSD', 'Apache', 'PSF', 'MPL-2.0', 'Zlib', '0BSD', 'CC0', 'MIT-0']   # (checked 2026-10-05)
 MPL_NOTE = ('Used unmodified under the Mozilla Public License 2.0; its source code is available from the address '
@@ -107,10 +107,10 @@ def texts_of(d):
 
 def main():
     rule = '=' * 100
-    L = ['THIRD-PARTY NOTICES: proximity-voice-chat-STT-engine (the voice helper)',
+    L = ['THIRD-PARTY NOTICES: Kotodama (proximity-voice-chat-STT-engine)',
          '(written by engine/make_notices.py on %s; do not edit by hand)' % time.strftime('%Y-%m-%d'), '',
-         'The voice helper downloads the speech models below the first time it needs them and runs them on this '
-         'computer, and is built on the software packages below. Each is listed with its authors, its license, where it '
+         'Kotodama downloads the speech models below the first time it needs them (the language detector ships with it) '
+         'and runs them on this computer, and is built on the software packages below. Each is listed with its authors, its license, where it '
          'comes from and what was changed; the license texts follow.', '', rule, 'MODELS', rule, '']
     texts = []
     for i, m in enumerate(MODELS, 1):
@@ -122,8 +122,12 @@ def main():
     py = os.path.join(sys.base_prefix, 'LICENSE_PYTHON.txt')
     if not os.path.exists(py):
         py = os.path.join(sys.base_prefix, 'LICENSE.txt')
-    L += ['Python %d.%d.%d - Python Software Foundation License - https://www.python.org' % sys.version_info[:3], '']
+    L += ['Python %d.%d.%d - Python Software Foundation License - https://www.python.org' % sys.version_info[:3],
+          "Tcl/Tk (the window, through Python's tkinter) - Tcl/Tk license (BSD-style, text below) - https://www.tcl-lang.org",
+          'Nuitka (compiles Kotodama to a native program) - its runtime exception lets the compiled program carry any license '
+          '- https://nuitka.net', '']
     texts.append(('Python', open(py, encoding='utf-8').read()))
+    texts.append(('Tcl/Tk', open(os.path.join(LIC, 'Tcl-Tk.txt'), encoding='utf-8').read()))
     bad = []
     for d in packages():
         name, lic = d.metadata['Name'], license_of(d)
@@ -138,8 +142,8 @@ def main():
         if 'MPL' in lic:
             L.append('   ' + MPL_NOTE)
         if name == 'sounddevice':
-            L.append('   Bundles PortAudio (http://www.portaudio.com, MIT-style license, text below); only its non-ASIO '
-                     'build (libportaudio64bit.dll) is shipped.')
+            L.append('   With PortAudio (http://www.portaudio.com, MIT-style license, text below): on Windows its non-ASIO '
+                     'build (libportaudio64bit.dll) only; on Linux libportaudio.so.2.')
             texts.append(('PortAudio', open(os.path.join(LIC, 'PortAudio.txt'), encoding='utf-8').read()))
         for path, t in tx:
             texts.append(('%s %s: %s' % (name, d.version, path), t))

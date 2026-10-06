@@ -1,5 +1,7 @@
 # The game link (Teardown), version 4
 
+(Kotodama's link with Teardown, and how to add another game: see "Adding a game" at the end.)
+
 How a game mod and the helper program talk. Both run on the same PC, one helper per player. A Teardown
 mod's Lua cannot open sockets, write files or reach the network. It *can* write registry keys under
 `savegame.mod.*`, which the game saves to `savegame.xml` within about a frame. It can also ask whether a
@@ -12,7 +14,7 @@ Measured in-game (`probes/`, results in PROJECT.md): a registry write reaches `s
 frame (~17 ms), and a file the helper writes is seen by `HasFile` within ~17 ms. Spawning a prefab and
 reading its tags back takes about 28 ms (median).
 
-## Game -> helper: the feed
+## Game -> Kotodama: the feed
 
 The mod writes one string, `savegame.mod.pcvx.f`. That's 20 times a second while there are voices to
 hear, 5 times while only the helper is there, and once more (mic 0, no speakers) when there's nothing left.
@@ -35,7 +37,7 @@ mod's own tag: `local-<folder>` for a local mod, `steam-<id>` for a Workshop one
 
 Versions 2 (no lang, no live) and 3 (no live) are still read.
 
-## Helper -> game: files next to the mod's folder
+## Kotodama -> game: files next to the mod's folder
 
 The mod reads them through `MOD/../pcvx_`. The helper writes them in `Documents/Teardown/mods/`, and in the
 Workshop content folder when there is one.
@@ -67,9 +69,23 @@ therefore fills chunk by chunk; the finished line replaces it.
   words are garbled like typed text, and walking closer reveals letters.
 - **Without the tags:** the whole text, as before.
 
-## Another game
+## Adding a game
 
-The engine (`engine/asr.py`: speech detection, speech to text, language detection) knows nothing about the
-game. Everything game-specific is in `engine/teardown_helper.py`: the feed reader, the `Link` class that writes the
-files, and the mixer. Another game would need its own link (a localhost socket, a named pipe, shared
-memory, ...) speaking the same messages.
+Kotodama's engine knows no game. Speech detection, speech to text and the language detector are in `engine/asr.py`,
+and the voice mixer is in `engine/audio.py`. Each game is a module in `engine/games/`: a class derived from
+`games.base.Game`, listed in `games/__init__.py` `GAMES`, which puts it in the window's game picker. A module is only
+the game's link:
+
+| Part | What a game module does |
+|---|---|
+| `id`, `name`, `needs` | Its settings key, the name in the picker, and what players need in the game ("the X mod"). |
+| `locate()` | Is the game installed here, and where (`engine/steam.py` finds Steam games, their Workshop folders and, on Linux, their Proton prefix). |
+| `start()` / `stop()` | Begin and end the link: tell the game Kotodama runs, read its state in a thread of its own. |
+| `on_feed(feed)` | Call it with each new state from the game: `vol`, `speakers` ({id: src, talk, gain, az, el, muffle}), `mic`, `lang`, `live`, as in Teardown's feed above. The mixer plays the speakers from it. |
+| `send(kind, utt, text, times, t0)` | Hand the game what the player said: kinds `s` (started talking), `l` (live words, only growing), `f` (the finished line), with each unit's start time. |
+| `test_clips()`, `speaker_name()` | Recorded voices for the game's test speakers (optional). |
+
+How the game and Kotodama talk is up to the game: Teardown's mods can only use the save file and files next to
+the mod, but a game that can open a localhost socket, a named pipe or shared memory can use that. The messages stay
+the same. `engine/runtime.py` drives any module: the mixer, the output, the microphone (open only while the
+module's feed asks for it) and the speech to text.

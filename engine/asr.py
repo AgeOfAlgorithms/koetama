@@ -31,7 +31,8 @@ RATE = 16000
 PREROLL = 1.0              # s before the detected speech fed too
 MAX_LINE = 15.0            # s: a longer line is cut
 VAD_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx'
-CACHE = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'ProximityVoiceEngine', 'models')
+import paths                                   # noqa: E402  (Kotodama's folders)
+CACHE = paths.MODELS
 
 MODELS = {   # name: (Hugging Face repo, the exact revision tested, the files used); the loader: Models._load_<name>
     # (pinned: a later change to a repo cannot change what the helper runs; only these files are downloaded - the
@@ -232,10 +233,9 @@ LID_SURE = 0.8                # a short line: the detector's language only when 
 
 
 def lid_dir():
-    """where the language detector is: the helper's model folder, else this repo's export/lid (where export_lid.py
-    writes it)"""
-    here = os.path.dirname(os.path.abspath(__file__))
-    for d in (CACHE, os.path.join(os.path.dirname(here), 'export', 'lid')):
+    """where the language detector is: Kotodama's model folder (downloaded), the install's models folder (shipped
+    with it), else this repo's export/lid (where export_lid.py writes it)"""
+    for d in (CACHE, os.path.join(paths.APP_ROOT, 'models'), os.path.join(paths.APP_ROOT, 'export', 'lid')):
         if os.path.exists(os.path.join(d, LID_NAME + '.onnx')) and os.path.exists(os.path.join(d, LID_NAME + '.json')):
             return d
     raise RuntimeError('the language detector (%s.onnx) is missing: build it with engine/export_lid.py' % LID_NAME)
@@ -666,7 +666,8 @@ class Microphone:
     def open(self):
         if self.stream is not None:
             return True
-        import sounddevice as sd
+        from audio import _sounddevice   # (finds a packaged Linux build's own PortAudio)
+        sd = _sounddevice()
         device, extra = self.device, None
         if device is None:
             try:

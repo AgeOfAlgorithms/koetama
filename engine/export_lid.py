@@ -81,7 +81,11 @@ def main():
 
     # the check: real recordings (the benchmark's), cut to several lengths; SpeechBrain itself against the ONNX file
     sess = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
-    items = json.load(open(os.path.join(ROOT, 'export', 'asrbench', 'lid', 'items.json'), encoding='utf-8'))
+    items_path = os.path.join(ROOT, 'export', 'asrbench', 'lid', 'items.json')
+    if not os.path.exists(items_path):                  # (CI, a fresh clone: the benchmark's recordings are not here)
+        print('no benchmark recordings (export/asrbench/lid): the check against SpeechBrain is skipped')
+        return 0
+    items = json.load(open(items_path, encoding='utf-8'))
     import wave
     worst, same, n = 0.0, 0, 0
     for it in items[::9][:24]:

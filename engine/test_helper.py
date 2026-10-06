@@ -97,7 +97,7 @@ with tempfile.TemporaryDirectory() as tmp:
     path = os.path.join(tmp, 'savegame.xml')
     open(path, 'wb').write(xml)
     m = H.Mixer(NOISE)
-    r = H.FeedReader(m, path=path)
+    r = H.FeedReader(lambda f, tag: m.set_feed(f), path=path)
     r.once()
     check(m.feed is None and r.updates == 0, 'a feed already in the file when the helper starts is not played (an old session)')
     open(path, 'wb').write(xml.replace(b'2|5|', b'2|6|'))

@@ -1,0 +1,111 @@
+# Builds Kotodama on GitHub: Windows (the folder + its installer) and Linux (a .tar.gz), with SHA256SUMS.txt.
+# Every push to main: the builds as artifacts (Actions tab -> the run -> Artifacts).
+# A tag v<version> (matching engine/paths.py VERSION): also a DRAFT release with the files - nothing is public until it is
+# published by hand. Code signing (SignPath) slots in after the Windows build once the project is accepted.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy sounddevice sherpa-onnx onnxruntime huggingface_hub psutil nuitka ordered-set zstandard
+      - name: The language detector (SpeechBrain VoxLingua107 ECAPA as ONNX)
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install speechbrain onnx
+          python engine/export_lid.py
+      - name: Tests
+        run: |
+          python engine/test_app.py
+      - name: Inno Setup (if the runner has none)
+        shell: pwsh
+        run: if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) { choco install innosetup -y --no-progress }
+      - name: Build (Nuitka) and the installer (Inno Setup)
+        run: python build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotodama-windows
+          path: |
+            dist/Kotodama-Setup-*.exe
+            dist/SHA256SUMS.txt
+      - name: Draft release (a tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/Kotodama-Setup-*.exe
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: System libraries (PortAudio, Tk)
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 tk-dev patchelf
+      - name: Packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy sounddevice sherpa-onnx onnxruntime huggingface_hub psutil nuitka ordered-set zstandard
+      - name: The language detector
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install speechbrain onnx
+          python engine/export_lid.py
+      - name: Tests
+        run: python engine/test_app.py
+      - name: Build (Nuitka)
+        run: |
+          python build.py --no-installer
+          mkdir -p dist/Kotodama/lib
+          cp "$(ldconfig -p | grep -m1 'libportaudio.so.2' | awk '{print $NF}')" dist/Kotodama/lib/libportaudio.so.2
+          rm -f dist/*.tar.gz dist/SHA256SUMS.txt
+          python build.py --skip-nuitka --no-installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotodama-linux
+          path: |
+            dist/Kotodama-*-linux.tar.gz
+            dist/SHA256SUMS.txt
+      - name: Draft release (a tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/Kotodama-*-linux.tar.gz
+
+  sums:
+    # one SHA256SUMS.txt for the release, from both builds
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: SHA256SUMS.txt
+        run: |
+          cd art
+          sha256sum kotodama-windows/Kotodama-Setup-*.exe kotodama-linux/Kotodama-*-linux.tar.gz | sed 's#  kotodama-[a-z]*/#  #' > ../SHA256SUMS.txt
+          cat ../SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: SHA256SUMS.txt

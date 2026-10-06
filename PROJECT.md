@@ -1,31 +1,42 @@
-# Proximity voice chat STT engine
+# Kotodama (repo proximity-voice-chat-STT-engine)
 
-The helper program behind proximity voice chat in games: it plays the other players' voices (mixed by the
-game's distances, directions and walls) and turns what the player says into text - live words while they
-talk, the finished line after - on the player's own PC (CPU only, nothing sent anywhere). The first game is
-Teardown, through the mod Proximity Babble Chat (repo teardown-mods, folder `proxchat/`; the mod's side is
-`voice.lua`). The link between them: PROTOCOL.md. Moved out of the mod's repo on 2026-10-05 (the user: the
-engine is its own project, decoupled from the chat mod; it may serve other games later).
+**Kotodama** (the user's pick, 2026-10-06; Japanese "word spirit") is the app behind proximity voice chat in games:
+it plays the other players' voices (mixed by the game's distances, directions and walls) and turns what the
+player says into text - live words while they talk, the finished line after - on the player's own PC (CPU only,
+nothing sent anywhere). Games are modules (`engine/games/`), picked in the app's window; the first is Teardown,
+through the mod Proximity Babble Chat (repo teardown-mods, folder `proxchat/`; the mod's side is `voice.lua`). The
+link: PROTOCOL.md. Moved out of the mod's repo on 2026-10-05 (the user: its own project, decoupled from the chat mod,
+for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026 AgeOfAlgorithms" as the mod's.
 
 ## Layout
 
 | path | what |
 |---|---|
-| `engine/asr.py` | speech to text: Silero VAD, the rolling passes (Parakeet v3 / GigaAM v3 / SenseVoice by language), "auto" language (SpeechBrain detector + stitching) |
-| `engine/teardown_helper.py` | the program: the game link (feed reader, `Link` files), the voice mixer, the microphone, the CLI |
-| `engine/speech.py` | the first speech detector + faster-whisper path (kept: test_helper and bench/lid.py use it) |
-| `engine/export_lid.py` | builds the language detector's ONNX file (env pclid) |
+| `engine/kotodama.py` | the app's window (tkinter): game picker, connection state, microphone / speakers / volume, what it hears, updates, licenses; `--cli` = the command line |
+| `engine/runtime.py` | the running app, game-independent: the game module, the mixer and its output, the speech to text, the microphone (open only while the game wants it) |
+| `engine/games/` | one module per game (`base.Game`: locate, start/stop, on_feed, send, test clips); `teardown.py`: the savegame feed + files link (Windows, and Linux through Proton) |
+| `engine/audio.py` | the voice mixer (numpy only: the muffle is an FIR of two one-pole low-passes; scipy dropped from the app), resampling (sherpa-onnx's), wav files, devices |
+| `engine/steam.py` | Steam libraries, an app's install / Workshop folder, its Proton prefix (Linux), the real Documents folder |
+| `engine/asr.py` | speech to text: Silero VAD, the rolling passes (Parakeet v3 / GigaAM v3 / SenseVoice by language), word times, "auto" language (SpeechBrain detector + stitching) |
+| `engine/paths.py` | the name, version, repo; the user's data folder (%LOCALAPPDATA%\Kotodama: settings, models, test voices) |
+| `engine/updater.py` | updates from GitHub Releases: check, download, SHA256SUMS + same-publisher signature, run the installer silently |
+| `engine/teardown_helper.py` | the command line for Teardown with the test modes (--auto-speech, --mic-wav, --transcribe, --auto, --type, --demo) |
+| `engine/speech.py` | the first speech detector + faster-whisper path (kept: test_helper and bench/lid.py use it; not in the app) |
+| `engine/export_lid.py` | builds the language detector's ONNX file (env pclid; CI too) |
 | `engine/make_notices.py`, `engine/licenses/` | writes THIRD_PARTY_NOTICES.txt (every model and package, full license texts) |
-| `engine/test_*.py` | test_helper (link, mixer, VAD), test_asr (the models on the benchmark clips), test_e2e (a fake game), test_auto_speech (22 recorded lines in real time) |
+| `engine/make_dummy_lines.py` | the mod's voice dummies' lines with word times (PC.VDUMMY_LINES) |
+| `engine/test_*.py` | test_app (updater, Steam, games, runtime, filter), test_helper (link, mixer, VAD, word times), test_asr (the models on the benchmark clips), test_e2e (a fake game), test_auto_speech (22 recorded lines in real time) |
+| `build.py`, `installer/kotodama.iss` | the build: Nuitka standalone folder, ASIO DLLs removed, the detector + notices added; Inno Setup installer (per user); SHA256SUMS.txt |
+| `.github/workflows/build.yml` | CI: Windows (installer) and Linux (tar.gz, with libportaudio.so.2) on every push to main; a v<version> tag: a DRAFT release |
 | `bench/` | the benchmarks behind every model choice (reports in `export/asrbench/*.md`) |
 | `probes/` | the in-game feasibility probes (each a tiny Teardown mod + a Python side) |
-| `export/` | generated, git-ignored: clips, reports, the detector's ONNX (`export/lid/`), test output |
+| `export/`, `build/`, `dist/` | generated, git-ignored |
 
 ## Environments (conda, conda-forge only; pip inside)
 
-- `pcvoice`: the helper and its tests - python 3.12 + pip only (numpy, scipy, sounddevice, sherpa-onnx,
-  onnxruntime, huggingface_hub, psutil, faster-whisper, opencc). Never conda's numpy/scipy here (MKL/OpenMP
-  clash killed the process).
+- `pcvoice`: the app and its tests - python 3.12 + pip only (numpy, sounddevice, sherpa-onnx, onnxruntime,
+  huggingface_hub, psutil; nuitka for builds; faster-whisper, scipy, opencc, pillow for old paths / tests only).
+  Never conda's numpy/scipy here (MKL/OpenMP clash killed the process).
 - `pclid`: torch CPU + speechbrain + onnx, for `engine/export_lid.py` only.
 - `pcbench`: the benchmarks' extra tools (edge-tts for clips).
 - `teardown` (in teardown-mods): LuaJIT and PIL for the mod side.
@@ -33,24 +44,32 @@ engine is its own project, decoupled from the chat mod; it may serve other games
 ## Commands (from the repo root)
 
     P=C:/Users/user/miniconda3/envs/pcvoice/python.exe
-    $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
-    $P engine/teardown_helper.py                  # the helper (Teardown running, a level with the mod)
+    $P engine/kotodama.py                 # the app
+    $P engine/test_app.py ; $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
+    $P engine/teardown_helper.py          # the command line (Teardown running, a level with the mod)
+    $P build.py                           # dist/Kotodama/ + dist/Kotodama-Setup-<v>.exe (Inno Setup: per-user winget install)
     C:/Users/user/miniconda3/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
-    $P engine/make_notices.py            # after any model or package change
+    $P engine/make_notices.py             # after any model or package change
 
-Heavy jobs (benchmarks, long tests) only while the user is not playing: they stream the game over Moonlight
+Heavy jobs (benchmarks, long tests, builds) only while the user is not playing: they stream the game over Moonlight
 and a busy CPU freezes it. Commit as AgeOfAlgorithms (123909089+AgeOfAlgorithms@users.noreply.github.com).
+
+## Release plan (the user, 2026-10-06): open source + SignPath
+
+Open source (MIT), builds by GitHub Actions, signed for free by SignPath Foundation (publisher shown as "SignPath
+Foundation"; needs an OSI license, an automated build, the project already released). Steam was considered and
+dropped as too much work for now. Steps: [done] license, window, build, installer, updater, CI; [the user] make the
+repo public (first strip personal paths and private notes), publish the first release (unsigned), apply to SignPath,
+then add its signing step to the workflow. The speech models stay OUT of the signed package (SenseVoice's FunASR
+license is not OSI): they download per language (pinned Hugging Face revisions now; a mirror on our own release
+later). The language detector (Apache-2.0) ships inside the app. Optional: a winget listing.
 
 ## Open
 
-- Hosting the models for players: mirror the pinned files in a repo of ours or bundle them (the user's
-  choice, open); the detector ONNX is only on this PC (`export/lid/`).
-- Per-word times: BUILT 2026-10-05 (PROTOCOL.md: units, `w`, `a`; live words only grow - LocalAgreement of two
-  passes, never the last unit; `asr.unit_times` from sherpa-onnx token timestamps). Live words now need ~2 s of
-  speech (two passes that agree): shorter lines show only as the finished line. Not seen in-game yet.
-- The voice dummies' clips start over on each turn (the game shows their words by time):
-  `engine/make_dummy_lines.py` makes the mod's PC.VDUMMY_LINES (their scripts + Parakeet word times).
-- No license file yet (all rights reserved until the user picks one).
+- The models mirror (our own GitHub release) - after the repo is public.
+- Linux build: made by CI, not tried on a real Linux / Steam Deck; no auto-update there (the app opens the page).
+- The voice dummies' test voices are made with the Windows computer voices: none on Linux (silent dummies).
+- Nothing tried in-game since the restructure (2026-10-06): the window with Teardown, the installer, an update.
 
 ## History: research and decisions (moved from proxchat/PROJECT.md, 2026-10-05)
 

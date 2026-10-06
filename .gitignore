@@ -221,3 +221,8 @@ __marimo__/
 
 # this project: generated data (benchmark clips and reports, the exported language detector, test output)
 export/
+
+# builds
+build/
+dist/
+build_log.txt
