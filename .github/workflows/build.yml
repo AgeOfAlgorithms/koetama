@@ -34,10 +34,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app
-          # (sherpa-onnx's build script downloads its libraries here, outside what the cache keeps by itself: a cached
-          #  build that skips the script would link without them)
-          cache-directories: app/target/sherpa-onnx-prebuilt
           prefix-key: v1-rust
+      - name: sherpa-onnx's libraries (a restored build cache lacks them - its tidying drops them - so their build script runs again)
+        shell: bash
+        working-directory: app
+        run: if [ ! -d target/sherpa-onnx-prebuilt ]; then cargo clean -p sherpa-onnx-sys; cargo clean -p sherpa-onnx-sys --release; fi
       - name: The language detector (SpeechBrain VoxLingua107 ECAPA as ONNX)
         run: |
           python -m pip install --upgrade pip
@@ -93,10 +94,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app
-          # (sherpa-onnx's build script downloads its libraries here, outside what the cache keeps by itself: a cached
-          #  build that skips the script would link without them)
-          cache-directories: app/target/sherpa-onnx-prebuilt
           prefix-key: v1-rust
+      - name: sherpa-onnx's libraries (a restored build cache lacks them - its tidying drops them - so their build script runs again)
+        shell: bash
+        working-directory: app
+        run: if [ ! -d target/sherpa-onnx-prebuilt ]; then cargo clean -p sherpa-onnx-sys; cargo clean -p sherpa-onnx-sys --release; fi
       - name: System libraries (ALSA for sound; a virtual screen and GL for the selftest's window)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config xvfb libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libx11-xcb1
       - name: The language detector
