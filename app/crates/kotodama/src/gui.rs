@@ -456,20 +456,48 @@ impl eframe::App for App {
     }
 }
 
+/// How the window is drawn: wgpu (Direct3D 12 on Windows: it falls back to Windows' own software renderer where
+/// there is no graphics driver - a virtual machine, a remote desktop - where OpenGL is only 1.1 and egui's OpenGL
+/// renderer cannot start), OpenGL (glow) elsewhere. KOTODAMA_RENDERER=wgpu|glow chooses.
+pub fn renderer() -> eframe::Renderer {
+    match std::env::var("KOTODAMA_RENDERER").ok().as_deref() {
+        Some("glow") => eframe::Renderer::Glow,
+        Some("wgpu") => eframe::Renderer::Wgpu,
+        _ if cfg!(windows) => eframe::Renderer::Wgpu,
+        _ => eframe::Renderer::Glow,
+    }
+}
+
 pub fn main() -> i32 {
     if !crate::instance::single_instance() {
         message(&format!("{} is already running.", paths::APP_NAME));
         return 0;
     }
+    let first = renderer();
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{} {}", paths::APP_NAME, paths::VERSION))
             .with_inner_size([760.0, 520.0])
             .with_min_inner_size([560.0, 460.0]),
+        renderer: first,
         ..Default::default()
     };
     match eframe::run_native(paths::APP_NAME, opts, Box::new(|cc| Ok(Box::new(App::new(cc))))) {
         Ok(()) => 0,
+        Err(e) if std::env::var_os("KOTODAMA_RENDERER").is_none() => {
+            // (that renderer would not start here: once more with the other one - in a new process, as a window
+            //  system can be set up only once per process)
+            let other = if first == eframe::Renderer::Wgpu { "glow" } else { "wgpu" };
+            crate::instance::release();
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(args).env("KOTODAMA_RENDERER", other).status()) {
+                Ok(st) => st.code().unwrap_or(1),
+                Err(e2) => {
+                    message(&format!("{} could not open its window: {e} ({e2})", paths::APP_NAME));
+                    1
+                }
+            }
+        }
         Err(e) => {
             message(&format!("{} could not open its window: {e}", paths::APP_NAME));
             1

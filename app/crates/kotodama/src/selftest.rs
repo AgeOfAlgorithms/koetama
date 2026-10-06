@@ -80,10 +80,12 @@ fn window() -> Result<String, String> {
             ui.ctx().request_repaint();
         }
     }
+    let r = crate::gui::renderer();
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([200.0, 80.0]).with_visible(false),
+        renderer: r,
         ..Default::default()
     };
     eframe::run_native("Kotodama selftest", opts, Box::new(|_| Ok(Box::new(One(0))))).map_err(|e| e.to_string())?;
-    Ok("egui".into())
+    Ok(format!("egui, {}", if r == eframe::Renderer::Wgpu { "wgpu" } else { "OpenGL" }))
 }
