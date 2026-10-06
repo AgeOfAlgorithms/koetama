@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py', '.github/workflows/build.yml') }}
           restore-keys: nuitka-${{ runner.os }}-
       - name: Nuitka's cache folder
         shell: bash
@@ -59,7 +59,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py', '.github/workflows/build.yml') }}
       - name: The build runs (the window, sound, ONNX, the detector, HTTPS)
         shell: bash
         run: ./dist/Kotodama/Kotodama.exe --selftest
@@ -114,7 +114,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py', '.github/workflows/build.yml') }}
           restore-keys: nuitka-${{ runner.os }}-
       - name: Nuitka's cache folder
         shell: bash
@@ -131,7 +131,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py', '.github/workflows/build.yml') }}
       - name: The build runs (the window on a virtual screen, sound, ONNX, the detector, HTTPS)
         run: |
           mkdir -p /tmp/try && tar -xzf dist/Kotodama-*-linux.tar.gz -C /tmp/try
