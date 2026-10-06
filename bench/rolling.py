@@ -1,7 +1,7 @@
 """Live words WITHOUT a streaming model: the line so far re-transcribed every INTERVAL s by the language's own
 offline model (Parakeet v3 / GigaAM v3 / SenseVoice), against Nemotron 3.5 streaming.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe bench/rolling.py
+    <conda>/envs/pcvoice/python.exe bench/rolling.py
 
 How a rolling line works (RollingLine):
   - every INTERVAL s the audio since the line began (1 s before the speech) is transcribed again

@@ -1,5 +1,6 @@
 # Builds Kotodama on GitHub: Windows (the folder + its installer) and Linux (a .tar.gz), with SHA256SUMS.txt.
-# Every push to main: the builds as artifacts (Actions tab -> the run -> Artifacts).
+# Every push to main that changes the app (not the docs): the builds as artifacts (Actions tab -> the run -> Artifacts).
+# Nuitka's compile cache is kept between runs (a first Windows build takes 30+ minutes, a cached one a few).
 # A tag v<version> (matching engine/paths.py VERSION): also a DRAFT release with the files - nothing is public until it is
 # published by hand. Code signing (SignPath) slots in after the Windows build once the project is accepted.
 name: build
@@ -8,10 +9,15 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths: ['engine/**', 'build.py', 'installer/**', '.github/workflows/**', 'LICENSE', 'THIRD_PARTY_NOTICES.txt']
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:                       # (a newer push replaces a build still running)
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows:
@@ -36,8 +42,24 @@ jobs:
       - name: Inno Setup (if the runner has none)
         shell: pwsh
         run: if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) { choco install innosetup -y --no-progress }
+      - name: Nuitka's cache (restore)
+        id: nuitka-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
+          restore-keys: nuitka-${{ runner.os }}-
+      - name: Nuitka's cache folder
+        shell: bash
+        run: echo "NUITKA_CACHE_DIR=${{ runner.temp }}/nuitka-cache" >> "$GITHUB_ENV"
       - name: Build (Nuitka) and the installer (Inno Setup)
         run: python build.py
+      - name: Nuitka's cache (save, also when a later step fails)
+        if: always() && steps.nuitka-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
       - name: The build runs (the window, sound, ONNX, the detector, HTTPS)
         shell: bash
         run: ./dist/Kotodama/Kotodama.exe --selftest
@@ -87,6 +109,16 @@ jobs:
           python engine/export_lid.py
       - name: Tests
         run: python engine/test_app.py
+      - name: Nuitka's cache (restore)
+        id: nuitka-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
+          restore-keys: nuitka-${{ runner.os }}-
+      - name: Nuitka's cache folder
+        shell: bash
+        run: echo "NUITKA_CACHE_DIR=${{ runner.temp }}/nuitka-cache" >> "$GITHUB_ENV"
       - name: Build (Nuitka)
         run: |
           python build.py --no-installer
@@ -94,6 +126,12 @@ jobs:
           cp "$(ldconfig -p | grep -m1 'libportaudio.so.2' | awk '{print $NF}')" dist/Kotodama/lib/libportaudio.so.2
           rm -f dist/*.tar.gz dist/SHA256SUMS.txt
           python build.py --skip-nuitka --no-installer
+      - name: Nuitka's cache (save, also when a later step fails)
+        if: always() && steps.nuitka-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('engine/**/*.py', 'build.py') }}
       - name: The build runs (the window on a virtual screen, sound, ONNX, the detector, HTTPS)
         run: |
           mkdir -p /tmp/try && tar -xzf dist/Kotodama-*-linux.tar.gz -C /tmp/try

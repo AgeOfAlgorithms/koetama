@@ -3,7 +3,7 @@ ONNX export) in the helper's own "auto" path (asr.transcribe_mixed: windows, vot
 language's model). Words wrong on the benchmark's single-language lines, the 20 mixed lines and the one-word callouts
 (said alone, where the detector's confidence decides between its guess and English); the detector's own time.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe bench/lidswap.py [helper]
+    <conda>/envs/pcvoice/python.exe bench/lidswap.py [helper]
     (helper: only the helper's detector with asr.py's settings -> lidswap_helper.md)
 
 Report: export/asrbench/lidswap.md. (AmberNet is loaded here only, from the Hugging Face cache, for the comparison.)

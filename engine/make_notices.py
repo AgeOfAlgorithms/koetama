@@ -1,7 +1,7 @@
 """Write THIRD_PARTY_NOTICES.txt for the voice helper: every model it downloads and every package it runs on, with
 the attribution and the full license text each one asks for. Run it again whenever a model or a package changes.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe engine/make_notices.py
+    <conda>/envs/pcvoice/python.exe engine/make_notices.py
 
 The packages are found from the helper's direct dependencies (RUNTIME) and what they require, as installed in the
 env running this. Model license texts are kept in engine/licenses/ (copied from each source).

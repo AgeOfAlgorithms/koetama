@@ -5,7 +5,7 @@
      Chinese  SenseVoice Small (int8), streaming Paraformer zh-en (int8), streaming Zipformer multi-zh-hans (int8)
   3. noise suppression before Nemotron 3.5 (560 ms, int8): GTCRN (0.5 MB) and DPDFNet (2 and baseline)
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/second.py
+    <conda>/envs/pcbench/python.exe bench/second.py
 
 Same clips, 4 threads, one other core kept busy. Report: export/asrbench/second.md
 """

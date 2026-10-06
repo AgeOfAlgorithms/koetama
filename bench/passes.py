@@ -4,7 +4,7 @@
   2. One-word lines ("Okay.", "Да.", "好。"...): do the second-pass models (GigaAM v3, SenseVoice, Parakeet v3)
      get them? (Nemotron alone dropped most; Whisper small got most.)
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/passes.py
+    <conda>/envs/pcbench/python.exe bench/passes.py
 
 Report: export/asrbench/passes.md
 """

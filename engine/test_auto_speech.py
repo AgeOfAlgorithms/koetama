@@ -1,7 +1,7 @@
 """The in-game auto test (teardown_helper.py --auto-speech) against a fake game: what the game would receive - live words
 and finished lines - for each recorded line, in real time. Checks every line arrives, live words first.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe engine/test_auto_speech.py
+    <conda>/envs/pcvoice/python.exe engine/test_auto_speech.py
 """
 import os
 import re

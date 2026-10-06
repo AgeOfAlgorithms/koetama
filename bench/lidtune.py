@@ -7,7 +7,7 @@
           line holds its language unless the evidence for a change is strong (instead of the 3-frame vote)
 Words wrong on single-language lines, the 20 mixed lines and the one-word callouts, as in lidswap.py.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe bench/lidtune.py
+    <conda>/envs/pcvoice/python.exe bench/lidtune.py
 
 Report: export/asrbench/lidtune2.md (run 1, with the configurations now commented out: lidtune.md)
 """

@@ -2,7 +2,7 @@
 detector (AmberNet) more ways to be wrong. Words wrong through asr.transcribe_mixed on the benchmark's
 single-language lines (en, ru, zh, es, de) and the 20 mixed lines, for growing candidate sets.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe bench/autolangs.py
+    <conda>/envs/pcvoice/python.exe bench/autolangs.py
 
 Report: export/asrbench/autolangs.md
 """

@@ -1,7 +1,7 @@
 """The voice helper's compute budget, as it runs now (rolling design, asr.RollingLine): per language and with "auto"
 (language detection + stitching), with 4 and 2 threads, while another core is kept busy (Teardown's main thread).
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe bench/budget.py
+    <conda>/envs/pcvoice/python.exe bench/budget.py
 
 Per configuration: CPU while talking (cores busy on average: process CPU time / seconds of speech), the longest
 single pass (how far behind the live words can fall), the delay of the finished line after the speech ends,

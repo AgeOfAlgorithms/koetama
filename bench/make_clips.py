@@ -1,6 +1,6 @@
 """Make the speech-to-text benchmark's clips with computer voices (no microphone needed).
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/make_clips.py
+    <conda>/envs/pcbench/python.exe bench/make_clips.py
 
 Voices: the Windows voices (David, Mark, Zira: English, with each word's position in the audio, for
 checking word timestamps) and Piper voices through sherpa-onnx (English, Russian, Chinese, Spanish,

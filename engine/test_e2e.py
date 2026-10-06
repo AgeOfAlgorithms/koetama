@@ -3,7 +3,7 @@ reads the helper's message files in order and acks them, as voice.lua does) and 
 recording as its microphone (--mic-wav, real time). The recording: four benchmark lines and two one-word
 callouts with pauses (export/asrbench, from bench/make_clips.py).
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe engine/test_e2e.py
+    <conda>/envs/pcvoice/python.exe engine/test_e2e.py
 """
 import json
 import os

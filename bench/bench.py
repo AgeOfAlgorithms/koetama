@@ -1,9 +1,9 @@
 """Speech-to-text benchmark for the voice helper: Nemotron 3.5 ASR Streaming (sherpa-onnx) against Whisper
 small / medium (faster-whisper), on the clips from make_clips.py, on this machine's CPU.
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/bench.py            # everything, then the report
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/bench.py --no-load  # without the busy core
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/bench.py --report   # only the report again
+    <conda>/envs/pcbench/python.exe bench/bench.py            # everything, then the report
+    <conda>/envs/pcbench/python.exe bench/bench.py --no-load  # without the busy core
+    <conda>/envs/pcbench/python.exe bench/bench.py --report   # only the report again
 
 Each model runs in its own process (its memory is its own) with 4 threads, while another process keeps one
 core busy (Teardown's main thread does). Per clip it records the text, the time, and:

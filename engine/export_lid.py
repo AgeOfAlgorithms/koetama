@@ -2,7 +2,7 @@
 VoxLingua107, CC-BY-4.0) as one ONNX file - audio in, 107 language log-probabilities out - so the helper needs no
 PyTorch. Replaces NVIDIA AmberNet (NGC terms: no redistribution).
 
-    C:/Users/user/miniconda3/envs/pclid/python.exe engine/export_lid.py
+    <conda>/envs/pclid/python.exe engine/export_lid.py
 
 (env pclid: torch CPU + speechbrain + onnx + onnxruntime.) Writes export/lid/voxlingua107-ecapa.onnx and
 voxlingua107-ecapa.json (the language codes), then checks the ONNX file against SpeechBrain itself on real

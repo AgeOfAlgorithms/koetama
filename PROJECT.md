@@ -73,7 +73,16 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
 - The models mirror (our own GitHub release) - after the repo is public.
 - Linux build: made by CI, not tried on a real Linux / Steam Deck; no auto-update there (the app opens the page).
 - The voice dummies' test voices are made with the Windows computer voices: none on Linux (silent dummies).
-- Nothing tried in-game since the restructure (2026-10-06): the window with Teardown, the installer, an update.
+- Verified on this PC (2026-10-06, no game running): the built exe end to end (test_e2e with KOTODAMA_EXE), also with
+  an empty model cache (it downloaded Parakeet itself, 644 MB); --selftest; the installer: silent install, the installed
+  selftest, an update with /RELAUNCH=1 while Kotodama runs (old closed, new started), uninstall (user data kept).
+  Not yet: the window with Teardown running, a real update from a published release (needs a v0.1.1 release).
+- Packaging lessons: a conda Python keeps its modules' DLLs in Library/bin, which Nuitka misses (build.py CONDA_DLLS;
+  tcl86t needs zlib1.dll - without it the window silently failed to open while --cli worked). huggingface_hub broke in
+  the compiled build (lazy imports): models come through engine/fetch.py. PowerShell's Start-Process -Wait also waits
+  for the children (a relaunched Kotodama): use WaitForExit() when testing the relaunch.
+- Private notes before the repo goes public: this file (Moonlight/the user's setup, local paths), CLAUDE.md, and the
+  git history (local conda paths in old commits; nothing secret found).
 
 ## History: research and decisions (moved from proxchat/PROJECT.md, 2026-10-05)
 

@@ -2,7 +2,7 @@
 PC.VDUMMY_LINES): the dummies' bubbles fill with their words as the helper plays their clips, so the bubble
 features can be tried alone (arriving mid-sentence, walking away, the buffer's garbling).
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe engine/make_dummy_lines.py
+    <conda>/envs/pcvoice/python.exe engine/make_dummy_lines.py
 
 The text is the script each clip was made from (teardown_helper.VOICES); the times come from Parakeet's token
 timestamps on the clip, matched word by word to the script (a word Parakeet heard differently takes the time

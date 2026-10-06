@@ -1,7 +1,7 @@
 """Single-word callouts ("Okay.", "Yes.", "Run!"...): does Nemotron drop short utterances, and does a blank
 penalty (the decoder's "say nothing" made less attractive) bring them back? Whisper small for comparison.
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/shortwords.py
+    <conda>/envs/pcbench/python.exe bench/shortwords.py
 
 Each word is said by several voices (0.5 s before, 1 s after), clean and as through a webcam in a room.
 Report: export/asrbench/shortwords.md

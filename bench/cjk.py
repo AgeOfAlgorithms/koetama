@@ -2,8 +2,8 @@
 language 'zh'. Lines said by Microsoft's online neural voices (edge-tts: no Windows voices or Piper voices for these),
 transcribed with the setting fixed at 'zh' (as before), 'auto', and the line's own language; characters wrong.
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/cjk.py make
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe bench/cjk.py test [Hugging Face repo]
+    <conda>/envs/pcbench/python.exe bench/cjk.py make
+    <conda>/envs/pcvoice/python.exe bench/cjk.py test [Hugging Face repo]
 
 Report: export/asrbench/cjk_<repo>.md
 """

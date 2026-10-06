@@ -1,7 +1,7 @@
 """Language detection and switching languages inside one utterance: Whisper small / medium and Nemotron 3.5
 (560 ms, int8) with NO language given.
 
-    C:/Users/user/miniconda3/envs/pcbench/python.exe bench/codeswitch.py
+    <conda>/envs/pcbench/python.exe bench/codeswitch.py
 
 1. Detection: every single-language line of the benchmark (clean): which language each model decides on
    (Whisper: its detected language; Nemotron: the script of the words it writes).

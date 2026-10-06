@@ -3,7 +3,7 @@
 into one long recording with pauses, fed in 50 ms blocks. Checks: one finished line per spoken line, the
 right words (error rate), live words before each line ends, each language written by its own model.
 
-    C:/Users/user/miniconda3/envs/pcvoice/python.exe engine/test_asr.py          (downloads the models once)
+    <conda>/envs/pcvoice/python.exe engine/test_asr.py          (downloads the models once)
 """
 import json
 import os
