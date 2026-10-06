@@ -188,6 +188,9 @@ pub fn signer(path: &Path) -> (Option<String>, Option<String>) {
     );
     let mut cmd = Command::new("powershell");
     cmd.args(["-NoProfile", "-Command", &ps]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    // (Windows PowerShell with its own modules: a PSModulePath inherited from PowerShell 7 - Kotodama started from
+    //  a pwsh window, or GitHub's runners - points it at modules it cannot load, and Get-AuthenticodeSignature fails)
+    cmd.env_remove("PSModulePath");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

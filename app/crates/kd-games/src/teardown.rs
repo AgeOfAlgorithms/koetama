@@ -604,6 +604,7 @@ pub fn make_voices_in(work: &Path) -> HashMap<i64, PathBuf> {
             );
             let mut cmd = std::process::Command::new("powershell");
             cmd.args(["-NoProfile", "-Command", &ps]).stdin(std::process::Stdio::null());
+            cmd.env_remove("PSModulePath"); // (PowerShell 7's module path breaks Windows PowerShell's own modules)
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
