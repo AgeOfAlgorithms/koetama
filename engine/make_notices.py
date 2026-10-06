@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LIC = os.path.join(HERE, 'licenses')
 OUT = os.path.join(os.path.dirname(HERE), 'THIRD_PARTY_NOTICES.txt')   # (the repo root)
 
-RUNTIME = ['numpy', 'sounddevice', 'sherpa-onnx', 'onnxruntime', 'huggingface_hub', 'psutil']   # (what Kotodama runs on)
+RUNTIME = ['numpy', 'sounddevice', 'sherpa-onnx', 'onnxruntime', 'psutil']   # (what Kotodama runs on)
 EXCLUDE = ['_sounddevice_data/portaudio-binaries/*-asio.dll']
 ALLOWED = ['MIT', 'BSD', 'Apache', 'PSF', 'MPL-2.0', 'Zlib', '0BSD', 'CC0', 'MIT-0']   # (checked 2026-10-05)
 MPL_NOTE = ('Used unmodified under the Mozilla Public License 2.0; its source code is available from the address '

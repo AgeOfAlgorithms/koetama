@@ -128,14 +128,22 @@ class Models:
         self.threads, self.log = threads, log
         self.loaded = {}
         self.lock = threading.Lock()
+        self.downloading = None                # (a download going on: (file, bytes done, bytes total), for the window)
 
     def _repo(self, repo, revision=None, files=None):
+        """the folder of a model's files: pinned files through fetch.py (no Hugging Face library in the app); a whole
+        repo (the benchmarks') through huggingface_hub"""
+        if files:
+            import fetch
+
+            def progress(name, done, total):
+                self.downloading = (name, done, total)
+            try:
+                return fetch.repo_files(repo, revision, files, log=self.log, progress=progress)
+            finally:
+                self.downloading = None
         from huggingface_hub import snapshot_download
-        t0 = time.perf_counter()
-        d = snapshot_download(repo, revision=revision, allow_patterns=files)
-        if time.perf_counter() - t0 > 3:
-            self.log('downloaded %s (%.0f s)' % (repo.split('/')[-1], time.perf_counter() - t0))
-        return d
+        return snapshot_download(repo, revision=revision)
 
     def model_dir(self, name):
         """the folder of a model in MODELS: its pinned revision, only the files used (downloaded the first time)"""

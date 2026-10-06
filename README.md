@@ -24,8 +24,10 @@ Adding a game: see [PROTOCOL.md](PROTOCOL.md), "Adding a game".
 3. Start Kotodama, pick your game, then start the game.
 
 The first time you speak, Kotodama downloads the speech model for your language once: about 670 MB for English and
-the other European languages, 225 MB for Russian, 240 MB for Chinese, Cantonese, Japanese and Korean. Updates:
-**Check for updates** in the window installs a new version for you.
+the other European languages, 225 MB for Russian, 240 MB for Chinese, Cantonese, Japanese and Korean. The window
+shows the download's progress, and a broken download picks up where it stopped. Updates: **Check for updates** in the
+window installs the new version and restarts Kotodama. Uninstalling keeps your settings and downloaded models in
+`%LOCALAPPDATA%\Kotodama`; delete that folder to remove them too.
 
 **Linux / Steam Deck:** download `Kotodama-<version>-linux.tar.gz`, unpack it, run `Kotodama/Kotodama`. Teardown
 runs through Proton; Kotodama finds its files inside Teardown's Proton folder.
@@ -67,12 +69,17 @@ separate environment if you like.
 which antivirus programs often flag, it doesn't unpack itself at runtime. GitHub Actions builds Windows and Linux on
 every push ([`.github/workflows/build.yml`](.github/workflows/build.yml)); a `v<version>` tag makes a draft release.
 
+`Kotodama --selftest` checks that a build's native parts load: the window, sound, sherpa-onnx, the shipped language
+detector and HTTPS for the model downloads. CI runs it on each build, and on Windows also on the installed copy,
+before it uninstalls it again. The installer takes `/VERYSILENT` for an install without questions; add `/RELAUNCH=1`
+to start Kotodama afterwards (the updater does).
+
 ## Tests
 
     python engine/test_app.py        # the updater, finding games, the runtime, the mixer's filter
     python engine/test_helper.py     # the Teardown link, the mixer, word times
     python engine/test_asr.py        # the speech models on recorded lines (needs export/ from bench/)
-    python engine/test_e2e.py        # a fake game, end to end
+    python engine/test_e2e.py        # a fake game, end to end (KOTODAMA_EXE=<the built exe>: the build instead)
     python engine/test_auto_speech.py
 
 ## License

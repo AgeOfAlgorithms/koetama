@@ -1,7 +1,8 @@
 ; Kotodama's Windows installer (Inno Setup 6). build.py runs it:
 ;   ISCC /DAppVersion=0.1.0 /DAppName=Kotodama /DSourceDir=<dist\Kotodama> /DOutDir=<dist> installer\kotodama.iss
 ; Per user (no admin rights): installs to %LOCALAPPDATA%\Programs\Kotodama, so the in-app updater can run it silently
-; (/VERYSILENT): it closes a running Kotodama, replaces the files and starts the new version.
+; (/VERYSILENT /RELAUNCH=1): it closes a running Kotodama, replaces the files and starts the new version. A silent install
+; without /RELAUNCH=1 (a package manager, the CI) starts nothing.
 ; The speech models are not in it: Kotodama downloads them per language into %LOCALAPPDATA%\Kotodama\models.
 
 #ifndef AppName
@@ -48,6 +49,12 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppName}.exe"; Tasks: desktopicon
 
 [Run]
-; an install by hand: a "Launch Kotodama" box at the end; an update (silent): start the new version at once
+; an install by hand: a "Launch Kotodama" box at the end; an update (silent, /RELAUNCH=1): start the new version at once
 Filename: "{app}\{#AppName}.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\{#AppName}.exe"; Flags: nowait; Check: WizardSilent
+Filename: "{app}\{#AppName}.exe"; Flags: nowait; Check: Relaunch
+
+[Code]
+function Relaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
+end;

@@ -27,7 +27,7 @@ jobs:
           python -m pip install numpy sounddevice sherpa-onnx onnxruntime huggingface_hub psutil nuitka ordered-set zstandard
       - name: The language detector (SpeechBrain VoxLingua107 ECAPA as ONNX)
         run: |
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           python -m pip install speechbrain onnx
           python engine/export_lid.py
       - name: Tests
@@ -38,6 +38,22 @@ jobs:
         run: if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) { choco install innosetup -y --no-progress }
       - name: Build (Nuitka) and the installer (Inno Setup)
         run: python build.py
+      - name: The build runs (the window, sound, ONNX, the detector, HTTPS)
+        shell: bash
+        run: ./dist/Kotodama/Kotodama.exe --selftest
+      - name: The installer installs, the installed app runs, the uninstaller removes it
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\Kotodama-Setup-*.exe).FullName
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "setup exit code $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Kotodama"
+          $p = Start-Process "$app\Kotodama.exe" -ArgumentList '--selftest' -Wait -PassThru -RedirectStandardOutput selftest.txt
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { throw "installed selftest exit code $($p.ExitCode)" }
+          $p = Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          Start-Sleep 5
+          if (Test-Path "$app\Kotodama.exe") { throw 'the uninstaller left Kotodama.exe' }
       - uses: actions/upload-artifact@v4
         with:
           name: kotodama-windows
@@ -59,14 +75,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: System libraries (PortAudio, Tk)
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2 tk-dev patchelf
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 tk-dev patchelf xvfb
       - name: Packages
         run: |
           python -m pip install --upgrade pip
           python -m pip install numpy sounddevice sherpa-onnx onnxruntime huggingface_hub psutil nuitka ordered-set zstandard
       - name: The language detector
         run: |
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           python -m pip install speechbrain onnx
           python engine/export_lid.py
       - name: Tests
@@ -78,6 +94,10 @@ jobs:
           cp "$(ldconfig -p | grep -m1 'libportaudio.so.2' | awk '{print $NF}')" dist/Kotodama/lib/libportaudio.so.2
           rm -f dist/*.tar.gz dist/SHA256SUMS.txt
           python build.py --skip-nuitka --no-installer
+      - name: The build runs (the window on a virtual screen, sound, ONNX, the detector, HTTPS)
+        run: |
+          mkdir -p /tmp/try && tar -xzf dist/Kotodama-*-linux.tar.gz -C /tmp/try
+          xvfb-run -a /tmp/try/Kotodama/Kotodama --selftest
       - uses: actions/upload-artifact@v4
         with:
           name: kotodama-linux

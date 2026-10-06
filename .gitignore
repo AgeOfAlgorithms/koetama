@@ -225,4 +225,5 @@ export/
 # builds
 build/
 dist/
-build_log.txt
+build_log*.txt
+build_time.txt

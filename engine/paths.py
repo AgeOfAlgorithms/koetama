@@ -25,6 +25,3 @@ def data_dir():
 DATA = data_dir()
 MODELS = os.path.join(DATA, 'models')
 SETTINGS = os.path.join(DATA, 'settings.json')
-if FROZEN:                                                     # (a packaged build: its Hugging Face downloads in its own
-    os.environ.setdefault('HF_HUB_CACHE', os.path.join(MODELS, 'hub'))   # folder, not the developer's cache)
-    os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')

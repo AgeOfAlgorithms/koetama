@@ -30,6 +30,14 @@ LANG_NAMES = {'en': 'English', 'es': 'Español', 'fr': 'Français', 'de': 'Deuts
               'et': 'Eesti', 'lv': 'Latviešu', 'lt': 'Lietuvių', 'sl': 'Slovenščina', 'el': 'Ελληνικά', 'mt': 'Malti'}
 
 
+def download_text(down):
+    """(file, bytes done, bytes total) -> '42 % of 640 MB' (or '120 MB' when the size is not known)"""
+    name, done, total = down
+    if total:
+        return '%d %% of %.0f MB' % (100 * done / total, total / 1e6)
+    return '%.0f MB' % (done / 1e6)
+
+
 # ---------------------------------------------------------------- settings, one copy at a time
 def load_settings():
     try:
@@ -210,7 +218,8 @@ class App:
                 self.dot.create_oval(2, 2, 12, 12, fill=colour, outline='')
                 self.lang_lbl.config(text='Language: %s  (set in the game)    Microphone: %s' % (
                     LANG_NAMES.get(st['lang'], st['lang']), {'off': 'off', 'wanted': 'starting', 'loading': 'loading the speech models...',
-                                                             'listening': 'listening', 'talking': 'hearing you'}[st['mic']]))
+                                                             'listening': 'listening', 'talking': 'hearing you'}[st['mic']]
+                    if not st.get('download') else 'downloading the speech model, %s' % download_text(st['download'])))
                 hear = ('Hearing: ' + st['live']) if st['live'] else (('You said: ' + st['last']) if st['last'] else '')
                 self.hear_lbl.config(text=hear[-160:])
                 lvl = max(0.0, min(1.0, (st['level'] + 60) / 60)) if st['mic'] in ('listening', 'talking') else 0
@@ -298,7 +307,53 @@ class App:
             self.root.destroy()
 
 
+def selftest():
+    """--selftest: a packaged build's native parts load (the window, PortAudio, ONNX Runtime + the shipped language
+    detector, sherpa-onnx, HTTPS for the model downloads). Exit code 0 when all do; run by the CI on each build."""
+    import tempfile
+    failed = 0
+
+    def step(name, fn):
+        nonlocal failed
+        try:
+            print('ok   %s%s' % (name, (': ' + str(fn())) if fn else ''), flush=True)
+        except Exception as e:
+            failed += 1
+            print('FAIL %s: %s: %s' % (name, type(e).__name__, e), flush=True)
+
+    def window():
+        import tkinter as tk
+        r = tk.Tk()
+        r.withdraw()
+        r.update()
+        r.destroy()
+        return 'Tk %s' % tk.TkVersion
+
+    def detector():
+        import asr
+        asr.Models(threads=1, log=lambda m: None).get('langid')
+        return asr.lid_dir()
+
+    def https():
+        import fetch
+        d = tempfile.mkdtemp()
+        fetch.download(fetch.BASE + '/csukuangfj/sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16/resolve/'
+                       '32a4c7cc81809bd132e2d935ab99e9e6ab47fbec/tokens.txt', os.path.join(d, 'tokens.txt'), tries=2)
+        return '%d bytes' % os.path.getsize(os.path.join(d, 'tokens.txt'))
+
+    print('%s %s selftest (%s)' % (paths.APP_NAME, paths.VERSION, paths.APP_ROOT), flush=True)
+    step('the window', window)
+    step('sound (PortAudio)', lambda: '%d output devices' % len(audio.output_devices()))
+    step('sherpa-onnx', lambda: __import__('sherpa_onnx').__name__)
+    step('the language detector (ONNX Runtime)', detector)
+    step('model downloads (HTTPS)', https)
+    print('%d failed' % failed)
+    return 1 if failed else 0
+
+
 def main():
+    if '--selftest' in sys.argv:
+        return selftest()
     if '--cli' in sys.argv:
         sys.argv.remove('--cli')
         import teardown_helper

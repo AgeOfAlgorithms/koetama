@@ -110,5 +110,5 @@ def download(info, progress=None):
 
 def install(path):
     """run the installer silently (it closes Kotodama, replaces it and starts the new version); the caller exits"""
-    subprocess.Popen([path, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'],
+    subprocess.Popen([path, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/RELAUNCH=1'],
                      creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0))

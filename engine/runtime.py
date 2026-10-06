@@ -172,6 +172,7 @@ class Runtime:
             for sid, sp in sorted(feed['speakers'].items()):
                 speakers.append(dict(name=self.game.speaker_name(sp['src']), talk=sp['talk'], gain=sp['gain'],
                                      az=sp['az'], muffle=sp['muffle']))
-        return dict(state=state, mic=mic, level=getattr(self.mic, 'level', -120.0) if self.mic else -120.0,
+        down = getattr(getattr(self.listener, 'models', None), 'downloading', None)
+        return dict(state=state, mic=mic, download=down, level=getattr(self.mic, 'level', -120.0) if self.mic else -120.0,
                     lang=self.language(), live=self.live_now, last=self.last_said, speakers=speakers, error=self.error,
                     updates=getattr(getattr(self.game, 'reader', None), 'updates', 0))

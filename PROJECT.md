@@ -19,6 +19,7 @@ for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026
 | `engine/steam.py` | Steam libraries, an app's install / Workshop folder, its Proton prefix (Linux), the real Documents folder |
 | `engine/asr.py` | speech to text: Silero VAD, the rolling passes (Parakeet v3 / GigaAM v3 / SenseVoice by language), word times, "auto" language (SpeechBrain detector + stitching) |
 | `engine/paths.py` | the name, version, repo; the user's data folder (%LOCALAPPDATA%\Kotodama: settings, models, test voices) |
+| `engine/fetch.py` | model downloads over plain HTTPS (no Hugging Face library in the app): the pinned files of each model, resumable, into %LOCALAPPDATA%/Kotodama/models; a developer's Hugging Face cache is used where it has them; KOTODAMA_MODELS_URL = a mirror |
 | `engine/updater.py` | updates from GitHub Releases: check, download, SHA256SUMS + same-publisher signature, run the installer silently |
 | `engine/teardown_helper.py` | the command line for Teardown with the test modes (--auto-speech, --mic-wav, --transcribe, --auto, --type, --demo) |
 | `engine/speech.py` | the first speech detector + faster-whisper path (kept: test_helper and bench/lid.py use it; not in the app) |
@@ -48,6 +49,9 @@ for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026
     $P engine/test_app.py ; $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
     $P engine/teardown_helper.py          # the command line (Teardown running, a level with the mod)
     $P build.py                           # dist/Kotodama/ + dist/Kotodama-Setup-<v>.exe (Inno Setup: per-user winget install)
+    dist/Kotodama/Kotodama.exe --selftest # the build's window, sound, ONNX, detector, HTTPS load (CI runs it)
+    KOTODAMA_EXE=dist/Kotodama/Kotodama.exe $P engine/test_e2e.py   # the built exe end to end
+    KOTODAMA_DEBUG=1 $P build.py          # a build whose errors go to %TEMP%/kotodama.err.txt (a window that won't open)
     C:/Users/user/miniconda3/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
     $P engine/make_notices.py             # after any model or package change
 

@@ -151,5 +151,41 @@ for fc in (400.0, 4000.0):
     err = float(np.abs(np.concatenate(got) - np.array(ref)).max())
     check(err < 1e-3, 'the low-pass at %.0f Hz matches two one-pole filters (largest difference %.6f)' % (fc, err))
 
+# ---- model downloads (fetch.py) from a local web server laid out like Hugging Face: <repo>/resolve/<rev>/<file>
+import functools, http.server, tempfile, threading
+import fetch
+import kotodama
+web, home = tempfile.mkdtemp(), tempfile.mkdtemp()
+os.makedirs(os.path.join(web, 'own', 'model', 'resolve', 'abc'))
+blob = os.urandom(3 << 20)
+open(os.path.join(web, 'own', 'model', 'resolve', 'abc', 'm.onnx'), 'wb').write(blob)
+srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=web))
+srv.RequestHandlerClass.log_message = lambda *a: None
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+old = fetch.BASE, paths.MODELS, os.environ.get('HF_HUB_CACHE')
+fetch.BASE, paths.MODELS, os.environ['HF_HUB_CACHE'] = 'http://127.0.0.1:%d' % srv.server_address[1], home, os.path.join(home, 'nohf')
+want = os.path.join(home, 'own__model', 'abc', 'm.onnx')
+os.makedirs(os.path.dirname(want))
+open(want + '.part', 'wb').write(b'half a file from before')     # (a broken download; this server cannot resume)
+seen = []
+d = fetch.repo_files('own/model', 'abc', ['m.onnx'], log=lambda m: None, progress=lambda f, a, b: seen.append((f, a, b)))
+check(open(os.path.join(d, 'm.onnx'), 'rb').read() == blob and not os.path.exists(want + '.part'),
+      'a model file downloads whole, over a broken earlier try')
+check(seen and seen[-1] == ('m.onnx', len(blob), len(blob)), 'the download reports its progress')
+check(fetch.repo_files('own/model', 'abc', ['m.onnx'], log=lambda m: 1 / 0) == d, 'a downloaded file is not downloaded again')
+try:
+    fetch.download(fetch.BASE + '/own/model/resolve/abc/none.onnx', os.path.join(home, 'none.onnx'), tries=1)
+    check(False, 'a missing file is an error')
+except OSError:
+    check(not os.path.exists(os.path.join(home, 'none.onnx')), 'a missing file is an error, and leaves nothing behind')
+check(kotodama.download_text(('m', 336e6, 640e6)) == '52 % of 640 MB' and kotodama.download_text(('m', 5e6, 0)) == '5 MB',
+      'the window shows the download')
+srv.shutdown()
+fetch.BASE, paths.MODELS = old[0], old[1]
+if old[2] is None:
+    os.environ.pop('HF_HUB_CACHE')
+else:
+    os.environ['HF_HUB_CACHE'] = old[2]
+
 print('\n%d checks, %d failed' % (NCHECK, FAILED))
 sys.exit(1 if FAILED else 0)

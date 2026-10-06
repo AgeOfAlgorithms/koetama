@@ -41,13 +41,15 @@ def nuitka():
            '--include-package-data=certifi',
            # (only what the app runs: the benchmarks' and old paths' packages stay out)
            '--nofollow-import-to=scipy,faster_whisper,ctranslate2,speech,torch,matplotlib,IPython,pytest,PIL,opencc,'
-           'speechbrain,edge_tts,test_helper,test_asr,test_e2e,test_auto_speech,export_lid,make_notices,make_dummy_lines',
+           'speechbrain,edge_tts,huggingface_hub,hf_xet,test_helper,test_asr,test_e2e,test_auto_speech,export_lid,make_notices,make_dummy_lines',
            '--company-name=' + paths.APP_NAME, '--product-name=' + paths.APP_NAME,
            '--file-version=' + paths.VERSION, '--product-version=' + paths.VERSION,
            '--file-description=%s: proximity voice chat with live speech to text' % paths.APP_NAME,
            '--copyright=Copyright (c) 2026 AgeOfAlgorithms (MIT)']
     if WIN:
         cmd += ['--windows-console-mode=attach']           # (no console window; one when started from a console: --cli)
+    if os.environ.get('KOTODAMA_DEBUG'):                   # (a build whose errors go to a file: %TEMP%\kotodama.err.txt)
+        cmd += ['--force-stderr-spec={TEMP}/kotodama.err.txt', '--force-stdout-spec={TEMP}/kotodama.out.txt']
     cmd.append(os.path.join(ROOT, 'engine', 'kotodama.py'))
     run(cmd, cwd=ROOT)
     built = os.path.join(out, 'kotodama.dist')
@@ -57,7 +59,19 @@ def nuitka():
     shutil.copytree(built, APP)
 
 
+CONDA_DLLS = ['ffi-8.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll', 'libbz2.dll', 'liblzma.dll', 'libexpat.dll',
+              'sqlite3.dll', 'tcl86t.dll', 'tk86t.dll', 'zlib.dll', 'zlib1.dll']
+
+
 def finish():
+    # a conda Python keeps the DLLs of its own modules (ctypes' libffi, ssl, tkinter's Tcl/Tk...) in Library/bin, where
+    # Nuitka does not look: copied in (a python.org Python - the CI's - needs none of this)
+    conda_bin = os.path.join(sys.base_prefix, 'Library', 'bin')
+    if WIN and os.path.isdir(conda_bin):
+        for f in CONDA_DLLS:
+            if os.path.exists(os.path.join(conda_bin, f)) and not os.path.exists(os.path.join(APP, f)):
+                shutil.copy2(os.path.join(conda_bin, f), os.path.join(APP, f))
+                print('added', f)
     # sounddevice's ASIO builds of PortAudio: Steinberg's ASIO SDK (GPLv3 or a Steinberg agreement) - never shipped
     for p in glob.glob(os.path.join(APP, '**', '*asio*'), recursive=True):
         os.remove(p)
