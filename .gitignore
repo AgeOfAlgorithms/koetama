@@ -227,3 +227,4 @@ build/
 dist/
 build_log*.txt
 build_time.txt
+app/target/

@@ -1,0 +1,11 @@
+[package]
+name = "kd-common"
+description = "Kotodama: names and folders, a line's word units, model downloads, the game feed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true

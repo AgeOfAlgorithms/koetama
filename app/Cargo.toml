@@ -1,0 +1,42 @@
+# Kotodama in Rust: one program (crates/kotodama) built from small crates, each the port of one part of engine/
+# (the Python app, kept as the reference: app/fixtures/make_fixtures.py writes its answers for the tests here).
+# DESIGN.md has the crates, their interfaces and which Python they replace.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+authors = ["AgeOfAlgorithms"]
+repository = "https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine"
+
+[workspace.dependencies]
+kd-common = { path = "crates/kd-common" }
+kd-audio = { path = "crates/kd-audio" }
+kd-speech = { path = "crates/kd-speech" }
+kd-games = { path = "crates/kd-games" }
+kd-update = { path = "crates/kd-update" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
+cpal = "0.18"
+rubato = "5"
+hound = "3.5"
+regex = "1"
+sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-27"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_Console", "Win32_Security"] }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "unwind"
+
+[profile.dev.package."*"]
+opt-level = 2          # (dependencies optimised in debug builds too: the mixer and the speech glue run in real time)
