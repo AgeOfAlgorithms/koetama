@@ -104,8 +104,9 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
   Listener end to end); the Python test_e2e.py passes against the Rust exe; selftest + installer cycle pass. Not yet:
   in-game with Teardown, Linux (CI builds it), a real update from one release to the next. Python 0.1 was never
   released: the first release is the Rust 0.2.
-- Idle memory of the window ~180 MB (most of it the OpenGL driver; egui with glow). The detector is 86 MB of the
-  123 MB install: an int8 copy (~22 MB) would need the accuracy checked again (bench/lidtune.py).
+- Idle memory of the window ~180 MB (measured with OpenGL; Windows now draws with wgpu). The detector ships with its
+  weights stored as float16 (43 MB, was 86; the user's decision 2026-10-06, bench/lidquant.py: the same results; int8
+  was REJECTED by the user - a third of the one-word callouts lost): 88 MB installed, a 52 MB installer.
 - (Python packaging, before the port) a conda Python keeps its modules' DLLs in Library/bin, which Nuitka misses (build.py CONDA_DLLS;
   tcl86t needs zlib1.dll - without it the window silently failed to open while --cli worked). huggingface_hub broke in
   the compiled build (lazy imports): models come through engine/fetch.py. PowerShell's Start-Process -Wait also waits
