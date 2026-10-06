@@ -148,6 +148,23 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
     check('tags="pcvx k=l u=7 t=' in t3 and bytes.fromhex(t3.split('t=')[1].split('"')[0]).decode() == 'the words so'
           and 'tags="pcvx k=f u=7 t="' in t4, 'their kinds and utterance in the tags (k=l / k=f, u=7)')
     check('pcvx_t1.xml' not in names(local) and 'pcvx_t2.xml' in names(local) and 'pcvx_t4.xml' in names(local), 'the game acks 1: that file is deleted, 2 waits')
+    # word times: w = each unit's start (4 hex digits, 1/100 s), a = how long ago the line's audio began
+    import time as _time
+    check(link.send_msg('l', 8, 'one two three', [0.1, 0.5, 0.9], _time.perf_counter() - 2.0), 'live words with their times are sent')
+    t5 = open(os.path.join(local, 'pcvx_t5.xml'), encoding='utf-8').read()
+    a5 = int(t5.split(' a=')[1].split('"')[0])
+    check(' w=000a0032005a a=' in t5 and 195 <= a5 <= 260, 'the file carries w (000a 0032 005a: 0.1 / 0.5 / 0.9 s) and a (%d: ~2 s ago)' % a5)
+    long = ' '.join(['word'] * 150)
+    link.send_msg('f', 8, long, [k * 0.1 for k in range(150)], _time.perf_counter())
+    t6 = open(os.path.join(local, 'pcvx_t6.xml'), encoding='utf-8').read()
+    n6 = len(bytes.fromhex(t6.split('t=')[1].split(' ')[0]).decode().split())
+    check(len(t6.split(' w=')[1].split(' ')[0]) == 4 * n6 and n6 < 150, 'a line cut at TEXT_MAX keeps one time per unit left (%d)' % n6)
+    check(link.send_msg('s', 9, ''), 'the player started talking: a message with no text (kind s)')
+    t7s = open(os.path.join(local, 'pcvx_t7.xml'), encoding='utf-8').read()
+    check('tags="pcvx k=s u=9 t="' in t7s, '... k=s, the utterance, an empty text')
+    link.send_msg('l', 8, 'no times here')
+    t7 = open(os.path.join(local, 'pcvx_t8.xml'), encoding='utf-8').read()
+    check(' w=' not in t7 and ' a=' not in t7, 'without times: no w / a tags (the game shows the words as before)')
     link.on_feed(fd(ping=1, sid=6, ack=0), 'local-proximity-chat')
     check('pcvx_t2.xml' not in names(local) and 'pcvx_p1' in names(local) and link.n == 0, 'a new session (a level start): unread texts dropped, numbers start over')
     link.send_text('first of the new level')
@@ -320,6 +337,47 @@ if have:
     check(text == '', 'three seconds of room noise: no words (%.2f s)%s' % (took, '' if text == '' else ' - got "%s"' % text))
 else:
     print('skip the real model (faster-whisper or export/voicehelper/voice2.wav not here)')
+
+# ---- words and their times (asr.units must split as the game's PC.voiceUnits: the same cases are in test_proxchat.lua)
+import asr  # noqa: E402
+UNIT_CASES = [('I really like eating apples', 5), ('Hello, world!  ok', 3), ('我们需要 a lever 才能打开这扇门。', 14),
+              ('すみません、ロープ', 9), ('한국어 말', 4), ('Привет, мир', 2), ('', 0), ('  ', 0)]
+bad = [(t, n, len(asr.units(t))) for t, n in UNIT_CASES if len(asr.units(t)) != n]
+check(not bad, 'units: words between spaces, each CJK / kana / Hangul character on its own (%s)' % (bad or 'all %d cases' % len(UNIT_CASES)))
+check([u for _, u in asr.units('Run, 它就在!')] == ['Run,', '它', '就', '在', '!'], 'units: a CJK character ends a word; punctuation stays on its word')
+check(asr.unit_times('I really like', [' I', ' really', ' like'], [0.1, 0.4, 0.9]) == [0.1, 0.4, 0.9]
+      and asr.unit_times('I really like', ['\u2581I', '\u2581re', 'ally', '\u2581like'], [0.1, 0.4, 0.6, 0.9]) == [0.1, 0.4, 0.9],
+      'unit times from the tokens: each word starts at its first token (plain and SentencePiece tokens)')
+check(asr.unit_times('我们需', ['我', '们', '需'], [0.2, 0.3, 0.5], offset=1.0) == [1.2, 1.3, 1.5], '... CJK, with an offset (a stretch of a mixed line)')
+check(asr.unit_times('Hello world', ['hello', ' world'], [0.3, 0.8]) == [0.3, 0.8], '... the capital tidy() added does not matter')
+check(asr.unit_times('a b c', [], [], dur=3.0) == [0.0, 1.0, 2.0], '... no tokens: spread over the line')
+line = asr.RollingLine.__new__(asr.RollingLine)
+line.committed, line.prev = [], None
+grew = [line._commit('I really like', [0.1, 0.4, 0.9]), line._commit('I really like eating', [0.1, 0.4, 0.9, 1.3])]
+said = ''.join(sep + u for sep, u, _ in line.committed)
+check(grew == [False, True] and said == 'I really like', 'live words: only what two passes agree on, never the last word ("I really like", not "eating")')
+grew = line._commit('I really liked eating apples', [0.1, 0.4, 0.9, 1.3, 1.8])
+check(not grew and ''.join(sep + u for sep, u, _ in line.committed) == 'I really like', '... a pass that changes a shown word takes nothing back')
+grew = line._commit('I really liked eating apples now', [0.1, 0.4, 0.9, 1.3, 1.8, 2.4])
+check(grew and ''.join(sep + u for sep, u, _ in line.committed) == 'I really like eating apples' and [t for _, _, t in line.committed] == [0.1, 0.4, 0.9, 1.3, 1.8],
+      '... and the next agreed words are added on, with their times')
+line.committed, line.prev = [], None
+line._commit('我们需要', [0.1, 0.2, 0.3, 0.4])
+line._commit('我们需要拉杆', [0.1, 0.2, 0.3, 0.4, 0.6, 0.7])
+check(''.join(sep + u for sep, u, _ in line.committed) == '我们需要', 'Chinese: no spaces put between the characters (all 4 agreed; the newest, 杆, held back)')
+
+# ---- a voice dummy's new turn starts its line from the beginning (the game times its words to the clip)
+clock = Clock()
+m = H.Mixer(NOISE, clock=clock)
+m.set_feed(feed())
+run(m, clock, 0.3)
+p1 = m.voices[7].pos
+m.set_feed(feed(talk=False))
+run(m, clock, 0.4)
+m.set_feed(feed())
+run(m, clock, 0.1, block=480)
+check(p1 == int(0.3 * H.RATE / 480) * 480 and m.voices[7].pos == int(0.1 * H.RATE / 480) * 480,
+      'a voice dummy talking again: its clip starts over (at %d samples after 0.1 s)' % m.voices[7].pos)
 
 print('\n%d checks, %d failed' % (NCHECK, FAILED))
 sys.exit(1 if FAILED else 0)

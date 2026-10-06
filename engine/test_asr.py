@@ -62,7 +62,8 @@ def read(path):
 def run(models, lang, pieces, gap=1.2):
     """pieces: [(reference text, audio)] glued with `gap` s of quiet; returns (finals, lives per utt, seconds)"""
     finals, lives = [], {}
-    lst = asr.Listener(lambda u, t: lives.setdefault(u, []).append(t), lambda u, t, i: finals.append((u, t, i)),
+    starts = []
+    lst = asr.Listener(lambda u, t, i=None: lives.setdefault(u, []).append(t), lambda u, t, i: finals.append((u, t, i)), on_start=starts.append,
                        log=lambda s: None, models=models)
     lst.set_language(lang)
     rng = np.random.default_rng(5)
@@ -75,6 +76,7 @@ def run(models, lang, pieces, gap=1.2):
     for k in range(0, len(audio), n):
         lst.feed(audio[k:k + n])
     lst.flush()
+    run.starts = starts
     return finals, lives, time.perf_counter() - t0, len(audio) / asr.RATE
 
 
@@ -108,11 +110,17 @@ def main():
             for _, _, info in finals:
                 used[info['used']] = used.get(info['used'], 0) + 1
             live_lines = sum(1 for u, _, _ in finals if lives.get(u))
+            long_lines = [u for u, _, i in finals if i['speech'] >= 2.5]      # (live words need two passes that agree: ~2 s)
+            long_live = sum(1 for u in long_lines if lives.get(u))
             err = 100.0 * e / max(1, n)
             print('  %s %-5s %2d lines -> %2d finals (%s), %d with live words first, error %.1f %%, %.1f s for %.1f s of audio'
                   % (lang, cond, len(pieces), len(finals), ', '.join('%s %d' % kv for kv in sorted(used.items())), live_lines, err, took, dur))
             check(missed == 0 and extra <= 2, '%s %s: every spoken line came out (%d split in two at a pause)' % (lang, cond, extra))
-            check(live_lines >= len(finals) - 2, '%s %s: live words came before the finished line (%d of %d)' % (lang, cond, live_lines, len(pieces)))
+            check(long_live >= len(long_lines) - 1, '%s %s: live words came before each line of 2.5 s or more (%d of %d)' % (lang, cond, long_live, len(long_lines)))
+            check(sorted(set(run.starts)) == sorted(u for u, _, _ in finals), '%s %s: each line began with a "started talking" call (%d)' % (lang, cond, len(run.starts)))
+            grows = all(all(b.startswith(x) for x, b in zip(v, v[1:])) for v in lives.values())
+            timed = all(len(i.get('times') or []) == len(asr.units(t)) and i['times'] == sorted(i['times']) for _, t, i in finals if t)
+            check(grows and timed, '%s %s: live words only ever grow (chunk by chunk); each line has one time per word, in order' % (lang, cond))
             if cond == 'room':
                 check(err <= expect[lang], '%s room: error %.1f %% (benchmark best + margin: %.0f %%)' % (lang, err, expect[lang]))
             check(used.get(asr.roll_model(lang), 0) >= len(pieces) - 1, "%s %s: the language's own model (%s) wrote the lines" % (lang, cond, asr.roll_model(lang)))
@@ -143,7 +151,7 @@ def main():
     # nothing said: no line
     rng = np.random.default_rng(9)
     noise = (rng.standard_normal(int(asr.RATE * 6)) * 0.01).astype(np.float32)
-    lst = asr.Listener(lambda u, t: None, lambda u, t, i: got.append(t), log=lambda s: None, models=models)
+    lst = asr.Listener(lambda u, t, i=None: None, lambda u, t, i: got.append(t), log=lambda s: None, models=models)
     got = []
     for k in range(0, len(noise), 800):
         lst.feed(noise[k:k + 800])

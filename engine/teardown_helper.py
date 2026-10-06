@@ -169,10 +169,21 @@ def io_dirs():
     return dirs
 
 
-def text_prefab(text, kind='f', utt=0):
+def times_hex(times):
+    """unit start times (s) as the tag w: 4 hex digits each, in 1/100 s (up to 655 s)"""
+    return ''.join('%04x' % max(0, min(0xFFFF, int(round(t * 100)))) for t in times)
+
+
+def text_prefab(text, kind='f', utt=0, times=None, ago=None):
     """the file the game Spawns to read a message: a body whose tags are its kind ("l" the live words so far, "f"
-    the finished line), the utterance it belongs to, and t = the hex of the UTF-8 text"""
-    return '<prefab version="1.5.2">\n\t<body tags="pcvx k=%s u=%d t=%s"/>\n</prefab>\n' % (kind, utt, text.encode('utf-8').hex())
+    the finished line), the utterance it belongs to, t = the hex of the UTF-8 text, and when there are word times:
+    w = each unit's start (times_hex; s after the line's audio began) and a = how long ago that was, in 1/100 s,
+    when the file was written (the game turns it into a moment on its own clock)"""
+    extra = ''
+    if times is not None and ago is not None:
+        extra = ' w=%s a=%d' % (times_hex(times), max(0, int(round(ago * 100))))
+    return '<prefab version="1.5.2">\n\t<body tags="pcvx k=%s u=%d t=%s%s"/>\n</prefab>\n' % (
+        kind, utt, text.encode('utf-8').hex(), extra)
 
 
 class Link:
@@ -246,18 +257,24 @@ class Link:
         text = text.strip()
         return bool(text) and self.send_msg('f', 0, text)
 
-    def send_msg(self, kind, utt, text):
-        """hand a message to the game: kind "l" (the live words so far) or "f" (the finished line; "" = nothing
-        made out: the live words go); False if no game is listening"""
+    def send_msg(self, kind, utt, text, times=None, t0=None):
+        """hand a message to the game: kind "s" (the player started talking: no text yet), "l" (the live words so far)
+        or "f" (the finished line; "" = nothing made out: the live words go); times: each unit's start (s after t0, time.perf_counter() when the line's
+        audio began) - written with how long ago t0 is now. False if no game is listening"""
+        import asr
         text = text.strip()[:TEXT_MAX]
+        if times is not None:                                # (cut with the text: the first n units keep their times)
+            n = len(asr.units(text))
+            times = list(times)[:n] if len(times) >= n else None
         with self.lock:
             if self.dir is None or (kind == 'l' and not text):
                 return False
             self.n += 1
             path = self._path(self.dir, 't%d.xml' % self.n)
             tmp = self._path(self.dir, 'w%d.tmp' % self.n)
+            ago = (time.perf_counter() - t0) if (times is not None and t0 is not None) else None
             with open(tmp, 'w', encoding='utf-8') as f:
-                f.write(text_prefab(text, kind, utt))
+                f.write(text_prefab(text, kind, utt, times if ago is not None else None, ago))
             os.replace(tmp, path)                                   # (appears complete, never half-written)
             self.pending[self.n] = path
             return True
@@ -279,6 +296,7 @@ def behind(az):
 class Voice:
     def __init__(self):
         self.pos = 0
+        self.talking = False      # (a new turn starts the clip from its beginning: the game times the words to it)
         self.gl = self.gr = 0.0
         self.muffle = 0.0
         self.z1 = np.zeros(1)
@@ -320,6 +338,9 @@ class Mixer:
                 v = self.voices[sid] = Voice()
             clip = self.clips.get(sp['src']) if sp else None
             talking = bool(sp and sp['talk'] and clip is not None)
+            if talking and not v.talking:
+                v.pos = 0
+            v.talking = talking
             if talking:
                 b = behind(sp['az'])
                 g = sp['gain'] * master * (1 - BEHIND_QUIET * b)
@@ -487,7 +508,7 @@ def main():
         if sr != asr.RATE:
             g = math.gcd(asr.RATE, sr)
             audio = resample_poly(audio, asr.RATE // g, sr // g).astype(np.float32)
-        lst = asr.Listener(lambda u, t: print('  live %d: %s' % (u, t)),
+        lst = asr.Listener(lambda u, t, i=None: print('  live %d: %s' % (u, t)),
                            lambda u, t, i: print('LINE %d: %s   [%s; %.1f s of speech; final pass %.2f s]' % (u, t or '(nothing)', i['used'], i['speech'], i['second_s'])),
                            threads=args.threads)
         lst.set_language(args.lang or 'en')
@@ -585,20 +606,21 @@ def main():
         elif not args.no_mic and not args.auto:           # (--auto, --type: the lines stand in for the microphone)
             import asr
 
-            def on_live(utt, words):
+            def on_live(utt, words, info=None):
                 live_now[0] = words
-                link.send_msg('l', utt, words)
+                link.send_msg('l', utt, words, (info or {}).get('times'), (info or {}).get('t0'))
 
             def on_final(utt, text, info):
                 live_now[0] = ''
-                sent = link.send_msg('f', utt, text)
+                sent = link.send_msg('f', utt, text, info.get('times'), info.get('t0'))
                 if text:
                     last_said[0] = text[:50]
                     log('you said (%.1f s; %s, final pass %.2f s)%s: %s' % (info['speech'], info['used'], info['second_s'],
                                                                          '' if sent else ' [no game to tell]', text))
                 else:
                     log('(%.1f s of sound, no words made out)' % info['speech'])
-            listener = asr.Listener(on_live, on_final, threads=args.threads, log=log)
+            listener = asr.Listener(on_live, on_final, threads=args.threads, log=log,
+                                    on_start=lambda utt: link.send_msg('s', utt, ''))   # (talking: their head bobs at once)
             if args.auto_speech:                          # (recorded lines in several languages, the real pipeline)
                 mic = asr.PlaylistMicrophone(listener, auto_speech_items(), log=log)
             elif args.mic_wav:                              # (a recording instead of the microphone)

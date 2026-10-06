@@ -45,8 +45,11 @@ and a busy CPU freezes it. Commit as AgeOfAlgorithms (123909089+AgeOfAlgorithms@
 
 - Hosting the models for players: mirror the pinned files in a repo of ours or bundle them (the user's
   choice, open); the detector ONNX is only on this PC (`export/lid/`).
-- Per-word times in the messages (late / leaving listeners get only what they heard): designed with the user
-  2026-10-05, not built (PROTOCOL.md, "Planned").
+- Per-word times: BUILT 2026-10-05 (PROTOCOL.md: units, `w`, `a`; live words only grow - LocalAgreement of two
+  passes, never the last unit; `asr.unit_times` from sherpa-onnx token timestamps). Live words now need ~2 s of
+  speech (two passes that agree): shorter lines show only as the finished line. Not seen in-game yet.
+- The voice dummies' clips start over on each turn (the game shows their words by time):
+  `engine/make_dummy_lines.py` makes the mod's PC.VDUMMY_LINES (their scripts + Parakeet word times).
 - No license file yet (all rights reserved until the user picks one).
 
 ## History: research and decisions (moved from proxchat/PROJECT.md, 2026-10-05)

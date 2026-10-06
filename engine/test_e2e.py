@@ -87,7 +87,7 @@ def main():
             if os.path.exists(f):
                 try:
                     body = open(f, encoding='utf-8').read()
-                    m = re.search(r'k=(\w) u=(\d+) t=([0-9a-f]*)"', body)
+                    m = re.search(r'k=(\w) u=(\d+) t=([0-9a-f]*)[" ]', body)
                     msgs.append((time.time() - t0, m.group(1), int(m.group(2)), bytes.fromhex(m.group(3)).decode()))
                     state['ack'] += 1
                     if first is None:
@@ -111,8 +111,9 @@ def main():
         print('   %5.1f s  utt %d: %s' % (x[0], x[2], x[3]))
     check(len(finals) == len(refs), 'one finished line per spoken line (%d of %d)' % (len(finals), len(refs)))
     utts = {x[2] for x in finals}
-    check(all(any(l[2] == u and l[0] < f[0] for l in lives) for u in utts for f in finals if f[2] == u),
-          'live words came before each finished line')
+    longer = [f for f in finals if len(f[3].split()) >= 8]                # (live words need two passes that agree: ~2.5 s of speech)
+    check(longer and all(any(l[2] == f[2] and l[0] < f[0] for l in lives) for f in longer),
+          'live words came before each finished line of 8 words or more (%d)' % len(longer))
     errs = sum(len(set(words(r)) ^ set(words(h[3]))) for r, h in zip(refs, finals))
     check(errs <= 3, 'the lines are right (%d words differ)' % errs)
     order = [x[2] for x in msgs]

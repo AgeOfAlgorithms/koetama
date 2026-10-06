@@ -46,7 +46,7 @@ def main():
             f = os.path.join(mods, 'pcvx_t%d.xml' % (st['ack'] + 1))
             if os.path.exists(f):
                 try:
-                    m = re.search(r'k=(\w) u=(\d+) t=([0-9a-f]*)"', open(f, encoding='utf-8').read())
+                    m = re.search(r'k=(\w) u=(\d+) t=([0-9a-f]*)[" ]', open(f, encoding='utf-8').read())
                     msgs.append((time.time() - t0, m.group(1), int(m.group(2)), bytes.fromhex(m.group(3)).decode()))
                     st['ack'] += 1
                 except (OSError, AttributeError):

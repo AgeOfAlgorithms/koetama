@@ -28,7 +28,7 @@ mod's own tag: `local-<folder>` for a local mod, `steam-<id>` for a Workshop one
 | session | new on every level start; the helper starts its message numbers over |
 | ack | the number of the last message the mod has read; the helper deletes that file |
 | ping | counts up every 2 s; the helper answers it (below) |
-| mic | 1: the player wants what they say transcribed (the helper opens the microphone only then) |
+| mic | 1: the helper should listen and transcribe (the microphone is open only then). Proximity Babble Chat sends 1 whenever the helper is connected: what a player says is always written, so everyone gets the same (no opting out while your voice is heard) |
 | lang | the language the player speaks (`en`, `ru`, `zh`, `yue`, `ja`, `ko`, `es`, ... or `auto`) |
 | live | 1: live words while the player talks; 0: only the finished line (less CPU) |
 | speaker | `id,src,talk,gain,azimuth,elevation,muffle`: a voice to play (src: a test voice 1..3, a real player later 0; talk 1 while talking; gain 0..1; azimuth degrees from where the camera looks, 0 ahead, 90 right; elevation degrees up; muffle 0..1 behind walls and in the buffer range) |
@@ -44,13 +44,28 @@ Workshop content folder when there is one.
 |---|---|
 | `pcvx_on` | the helper is running (removed when it stops). The mod looks for it once a second. |
 | `pcvx_p<n % 1000>` | the answer to ping n. If no answer comes for ~5 s, the helper counts as gone (a crashed helper leaves `pcvx_on` behind). |
-| `pcvx_t<n>.xml` | message n (1, 2, ... per session): a prefab `<body tags="pcvx k=<kind> u=<utterance> t=<hex of the UTF-8 text>"/>`. The mod `Spawn`s it, reads the tags, `Delete`s what it made, and acks n in the feed. |
+| `pcvx_t<n>.xml` | message n (1, 2, ... per session): a prefab `<body tags="pcvx k=<kind> u=<utterance> t=<hex of the UTF-8 text> [w=<times> a=<ago>]"/>`. The mod `Spawn`s it, reads the tags, `Delete`s what it made, and acks n in the feed. |
 
-Message kinds: `l` = the words so far while the player still talks (live), `f` = the finished line (it may be
-empty: nothing made out; the live words go).
+Message kinds: `s` = the player started talking (no text yet: sent the moment the speech detector hears a line
+begin, so the game can show them talking - their head bobs - before any words), `l` = the words so far while the
+player still talks (live), `f` = the finished line (it may be empty: nothing made out; the live words go). A game
+that does not know `s` reads it as an empty finished line, which does nothing.
 
-Planned (in progress): each message also carries the start time of every word and how long ago the speech
-began, so a listener who arrives (or leaves) mid-sentence gets only the words said while they were in range.
+**Live words only grow.** About once a second the helper reads the line so far again. It sends only the words
+two reads in a row agree on, never the newest one, and never takes a shown word back. The game's bubble
+therefore fills chunk by chunk; the finished line replaces it.
+
+**Word times** (`w`, `a`; both or neither):
+- **Units:** a line is split into units: runs of letters between spaces, and each CJK, kana or Hangul character
+  on its own (`engine/asr.py` `units()`; the mod's `PC.voiceUnits` splits the same way, and both test suites
+  share the same cases).
+- **`w`:** each unit's start, as 4 hex digits in 1/100 s after the line's audio began.
+- **`a`:** how long ago that was, in 1/100 s, at the moment the file was written. The mod turns it into a
+  moment on its own clock; the server stamps it on the server's clock.
+- **What a listener gets:** only the units said while they were in reach of the speaker, with "..." for each
+  stretch missed: arriving mid-sentence "... the rest", walking away "the start ...". In the buffer zone the
+  words are garbled like typed text, and walking closer reveals letters.
+- **Without the tags:** the whole text, as before.
 
 ## Another game
 

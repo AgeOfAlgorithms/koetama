@@ -13,7 +13,7 @@ finished line after. Chosen by the benchmarks in bench/ (see PROJECT.md):
 Everything runs on the CPU (sherpa-onnx / onnxruntime), on this machine; nothing is sent anywhere. The models are
 downloaded once (Hugging Face) the first time they are needed.
 
-    lst = Listener(on_live, on_final)       # on_live(utt, text), on_final(utt, text, info)
+    lst = Listener(on_live, on_final)       # on_live(utt, text, info), on_final(utt, text, info)
     lst.set_language('ru')                  # the game's "Language I speak" ('auto': found per stretch)
     lst.feed(samples_16k_float32)           # from the microphone, any block size; or in a thread: lst.start()
 """
@@ -45,6 +45,72 @@ MODELS = {   # name: (Hugging Face repo, the exact revision tested, the files us
     'parakeet': ('csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8', '2bda32ec70b097a55adaa07d9a7173915b43cc78',
                  ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt']),
 }
+
+
+# ---------------------------------------------------------------- words and when they were said
+# A line's UNITS: runs of letters between spaces, and each CJK / kana character on its own (Chinese and Japanese
+# have no spaces). The game splits the same way (voice.lua PC.voiceUnits; its PC.scriptOf "cjk" / "kana"
+# ranges): each unit's start time travels with the text, so a listener who arrives (or leaves) mid-sentence
+# gets only the words said while they were in reach.
+WIDE = ((0x3040, 0x30FF), (0x31F0, 0x31FF), (0x1100, 0x11FF), (0x3000, 0x303F), (0x3130, 0x318F), (0x3400, 0x9FFF),
+        (0xAC00, 0xD7AF), (0xF900, 0xFAFF), (0xFF00, 0xFFEF), (0x2B1A, 0x2B1A))
+SPACE = ' \t\n\r\x0b\x0c'             # (Lua's %s: ASCII white space only)
+
+
+def _wide(ch):
+    c = ord(ch)
+    return any(a <= c <= b for a, b in WIDE)
+
+
+def units(text):
+    """[(index of its first character, the unit)] of a text"""
+    out, cur = [], None
+    for i, ch in enumerate(text):
+        if ch in SPACE:
+            cur = None
+        elif _wide(ch):
+            out.append([i, ch])
+            cur = None
+        elif cur is None:
+            cur = [i, ch]
+            out.append(cur)
+        else:
+            cur[1] += ch
+    return [(i, u) for i, u in out]
+
+
+def unit_times(text, tokens, stamps, offset=0.0, dur=None):
+    """the start time (s, + offset) of each unit of text, from a model's tokens and their timestamps (sherpa-onnx
+    result.tokens / .timestamps; SentencePiece's '▁' is a space). text may differ a little from the tokens
+    (tidy's capital, spaces): each character is found in the tokens' text a few places ahead. No tokens: spread
+    evenly over dur."""
+    us = units(text)
+    if not us:
+        return []
+    if not tokens or len(tokens) != len(stamps):
+        d = dur or 0.0
+        return [round(offset + d * k / len(us), 2) for k in range(len(us))]
+    concat, ct = '', []
+    for tok, t in zip(tokens, stamps):
+        piece = tok.replace('\u2581', ' ')
+        concat += piece
+        ct += [float(t)] * len(piece)
+    times, j, last = [], 0, float(stamps[0])
+    for ch in text:
+        for k in range(j, min(len(concat), j + 4)):
+            if concat[k].lower() == ch.lower():
+                last, j = ct[k], k + 1
+                break
+        times.append(last)
+    out = [round(offset + times[i], 2) for i, _ in us]
+    for k in range(1, len(out)):                      # (never earlier than the unit before)
+        out[k] = max(out[k], out[k - 1])
+    return out
+
+
+def unit_key(u):
+    """a unit compared between two passes: lower case, no punctuation"""
+    return re.sub(r'[^\w]', '', u.lower())
 
 
 def tidy(text):
@@ -121,12 +187,24 @@ class Models:
 
     def offline(self, name, audio):
         """a whole line through an offline model: (text, seconds)"""
+        text, _, _, took = self.offline_full(name, audio)
+        return text, took
+
+    def offline_full(self, name, audio):
+        """... and its tokens with their timestamps: (text, tokens, timestamps, seconds)"""
         r = self.get(name)
         t0 = time.perf_counter()
         s = r.create_stream()
         s.accept_waveform(RATE, np.concatenate([audio, np.zeros(int(RATE * 0.3), np.float32)]))
         r.decode_stream(s)
-        return s.result.text.strip(), time.perf_counter() - t0
+        res = s.result
+        return res.text.strip(), list(res.tokens), list(res.timestamps), time.perf_counter() - t0
+
+    def offline_timed(self, name, audio, offset=0.0):
+        """a whole line, tidied, with the start time of each unit: (text, [times], seconds)"""
+        raw, tokens, stamps, took = self.offline_full(name, audio)
+        text = tidy(raw)
+        return text, unit_times(text, tokens, stamps, offset, len(audio) / RATE), took
 
 
 ROLL_EVERY = 1.0           # s: a rolling line is transcribed again this often...
@@ -281,18 +359,22 @@ def segments(models, x, fallback='en', cache=None):
     return [tuple(s) for s in segs]
 
 
-def transcribe_mixed(models, x, fallback='en', cache=None, segs_out=None):
+def transcribe_mixed(models, x, fallback='en', cache=None, segs_out=None, times_out=None):
     """a line in any of MIXED_LANGS, even several: cut into stretches, each written by its language's model.
-    -> (text, [langs], seconds); segs_out (a list): gets the stretches [(lang, start, end)]"""
+    -> (text, [langs], seconds); segs_out (a list): gets the stretches [(lang, start, end)]; times_out (a list):
+    the start time of each unit of the text"""
     t0 = time.perf_counter()
     segs = segments(models, x, fallback, cache)
     if segs_out is not None:
         segs_out[:] = segs
-    parts = []
+    parts, times = [], []
     for lang, a, b in segs:
-        text, _ = models.offline(roll_model(lang), x[int(a * RATE):int(b * RATE)])
-        if tidy(text):
-            parts.append(tidy(text))
+        text, tt, _ = models.offline_timed(roll_model(lang), x[int(a * RATE):int(b * RATE)], offset=a)
+        if text:
+            parts.append(text)
+            times += tt
+    if times_out is not None:
+        times_out[:] = times
     return ' '.join(parts), [s[0] for s in segs], time.perf_counter() - t0
 
 
@@ -306,6 +388,10 @@ class RollingLine:
         self.models, self.utt, self.lang, self.fallback, self.live = models, utt, lang, fallback, live
         self.model = roll_model(lang)
         self.audio = [preroll]
+        self.t0 = time.perf_counter() - len(preroll) / RATE   # (when the line's audio begins: word times count from here)
+        self.committed = []                                  # (the live words so far: [(space before, unit, time)])
+        self.prev = None                                     # (the last pass's units, compared: unit_key)
+        self.times = []
         self.text = ''
         self.speech = 0.0
         self.next = getattr(models, 'every', ROLL_EVERY)
@@ -316,10 +402,34 @@ class RollingLine:
         self.lid_cache = {}
 
     def _pass(self, audio):
+        """(text, [unit times], seconds)"""
         if self.lang == 'auto':
-            text, self.langs, took = transcribe_mixed(self.models, audio, self.fallback, self.lid_cache, self.segs)
-            return text, took
-        return self.models.offline(self.model, audio)
+            times = []
+            text, self.langs, took = transcribe_mixed(self.models, audio, self.fallback, self.lid_cache, self.segs, times)
+            return tidy(text), times, took
+        return self.models.offline_timed(self.model, audio)
+
+    def _commit(self, text, times):
+        """the live words: only units two passes in a row agree on, never the last one (it may be cut off), and
+        once shown never taken back - the bubble fills chunk by chunk (LocalAgreement). True if it grew."""
+        us = units(text)
+        keys = [unit_key(u) for _, u in us]
+        grew = False
+        if self.prev is not None and len(times) == len(us):
+            k = 0
+            while k < min(len(keys), len(self.prev)) and keys[k] == self.prev[k]:
+                k += 1
+            k = min(k, len(us) - 1)
+            for i in range(len(self.committed), k):
+                start, u = us[i]
+                end = us[i - 1][0] + len(us[i - 1][1]) if i > 0 else start
+                sep = text[end:start] if i > 0 else ''
+                if i > 0 and not sep and not (_wide(u[0]) or _wide(us[i - 1][1][-1])):
+                    sep = ' '                                # (two units that were apart stay apart)
+                self.committed.append((sep, u, times[i]))
+                grew = True
+        self.prev = keys
+        return grew
 
     def feed(self, x):
         self.audio.append(x)
@@ -327,23 +437,22 @@ class RollingLine:
         if not self.live or self.speech < self.next:            # (live words off: only the finished line)
             return None
         every = getattr(self.models, 'every', ROLL_EVERY)
-        text, took = self._pass(np.concatenate(self.audio))
+        text, times, took = self._pass(np.concatenate(self.audio))
         if took > ROLL_SLOW * every and every < ROLL_MAX:         # (this PC is slow for it: pass less often)
             self.models.every = every = min(ROLL_MAX, every * 2)
             self.models.log('live words every %.0f s (a pass took %.2f s)' % (every, took))
         self.next = self.speech + every
         self.compute += took
         self.passes += 1
-        text = tidy(text)
-        if text and text != self.text:
-            self.text = text
-            return text
+        if text and self._commit(text, times):
+            self.text = ''.join(sep + u for sep, u, _ in self.committed)
+            self.times = [t for _, _, t in self.committed]
+            return self.text
         return None
 
     def finish(self):
         t0 = time.perf_counter()
-        text, took = self._pass(np.concatenate(self.audio + [np.zeros(int(RATE * 0.2), np.float32)]))
-        text = tidy(text)
+        text, times, took = self._pass(np.concatenate(self.audio + [np.zeros(int(RATE * 0.2), np.float32)]))
         used = '+'.join(dict.fromkeys(self.langs)) if self.lang == 'auto' else self.model
         main = self.lang                                      # (auto: the language it was mostly in)
         if self.lang == 'auto' and self.segs:
@@ -351,7 +460,7 @@ class RollingLine:
             for l, a, b in self.segs:
                 span[l] = span.get(l, 0.0) + b - a
             main = max(span, key=span.get)
-        return text, dict(live=self.text, used=used, lang=main, speech=self.speech, second_s=took,
+        return text, dict(live=self.text, used=used, lang=main, speech=self.speech, second_s=took, times=times, t0=self.t0,
                           finish_s=time.perf_counter() - t0, live_cpu=self.compute, passes=self.passes)
 
 
@@ -368,10 +477,12 @@ def low_priority():
 
 
 class Listener:
-    """the microphone's audio in (16 kHz float32, any block size), lines out: on_live(utt, words) while the
-    player talks, on_final(utt, text, info) after (text may be '': nothing made out)"""
-    def __init__(self, on_live, on_final, threads=4, log=print, models=None, live=True):
+    """the microphone's audio in (16 kHz float32, any block size), lines out: on_live(utt, words, info) while the
+    player talks (only ever growing; info: times = each unit's start, s from t0 = when the line's audio began,
+    time.perf_counter()), on_final(utt, text, info) after (text may be '': nothing made out; info has times, t0)"""
+    def __init__(self, on_live, on_final, threads=4, log=print, models=None, live=True, on_start=None):
         self.on_live, self.on_final, self.log = on_live, on_final, log
+        self.on_start = on_start                     # (on_start(utt): the speech detector heard a line begin - at once)
         self.live = live                             # (False: no live words, only the finished line - less CPU)
         self.models = models or Models(threads, log)
         self.vad, self.win = self.models.vad()
@@ -403,7 +514,7 @@ class Listener:
         if self.line is not None:
             words = self.line.feed(x)
             if words is not None:
-                self.on_live(self.utt, words)
+                self.on_live(self.utt, words, dict(times=list(self.line.times), t0=self.line.t0))
         self.pending = np.concatenate([self.pending, x])
         while len(self.pending) >= self.win:
             w, self.pending = self.pending[:self.win], self.pending[self.win:]
@@ -411,6 +522,8 @@ class Listener:
             if self.line is None and self.vad.is_speech_detected():
                 self.utt += 1
                 self.line = RollingLine(self.models, self.utt, self.lang, self.ring.copy(), fallback=self.last_lang, live=self.live)
+                if self.on_start:
+                    self.on_start(self.utt)
             while not self.vad.empty():                   # (a finished segment: the line ends)
                 self.vad.pop()
                 self.end()
