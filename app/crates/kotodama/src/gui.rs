@@ -656,37 +656,6 @@ fn dark_title_bar(frame: &eframe::Frame) {
     let _ = frame;
 }
 
-/// Windows: the title bar's and the taskbar's icons from the exe's own icon (its 16-32 px drawings, at this display's
-/// scale) - the window icon handed to the window system is one picture, which Windows shrinks badly.
-fn window_icons(frame: &eframe::Frame) {
-    #[cfg(windows)]
-    {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            LoadImageW, SendMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, WM_SETICON,
-        };
-        let Ok(h) = frame.window_handle() else { return };
-        let RawWindowHandle::Win32(w) = h.as_raw() else { return };
-        let hwnd = w.hwnd.get() as *mut std::ffi::c_void;
-        unsafe {
-            let dpi = GetDpiForWindow(hwnd).max(96) as i32;
-            let module = GetModuleHandleW(std::ptr::null());
-            // (resource 1: the icon build.rs puts into the exe - kotodama.ico, every size)
-            for (which, base) in [(ICON_SMALL, 16), (ICON_BIG, 32)] {
-                let size = base * dpi / 96;
-                let icon = LoadImageW(module, 1 as *const u16, IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
-                if !icon.is_null() {
-                    SendMessageW(hwnd, WM_SETICON, which as usize, icon as isize);
-                }
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    let _ = frame;
-}
-
 /// Opens a web page or a file with the system's program for it.
 fn open_url(target: &str) {
     #[cfg(windows)]
@@ -736,7 +705,6 @@ impl eframe::App for App {
             // (the dark title bar: asked once the window exists)
             ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
             dark_title_bar(frame);
-            window_icons(frame);
             self.dressed = true;
         }
         egui::Panel::bottom("footer")

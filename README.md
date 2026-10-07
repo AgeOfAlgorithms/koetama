@@ -16,6 +16,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f59e0b" alt="MIT license"></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" width="640" alt="Kotodama's window: connected to Teardown, English and Japanese picked, the speech models loaded">
+</p>
+
 Kotodama ("word spirit" in Japanese) runs next to your game. It plays the other players' voices placed where they
 stand: louder when close, from their side, muffled behind walls. It also writes what you say as you say it, so the
 game can show your words in speech bubbles and a chat history. A spoken line can even open a door.

@@ -68,8 +68,9 @@ def main():
     frames = [(small if s <= 32 else big).resize((s, s), Image.LANCZOS) for s in sizes]
     frames[-1].save(os.path.join(HERE, 'kotodama.ico'), sizes=[(s, s) for s in sizes], append_images=frames[:-1])
     big.resize((256, 256), Image.LANCZOS).save(os.path.join(HERE, 'kotodama-256.png'))
-    # (the window's own icon, built into the program as raw pixels: 128 x 128 RGBA, no image decoder needed)
-    open(os.path.join(HERE, 'kotodama-128.rgba'), 'wb').write(big.resize((128, 128), Image.LANCZOS).convert('RGBA').tobytes())
+    # (the window's own icon, built into the program as raw pixels: 128 x 128 RGBA, no image decoder needed. The SMALL
+    #  design: Windows shows it at 16-32 px - the title bar, the taskbar - shrunk from this by eframe)
+    open(os.path.join(HERE, 'kotodama-128.rgba'), 'wb').write(small.resize((128, 128), Image.LANCZOS).convert('RGBA').tobytes())
     big.resize((512, 512), Image.LANCZOS).save(os.path.join(HERE, 'kotodama-512.png'))
     preview = Image.new('RGBA', (16 + 24 + 32 + 48 + 64 + 128 + 256 + 8 * 12, 280), (0x1a, 0x15, 0x15, 255))
     x = 12
