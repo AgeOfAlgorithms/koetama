@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="56" viewBox="0 0 220 56" role="img" aria-label="Download for Linux and Steam Deck">
+  <rect x="1" y="1" width="218" height="54" rx="13" fill="#0b0909" stroke="#f26d2a" stroke-width="2"/>
+  <g fill="none" stroke="#fdba74" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M30 17 v18"/>
+    <path d="M22 28 l8 8 l8 -8"/>
+    <path d="M20 40 h20"/>
+  </g>
+  <text x="54" y="27" fill="#fdba74" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700">Linux / Steam Deck</text>
+  <text x="54" y="44" fill="#a89896" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="12">Kotodama-linux.tar.gz</text>
+</svg>

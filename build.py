@@ -85,6 +85,14 @@ def inno(ver):
     return os.path.join(DIST, '%s-Setup-%s.exe' % (NAME, ver))
 
 
+def stable(path, name):
+    """a copy under a name without the version: .../releases/latest/download/<name> always gives the newest
+    (the README's buttons, the Workshop page)"""
+    dest = os.path.join(DIST, name)
+    shutil.copy2(path, dest)
+    return dest
+
+
 def archive(ver):
     """the Linux (and other) release: the folder as a .tar.gz (the libraries next to the program: it finds them there)"""
     plat = 'linux' if sys.platform.startswith('linux') else sys.platform
@@ -116,9 +124,10 @@ def main():
     if WIN and not args.no_installer:
         inst = inno(ver)
         if inst:
-            out.append(inst)
+            out += [inst, stable(inst, '%s-Setup.exe' % NAME)]
     if not WIN:
-        out.append(archive(ver))
+        tar = archive(ver)
+        out += [tar, stable(tar, '%s-linux.tar.gz' % NAME)]
     if out:
         print('wrote', sums(out))
     size = sum(os.path.getsize(p) for p in glob.glob(os.path.join(APP, '**', '*'), recursive=True) if os.path.isfile(p))

@@ -79,14 +79,14 @@ jobs:
         with:
           name: kotodama-windows
           path: |
-            dist/Kotodama-Setup-*.exe
+            dist/Kotodama-Setup*.exe
             dist/SHA256SUMS.txt
       - name: Draft release (a tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: dist/Kotodama-Setup-*.exe
+          files: dist/Kotodama-Setup*.exe
 
   linux:
     runs-on: ubuntu-22.04
@@ -131,14 +131,14 @@ jobs:
         with:
           name: kotodama-linux
           path: |
-            dist/Kotodama-*-linux.tar.gz
+            dist/Kotodama*linux.tar.gz
             dist/SHA256SUMS.txt
       - name: Draft release (a tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: dist/Kotodama-*-linux.tar.gz
+          files: dist/Kotodama*linux.tar.gz
 
   sums:
     # one SHA256SUMS.txt for the release, from both builds
@@ -152,7 +152,7 @@ jobs:
       - name: SHA256SUMS.txt
         run: |
           cd art
-          sha256sum kotodama-windows/Kotodama-Setup-*.exe kotodama-linux/Kotodama-*-linux.tar.gz | sed 's#  kotodama-[a-z]*/#  #' > ../SHA256SUMS.txt
+          sha256sum kotodama-windows/Kotodama-Setup*.exe kotodama-linux/Kotodama*linux.tar.gz | sed 's#  kotodama-[a-z]*/#  #' > ../SHA256SUMS.txt
           cat ../SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:

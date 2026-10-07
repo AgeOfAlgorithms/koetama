@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 /// The releases page (the newest).
-pub const PAGE: &str = "https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/releases/latest";
+pub const PAGE: &str = "https://github.com/AgeOfAlgorithms/kotodama/releases/latest";
 /// What GitHub's API answers in.
 pub const ACCEPT: &str = "application/vnd.github+json";
 

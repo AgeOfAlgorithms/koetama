@@ -151,7 +151,7 @@ def spdx_ok(expr):
 
 def main():
     rule = '=' * 100
-    L = ['THIRD-PARTY NOTICES: Kotodama (proximity-voice-chat-STT-engine)',
+    L = ['THIRD-PARTY NOTICES: Kotodama (github.com/AgeOfAlgorithms/kotodama)',
          '(written by engine/make_notices.py on %s; do not edit by hand)' % time.strftime('%Y-%m-%d'), '',
          'Kotodama downloads the speech models below the first time it needs them (the language detector ships with it) '
          'and runs them on this computer. It is built from the libraries below. Each is listed with its authors, its '

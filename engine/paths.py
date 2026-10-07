@@ -5,7 +5,7 @@ import sys
 APP_NAME = 'Kotodama'
 APP_ID = 'kotodama'
 VERSION = '0.1.0'
-REPO = 'AgeOfAlgorithms/proximity-voice-chat-STT-engine'      # (GitHub: releases, updates)
+REPO = 'AgeOfAlgorithms/kotodama'      # (GitHub: releases, updates)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, 'frozen', False)) or '__compiled__' in globals()   # (a packaged build: Nuitka / PyInstaller)

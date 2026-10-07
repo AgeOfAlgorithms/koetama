@@ -5,7 +5,7 @@ pub const APP_NAME: &str = "Kotodama";
 pub const APP_ID: &str = "kotodama";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// GitHub: releases, updates
-pub const REPO: &str = "AgeOfAlgorithms/proximity-voice-chat-STT-engine";
+pub const REPO: &str = "AgeOfAlgorithms/kotodama";
 
 /// This user's Kotodama folder: settings, downloaded models, the test voices.
 pub fn data_dir() -> PathBuf {

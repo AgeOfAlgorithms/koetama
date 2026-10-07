@@ -10,8 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/releases"><img src="https://img.shields.io/github/v/release/AgeOfAlgorithms/proximity-voice-chat-STT-engine?include_prereleases&label=release&color=f26d2a" alt="Release"></a>
-  <a href="https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/actions/workflows/build.yml"><img src="https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/AgeOfAlgorithms/kotodama/releases/latest/download/Kotodama-Setup.exe"><img src="docs/download-windows.svg" height="56" alt="Download for Windows"></a>
+  &nbsp;
+  <a href="https://github.com/AgeOfAlgorithms/kotodama/releases/latest/download/Kotodama-linux.tar.gz"><img src="docs/download-linux.svg" height="56" alt="Download for Linux / Steam Deck"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/AgeOfAlgorithms/kotodama/releases"><img src="https://img.shields.io/github/v/release/AgeOfAlgorithms/kotodama?include_prereleases&label=release&color=f26d2a" alt="Release"></a>
+  <a href="https://github.com/AgeOfAlgorithms/kotodama/actions/workflows/build.yml"><img src="https://github.com/AgeOfAlgorithms/kotodama/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3a2c2b" alt="Windows | Linux">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f59e0b" alt="MIT license"></a>
 </p>
@@ -41,11 +47,11 @@ game can show your words in speech bubbles and a chat history. A spoken line can
 
 ## Install
 
-**Windows:** download `Kotodama-Setup-<version>.exe` from
-[Releases](https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/releases) and run it. It installs for
+**Windows:** download [`Kotodama-Setup.exe`](https://github.com/AgeOfAlgorithms/kotodama/releases/latest/download/Kotodama-Setup.exe)
+(always the newest version; every version is on [Releases](https://github.com/AgeOfAlgorithms/kotodama/releases)) and run it. It installs for
 your user only, with no administrator rights. Then start Kotodama, pick your game mod and start the game.
 
-**Linux / Steam Deck:** download `Kotodama-<version>-linux.tar.gz`, unpack it and run `Kotodama/Kotodama`. Games
+**Linux / Steam Deck:** download [`Kotodama-linux.tar.gz`](https://github.com/AgeOfAlgorithms/kotodama/releases/latest/download/Kotodama-linux.tar.gz), unpack it and run `Kotodama/Kotodama`. Games
 running through Proton are found inside their Proton folder.
 
 The first time you speak, Kotodama downloads the speech model for your language once, showing its progress:

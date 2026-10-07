@@ -10,7 +10,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 authors = ["AgeOfAlgorithms"]
-repository = "https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine"
+repository = "https://github.com/AgeOfAlgorithms/kotodama"
 
 [workspace.dependencies]
 kd-common = { path = "crates/kd-common" }

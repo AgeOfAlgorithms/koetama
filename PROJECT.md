@@ -1,4 +1,4 @@
-# Kotodama (repo proximity-voice-chat-STT-engine)
+# Kotodama (repo github.com/AgeOfAlgorithms/kotodama; until 2026-10-07 proximity-voice-chat-STT-engine)
 
 **Kotodama** (the user's pick, 2026-10-06; Japanese "word spirit") is the app behind proximity voice chat in games:
 it plays the other players' voices (mixed by the game's distances, directions and walls) and turns what the
