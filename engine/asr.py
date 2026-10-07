@@ -249,6 +249,14 @@ def lid_dir():
     raise RuntimeError('the language detector (%s.onnx) is missing: build it with engine/export_lid.py' % LID_NAME)
 
 
+_LID_LABELS = []   # (the detector's 107 labels, once it is loaded)
+
+
+def detector_label(lang):
+    """the detector's label for a language (Cantonese is found as Chinese; SenseVoice writes both)"""
+    return 'zh' if lang == 'yue' else lang
+
+
 def _lid_load(models):
     import onnxruntime as ort
     d = lid_dir()
@@ -256,15 +264,19 @@ def _lid_load(models):
     so.intra_op_num_threads = models.threads
     sess = ort.InferenceSession(os.path.join(d, LID_NAME + '.onnx'), so, providers=['CPUExecutionProvider'])
     labels = json.load(open(os.path.join(d, LID_NAME + '.json'), encoding='utf-8'))['labels']
+    _LID_LABELS[:] = labels
     return sess, [labels.index(l) for l in MIXED_LANGS]
 
 
 Models._load_langid = _lid_load
 
 
-def lid_probs(models, x):
-    """the language detector's probabilities over MIXED_LANGS for a stretch of audio"""
+def lid_probs(models, x, langs=None):
+    """the language detector's probabilities over MIXED_LANGS (or langs: the ones a player speaks) for a stretch of
+    audio"""
     sess, idx = models.get('langid')
+    if langs is not None:
+        idx = [_LID_LABELS.index(detector_label(l)) for l in langs]
     if len(x) < 1600:
         x = np.concatenate([x, np.zeros(1600 - len(x), np.float32)])
     z = sess.run(None, {'audio': x[None].astype(np.float32)})[0][0][idx]
@@ -283,7 +295,7 @@ def quiet_point(x, t, span=0.3):
     return bt
 
 
-def segments(models, x, fallback='en', cache=None):
+def segments(models, x, fallback='en', cache=None, langs=None):
     """[(lang, start s, end s)] of a line that may change language. The detector on LID_WIN s windows every LID_HOP s;
     each LID_HOP s frame scores each language by the mean log-probability of the windows covering it. Quiet frames
     (LID_QUIET) and windows mostly quiet do not vote: before this, the quiet around a word (and the helper's 1 s of
@@ -296,9 +308,13 @@ def segments(models, x, fallback='en', cache=None):
     plain 3-frame vote and than AmberNet had them; mixed lines 11 % words wrong against AmberNet's 7.)
     (Cut by LANGUAGE, not by the model that writes it: Parakeet decides one language per clip, so English and German
     handed to it as one piece lose one of them - grouping by model tried 2026-10-05: 17 % words wrong against 7 %.)
-    cache: {window start: probabilities} kept by a growing line - its earlier windows never change."""
+    cache: {window start: probabilities} kept by a growing line - its earlier windows never change.
+    langs: the candidate languages (the ones a player speaks: fewer candidates, fewer wrong stretches); None:
+    MIXED_LANGS."""
+    names = list(langs) if langs is not None else MIXED_LANGS
+    probs = (lambda w: lid_probs(models, w)) if langs is None else (lambda w: lid_probs(models, w, names))
     dur = len(x) / RATE
-    L = len(MIXED_LANGS)
+    L = len(names)
     hop = int(LID_HOP * RATE)
     n = max(1, int(np.ceil(len(x) / hop)))
     db = np.array([10 * np.log10(np.mean(x[i * hop:(i + 1) * hop] ** 2) + 1e-12) if len(x[i * hop:(i + 1) * hop]) else -120.0
@@ -308,8 +324,8 @@ def segments(models, x, fallback='en', cache=None):
         return [(fallback, 0.0, dur)]
     v0, v1 = np.flatnonzero(voiced)[[0, -1]]
     if (v1 + 1 - v0) * LID_HOP < LID_WIN + LID_HOP * 2:   # (short speech: one stretch)
-        p = lid_probs(models, x[v0 * hop:(v1 + 1) * hop])
-        lang = MIXED_LANGS[int(p.argmax())] if p.max() > LID_SURE else fallback
+        p = probs(x[v0 * hop:(v1 + 1) * hop])
+        lang = names[int(p.argmax())] if p.max() > LID_SURE else fallback
         return [(lang, 0.0, dur)]
     score, cnt = np.zeros((n, L)), np.zeros(n)
     t = 0.0
@@ -320,7 +336,7 @@ def segments(models, x, fallback='en', cache=None):
             if cache is not None and k in cache:
                 p = cache[k]
             else:
-                p = lid_probs(models, x[int(t * RATE):int((t + LID_WIN) * RATE)])
+                p = probs(x[int(t * RATE):int((t + LID_WIN) * RATE)])
                 if cache is not None:
                     cache[k] = p
             score[f0:f1] += np.log(p + 1e-9)
@@ -340,7 +356,7 @@ def segments(models, x, fallback='en', cache=None):
         lab[f - 1] = back[f, lab[f]]
     segs = []
     for f in range(n):
-        l = MIXED_LANGS[lab[f]]
+        l = names[lab[f]]
         if segs and segs[-1][0] == l:
             segs[-1][2] = (f + 1) * LID_HOP
         else:
@@ -367,12 +383,12 @@ def segments(models, x, fallback='en', cache=None):
     return [tuple(s) for s in segs]
 
 
-def transcribe_mixed(models, x, fallback='en', cache=None, segs_out=None, times_out=None):
+def transcribe_mixed(models, x, fallback='en', cache=None, segs_out=None, times_out=None, langs=None):
     """a line in any of MIXED_LANGS, even several: cut into stretches, each written by its language's model.
     -> (text, [langs], seconds); segs_out (a list): gets the stretches [(lang, start, end)]; times_out (a list):
     the start time of each unit of the text"""
     t0 = time.perf_counter()
-    segs = segments(models, x, fallback, cache)
+    segs = segments(models, x, fallback, cache, langs)
     if segs_out is not None:
         segs_out[:] = segs
     parts, times = [], []

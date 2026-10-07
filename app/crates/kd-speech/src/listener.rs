@@ -1,7 +1,7 @@
 //! The microphone's audio in, lines out (asr.py Listener, low_priority).
 use crate::models::Models;
 use crate::rolling::{FinalInfo, LineInfo, RollingLine};
-use crate::{lock, roll_model, MAX_LINE, MIXED_LANGS, PREROLL, RATE};
+use crate::{lock, models_for, plan, roll_model, MAX_LINE, MIXED_LANGS, PREROLL, RATE};
 use kd_common::Log;
 use sherpa_onnx::VoiceActivityDetector;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,6 +42,7 @@ struct Inner {
     models: Arc<Models>,
     log: Log,
     lang: Mutex<String>,
+    cands: Mutex<Vec<String>>, // ("auto": the languages it chooses between)
     live: AtomicBool, // (false: no live words, only the finished line - less CPU)
     talking: AtomicBool,
     state: Mutex<State>,
@@ -68,6 +69,7 @@ impl Listener {
             models,
             log,
             lang: Mutex::new("en".into()),
+            cands: Mutex::new(MIXED_LANGS.iter().map(|l| l.to_string()).collect()),
             live: AtomicBool::new(live),
             talking: AtomicBool::new(false),
             state: Mutex::new(State {
@@ -86,13 +88,29 @@ impl Listener {
         })))
     }
 
-    /// The game's "Language I speak" ("auto": found per stretch); "" -> en. The next line uses it.
+    /// The game's "Language I speak" ("auto": found per stretch among MIXED_LANGS); "" -> en. The next line uses it.
     pub fn set_language(&self, lang: &str) {
-        *lock(&self.0.lang) = if lang.is_empty() { "en".into() } else { lang.to_string() };
+        let lang = if lang.is_empty() { "en".to_string() } else { lang.to_string() };
+        *lock(&self.0.cands) =
+            if lang == "auto" { MIXED_LANGS.iter().map(|l| l.to_string()).collect() } else { vec![lang.clone()] };
+        *lock(&self.0.lang) = lang;
+    }
+
+    /// The languages the player speaks: one - that language; several - "auto" among exactly them (fewer candidates,
+    /// fewer wrong stretches); none - English. The next line uses it.
+    pub fn set_languages(&self, langs: &[String]) {
+        let (lang, cands) = plan(langs);
+        *lock(&self.0.cands) = cands;
+        *lock(&self.0.lang) = lang;
     }
 
     pub fn language(&self) -> String {
         lock(&self.0.lang).clone()
+    }
+
+    /// The languages "auto" chooses between (one language: just it).
+    pub fn languages(&self) -> Vec<String> {
+        lock(&self.0.cands).clone()
     }
 
     /// Live words on or off (off: only the finished line - less CPU); the next line uses it.
@@ -101,23 +119,31 @@ impl Listener {
     }
 
     /// Load the models a language needs now (the first line would wait for them otherwise). Blocking.
+    /// None: what the listener's languages need - and the models they do not need are let go (their memory freed).
     pub fn warm(&self, lang: Option<&str>) -> Result<(), String> {
-        let lang = lang.map(str::to_string).unwrap_or_else(|| self.language());
-        if lang == "auto" {
-            // (mixed: the detector and every language's model)
-            let mut names = vec!["langid"];
-            for l in MIXED_LANGS {
-                let m = roll_model(l);
-                if !names.contains(&m) {
-                    names.push(m);
+        let Some(lang) = lang else {
+            let lang = self.language();
+            let cands = self.languages();
+            let need = if lang == "auto" { models_for(&cands) } else { vec![roll_model(&lang)] };
+            for name in self.0.models.loaded() {
+                if !need.contains(&name.as_str()) {
+                    self.0.models.unload(&name);
                 }
             }
-            for name in names {
+            for name in need {
+                self.0.models.load(name)?;
+            }
+            return Ok(());
+        };
+        if lang == "auto" {
+            // (mixed: the detector and every language's model)
+            let all: Vec<String> = MIXED_LANGS.iter().map(|l| l.to_string()).collect();
+            for name in models_for(&all) {
                 self.0.models.load(name)?;
             }
             Ok(())
         } else {
-            self.0.models.load(roll_model(&lang))
+            self.0.models.load(roll_model(lang))
         }
     }
 
@@ -244,8 +270,13 @@ impl Inner {
             if st.line.is_none() && st.vad.detected() {
                 st.utt += 1;
                 let lang = lock(&self.lang).clone();
+                let cands = lock(&self.cands).clone();
                 let live = self.live.load(Ordering::Relaxed);
-                st.line = Some(RollingLine::new(self.models.clone(), st.utt, &lang, st.ring.clone(), &st.last_lang, live));
+                // (a short line's fallback: the language of the line before, if it is one of these)
+                let fallback = if cands.contains(&st.last_lang) { st.last_lang.clone() } else { cands[0].clone() };
+                st.line = Some(
+                    RollingLine::new(self.models.clone(), st.utt, &lang, st.ring.clone(), &fallback, live).with_candidates(&cands),
+                );
                 self.talking.store(true, Ordering::Relaxed);
                 (self.cb.on_start)(st.utt);
             }
@@ -266,7 +297,7 @@ impl Inner {
         self.talking.store(false, Ordering::Relaxed);
         match line.finish() {
             Ok((text, info)) => {
-                if !text.is_empty() && MIXED_LANGS.contains(&info.lang.as_str()) {
+                if !text.is_empty() && lock(&self.cands).contains(&info.lang) {
                     st.last_lang = info.lang.clone();
                 }
                 (self.cb.on_final)(line.utt, &text, &info);

@@ -5,7 +5,9 @@
 pub fn single_instance() -> bool {
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
-    let name: Vec<u16> = format!("Local\\{}\0", kd_common::paths::APP_NAME).encode_utf16().collect();
+    let name: Vec<u16> = format!("Local\\{}\0", kd_common::paths::APP_NAME)
+        .encode_utf16()
+        .collect();
     unsafe {
         let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         // (the handle stays open until the program ends, or release(): that is the lock)
@@ -24,7 +26,9 @@ static LOCK_FILE: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new(
 pub fn single_instance() -> bool {
     let dir = kd_common::paths::data_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let Ok(f) = std::fs::File::create(dir.join("lock")) else { return true };
+    let Ok(f) = std::fs::File::create(dir.join("lock")) else {
+        return true;
+    };
     match f.try_lock() {
         Ok(()) => {
             let _ = LOCK_FILE.set(f);

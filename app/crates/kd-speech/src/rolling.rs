@@ -1,7 +1,7 @@
 //! One line while the player talks (asr.py RollingLine).
 use crate::models::Models;
-use crate::stitch::transcribe_mixed;
-use crate::{roll_model, RATE, ROLL_MAX, ROLL_SLOW};
+use crate::stitch::transcribe_mixed_in;
+use crate::{roll_model, MIXED_LANGS, RATE, ROLL_MAX, ROLL_SLOW};
 use kd_common::text::{is_wide, tidy, unit_key, units};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,6 +64,8 @@ pub struct RollingLine {
     langs: Vec<String>,
     segs: Vec<(String, f64, f64)>,
     lid_cache: HashMap<i64, Vec<f64>>,
+    /// lang "auto": the languages it may be in (the ones the player speaks; MIXED_LANGS if not told)
+    cands: Vec<String>,
 }
 
 impl RollingLine {
@@ -91,7 +93,16 @@ impl RollingLine {
             langs: vec![lang.to_string()],
             segs: Vec::new(),
             lid_cache: HashMap::new(),
+            cands: MIXED_LANGS.iter().map(|l| l.to_string()).collect(),
         }
+    }
+
+    /// The line's candidate languages for "auto" (the ones the player speaks).
+    pub fn with_candidates(mut self, cands: &[String]) -> RollingLine {
+        if !cands.is_empty() {
+            self.cands = cands.to_vec();
+        }
+        self
     }
 
     /// A line with no audio and no models loaded (the LocalAgreement tests: commit only).
@@ -102,7 +113,7 @@ impl RollingLine {
     /// (text, [unit times], seconds)
     fn pass(&mut self, audio: &[f32]) -> Result<(String, Vec<f64>, f64), String> {
         if self.lang == "auto" {
-            let m = transcribe_mixed(&self.models, audio, &self.fallback, Some(&mut self.lid_cache))?;
+            let m = transcribe_mixed_in(&self.models, &self.cands, audio, &self.fallback, Some(&mut self.lid_cache))?;
             self.langs = m.langs;
             self.segs = m.segs;
             return Ok((tidy(&m.text), m.times, m.took));

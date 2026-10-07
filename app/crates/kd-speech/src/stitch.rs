@@ -6,7 +6,7 @@ use std::time::Instant;
 
 const SR: f64 = RATE as f64;
 
-/// The language detector segments() asks: a stretch of audio -> probabilities over MIXED_LANGS.
+/// The language detector segments() asks: a stretch of audio -> probabilities over the candidate languages.
 pub type Probs<'a> = dyn FnMut(&[f32]) -> Result<Vec<f64>, String> + 'a;
 
 /// mean(x²), empty: None (numpy: nan, which never compares true)
@@ -65,15 +65,31 @@ pub fn quiet_point(x: &[f32], t: f64, span: f64) -> f64 {
 /// (Cut by LANGUAGE, not by the model that writes it: Parakeet decides one language per clip, so English and German
 /// handed to it as one piece lose one of them - grouping by model tried 2026-10-05: 17 % words wrong against 7 %.)
 /// cache: {window index k (its start / LID_HOP): probabilities} kept by a growing line - its earlier windows never
-/// change. probs: the detector (Models::lid_probs; tests: a stand-in).
+/// change. probs: the detector (Models::lid_probs; tests: a stand-in). Among MIXED_LANGS; segments_in: among the
+/// languages a player speaks.
 pub fn segments(
+    x: &[f32],
+    fallback: &str,
+    cache: Option<&mut HashMap<i64, Vec<f64>>>,
+    probs: &mut Probs,
+) -> Result<Vec<(String, f64, f64)>, String> {
+    let langs: Vec<String> = MIXED_LANGS.iter().map(|l| l.to_string()).collect();
+    segments_in(&langs, x, fallback, cache, probs)
+}
+
+/// segments() among these candidate languages (probs gives one probability per candidate, in this order).
+pub fn segments_in(
+    langs: &[String],
     x: &[f32],
     fallback: &str,
     mut cache: Option<&mut HashMap<i64, Vec<f64>>>,
     probs: &mut Probs,
 ) -> Result<Vec<(String, f64, f64)>, String> {
     let dur = x.len() as f64 / SR;
-    let nl = MIXED_LANGS.len();
+    let nl = langs.len();
+    if nl == 0 {
+        return Ok(vec![(fallback.to_string(), 0.0, dur)]);
+    }
     let hop = (LID_HOP * SR) as usize;
     let n = x.len().div_ceil(hop).max(1);
     let db: Vec<f64> = (0..n)
@@ -91,8 +107,11 @@ pub fn segments(
     if (v1 + 1 - v0) as f64 * LID_HOP < LID_WIN + LID_HOP * 2.0 {
         // (short speech: one stretch)
         let p = probs(slice(x, v0 * hop, (v1 + 1) * hop))?;
+        if p.len() != nl {
+            return Err(format!("the language detector gave {} probabilities, not {nl}", p.len()));
+        }
         let best = argmax(&p);
-        let lang = if p[best] > LID_SURE { MIXED_LANGS[best] } else { fallback };
+        let lang = if p[best] > LID_SURE { langs[best].as_str() } else { fallback };
         return Ok(vec![(lang.to_string(), 0.0, dur)]);
     }
     let mut score = vec![vec![0.0f64; nl]; n];
@@ -184,7 +203,7 @@ pub fn segments(
         segs[i - 1].2 = cut;
         segs[i].1 = cut;
     }
-    Ok(segs.into_iter().map(|(l, a, b)| (MIXED_LANGS[l].to_string(), a, b)).collect())
+    Ok(segs.into_iter().map(|(l, a, b)| (langs[l].clone(), a, b)).collect())
 }
 
 /// A line in mixed languages: the text, each stretch's language, the stretches, each unit's start time, the seconds.
@@ -204,8 +223,20 @@ pub fn transcribe_mixed(
     fallback: &str,
     cache: Option<&mut HashMap<i64, Vec<f64>>>,
 ) -> Result<Mixed, String> {
+    let langs: Vec<String> = MIXED_LANGS.iter().map(|l| l.to_string()).collect();
+    transcribe_mixed_in(models, &langs, x, fallback, cache)
+}
+
+/// ... in any of these languages (the ones a player speaks).
+pub fn transcribe_mixed_in(
+    models: &Models,
+    langs: &[String],
+    x: &[f32],
+    fallback: &str,
+    cache: Option<&mut HashMap<i64, Vec<f64>>>,
+) -> Result<Mixed, String> {
     let t0 = Instant::now();
-    let segs = segments(x, fallback, cache, &mut |w: &[f32]| models.lid_probs(w))?;
+    let segs = segments_in(langs, x, fallback, cache, &mut |w: &[f32]| models.lid_probs_in(w, langs))?;
     let mut parts: Vec<String> = Vec::new();
     let mut times = Vec::new();
     for (lang, a, b) in &segs {

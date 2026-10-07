@@ -103,8 +103,15 @@ pub struct Models;  impl Models {
     pub fn offline_full(&self, name, audio: &[f32]) -> Result<(String, Vec<String>, Vec<f32>, f64), String>;
     pub fn offline_timed(&self, name, audio: &[f32], offset: f64) -> Result<(String, Vec<f64>, f64), String>;
     pub fn lid_probs(&self, x: &[f32]) -> Result<Vec<f64>, String>;    // over MIXED_LANGS
+    pub fn lid_probs_in(&self, x: &[f32], langs: &[String]) -> Result<Vec<f64>, String>;  // over the player's
+    pub fn unload(&self, name: &str) -> bool;  pub fn loaded(&self) -> Vec<String>;
+    pub fn state(&self, name: &str) -> ModelState;                    // NotLoaded | Downloading(f, done, total) | Loading | Loaded
     pub fn every(&self) -> f64;  pub fn set_every(&self, s: f64);       // the live-words interval (slow PC: longer)
 }
+pub struct Lang { code, name, english, tier: Tier }  pub enum Tier { Full, Soft, Weak }  pub const LANGS: [Lang; 29];
+pub fn plan(langs: &[String]) -> (String, Vec<String>);  pub fn models_for(langs: &[String]) -> Vec<&'static str>;
+pub const MODEL_INFO: [ModelInfo; 4];   // name, title, memory_mb (for the window)
+pub fn segments_in(langs: &[String], x, fallback, cache, probs) -> ...;   // segments among the player's languages
 pub fn segments(x: &[f32], fallback: &str, cache: Option<&mut HashMap<i64, Vec<f64>>>,
                 probs: &mut dyn FnMut(&[f32]) -> Result<Vec<f64>, String>) -> Result<Vec<(String, f64, f64)>, String>;
 pub fn quiet_point(x: &[f32], t: f64, span: f64) -> f64;
@@ -121,6 +128,8 @@ pub struct Callbacks { pub on_start: Box<dyn Fn(u32) + Send + Sync>,
 #[derive(Clone)] pub struct Listener;  impl Listener {                    // a handle (Arc inside)
     pub fn new(cb: Callbacks, models: Arc<Models>, live: bool) -> Result<Listener, String>;  // makes the VAD
     pub fn set_language(&self, lang: &str);  pub fn language(&self) -> String;  pub fn set_live(&self, on: bool);
+    pub fn set_languages(&self, langs: &[String]);  pub fn languages(&self) -> Vec<String>;   // the player's: one, or "auto" among them
+    // warm(None): load what the languages need, let go of the rest
     pub fn warm(&self, lang: Option<&str>) -> Result<(), String>;      // blocking: load what a language needs
     pub fn feed(&self, x: &[f32]);  pub fn flush(&self);               // synchronous (--transcribe, tests)
     pub fn push(&self, x: &[f32]);                                     // the mic callback: queued, dropped when far behind

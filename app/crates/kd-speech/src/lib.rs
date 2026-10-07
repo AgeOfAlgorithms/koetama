@@ -32,9 +32,9 @@ mod stitch;
 
 pub use listener::{low_priority, Callbacks, Listener, OnFinal, OnLive, OnStart};
 pub use mics::{Mic, PlaylistMicrophone, WavMicrophone};
-pub use models::{init_onnxruntime, lid_dir, Models};
+pub use models::{init_onnxruntime, lid_dir, ModelState, Models};
 pub use rolling::{FinalInfo, LineInfo, RollingLine};
-pub use stitch::{quiet_point, segments, transcribe_mixed, Mixed, Probs};
+pub use stitch::{quiet_point, segments, segments_in, transcribe_mixed, transcribe_mixed_in, Mixed, Probs};
 
 pub const RATE: u32 = 16000;
 /// s before the detected speech fed too
@@ -90,6 +90,133 @@ pub const ROLL_MODEL: [(&str, &str); 5] =
 /// The one model of a language in the rolling design: its own recogniser, else Parakeet v3.
 pub fn roll_model(lang: &str) -> &'static str {
     ROLL_MODEL.iter().find(|(l, _)| *l == lang).map(|(_, m)| *m).unwrap_or("parakeet")
+}
+
+/// How well a language is written (the benchmarks; the game's Voice page shows the same groups).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tier {
+    /// supported: the benchmarks' good tier, and Russian, Mandarin, Cantonese, Japanese, Korean
+    Full,
+    /// beta: usable, less accurate
+    Soft,
+    /// experimental: it works, but many words come out wrong
+    Weak,
+}
+
+impl Tier {
+    pub fn label(self) -> &'static str {
+        match self {
+            Tier::Full => "Fully supported",
+            Tier::Soft => "Soft support (beta: less accurate)",
+            Tier::Weak => "Weak support (experimental: many words come out wrong)",
+        }
+    }
+}
+
+/// A language a player can speak: its code, its own name, its English name, how well it is written.
+#[derive(Clone, Copy, Debug)]
+pub struct Lang {
+    pub code: &'static str,
+    pub name: &'static str,
+    pub english: &'static str,
+    pub tier: Tier,
+}
+
+const fn lang(code: &'static str, name: &'static str, english: &'static str, tier: Tier) -> Lang {
+    Lang { code, name, english, tier }
+}
+
+/// Every language Kotodama writes (the game's PC.VOICE_LANGS, without "auto": a player who picks several gets it).
+pub const LANGS: [Lang; 29] = [
+    lang("en", "English", "English", Tier::Full),
+    lang("es", "Español", "Spanish", Tier::Full),
+    lang("fr", "Français", "French", Tier::Full),
+    lang("de", "Deutsch", "German", Tier::Full),
+    lang("it", "Italiano", "Italian", Tier::Full),
+    lang("pt", "Português", "Portuguese", Tier::Full),
+    lang("nl", "Nederlands", "Dutch", Tier::Full),
+    lang("pl", "Polski", "Polish", Tier::Full),
+    lang("uk", "Українська", "Ukrainian", Tier::Full),
+    lang("ru", "Русский", "Russian", Tier::Full),
+    lang("zh", "中文 (普通话)", "Mandarin", Tier::Full),
+    lang("yue", "粵語", "Cantonese", Tier::Full),
+    lang("ja", "日本語", "Japanese", Tier::Full),
+    lang("ko", "한국어", "Korean", Tier::Full),
+    lang("cs", "Čeština", "Czech", Tier::Soft),
+    lang("sk", "Slovenčina", "Slovak", Tier::Soft),
+    lang("ro", "Română", "Romanian", Tier::Soft),
+    lang("hr", "Hrvatski", "Croatian", Tier::Soft),
+    lang("bg", "Български", "Bulgarian", Tier::Soft),
+    lang("fi", "Suomi", "Finnish", Tier::Soft),
+    lang("sv", "Svenska", "Swedish", Tier::Soft),
+    lang("hu", "Magyar", "Hungarian", Tier::Soft),
+    lang("da", "Dansk", "Danish", Tier::Weak),
+    lang("et", "Eesti", "Estonian", Tier::Weak),
+    lang("lv", "Latviešu", "Latvian", Tier::Weak),
+    lang("lt", "Lietuvių", "Lithuanian", Tier::Weak),
+    lang("sl", "Slovenščina", "Slovenian", Tier::Weak),
+    lang("el", "Ελληνικά", "Greek", Tier::Weak),
+    lang("mt", "Malti", "Maltese", Tier::Weak),
+];
+
+pub fn lang_info(code: &str) -> Option<&'static Lang> {
+    LANGS.iter().find(|l| l.code == code)
+}
+
+/// The language detector's label for a language (Cantonese is found as Chinese; SenseVoice writes both).
+pub fn detector_label(lang: &str) -> &str {
+    if lang == "yue" {
+        "zh"
+    } else {
+        lang
+    }
+}
+
+/// A model as the window shows it: its name, what it is for, about how much memory it takes when loaded (MB).
+#[derive(Clone, Copy, Debug)]
+pub struct ModelInfo {
+    pub name: &'static str,
+    pub title: &'static str,
+    pub memory_mb: u32,
+}
+
+pub const MODEL_INFO: [ModelInfo; 4] = [
+    ModelInfo { name: "parakeet", title: "Parakeet v3 (English and the other European languages)", memory_mb: 680 },
+    ModelInfo { name: "sensevoice", title: "SenseVoice (Mandarin, Cantonese, Japanese, Korean)", memory_mb: 260 },
+    ModelInfo { name: "gigaam", title: "GigaAM v3 (Russian)", memory_mb: 250 },
+    ModelInfo { name: "langid", title: "Language detector (when you speak several languages)", memory_mb: 100 },
+];
+
+/// The languages a player speaks -> how the listener runs: one language - that language; several - "auto" among
+/// them (the detector's candidates); none - English.
+pub fn plan(langs: &[String]) -> (String, Vec<String>) {
+    let mut cands: Vec<String> = Vec::new();
+    for l in langs {
+        if !l.is_empty() && l != "auto" && !cands.contains(l) {
+            cands.push(l.clone());
+        }
+    }
+    match cands.len() {
+        0 => ("en".into(), vec!["en".into()]),
+        1 => (cands[0].clone(), cands),
+        _ => ("auto".into(), cands),
+    }
+}
+
+/// The models a choice of languages needs: each language's own, and the detector for several.
+pub fn models_for(langs: &[String]) -> Vec<&'static str> {
+    let (lang, cands) = plan(langs);
+    let mut names: Vec<&'static str> = Vec::new();
+    if lang == "auto" {
+        names.push("langid");
+    }
+    for l in &cands {
+        let m = roll_model(l);
+        if !names.contains(&m) {
+            names.push(m);
+        }
+    }
+    names
 }
 
 // ---------------------------------------------------------------- mixed languages ("auto": the language decided per stretch)

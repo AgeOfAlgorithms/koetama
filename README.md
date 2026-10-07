@@ -41,14 +41,24 @@ runs through Proton; Kotodama finds its files inside Teardown's Proton folder.
 | Speech detection | Silero VAD v5 finds where a line starts and ends. |
 | Speech to text | The line so far is written again every second (the live words: only what two passes agree on, so they never jump back), then once more when you stop. Each language has its own model: Parakeet TDT 0.6B v3 (English, other European languages), GigaAM v3 (Russian), SenseVoice Small (Mandarin, Cantonese, Japanese, Korean). |
 | Word times | Each word's start time travels with the text, so a player who walks up mid-sentence sees only what was said after they arrived. |
-| "Auto" language | SpeechBrain's VoxLingua107 detector splits a line by language, and each stretch is written by its own model. A line can mix languages. |
+| Several languages | Pick every language you speak. With several, SpeechBrain's VoxLingua107 detector splits a line by language (choosing among exactly yours), and each stretch is written by its own model. A line can mix languages. |
 
 ## Languages
 
-| Support | Languages |
-|---|---|
-| Supported | English, Spanish, French, German, Italian, Portuguese, Dutch, Polish, Ukrainian, Russian, Mandarin, Cantonese, Japanese, Korean, and Auto |
-| Beta | Czech, Slovak, Romanian, Croatian, Bulgarian, Finnish, Swedish, Hungarian |
+In Kotodama's window, **Languages I speak** → **Choose...**: tick every language you speak. Kotodama loads only the
+speech models those need, and shows each model, whether it is loaded and about how much memory it takes. Fewer
+languages are lighter and more accurate. Until you choose, it follows the game's setting ("Language I speak").
+
+| Support | Languages | Model, memory |
+|---|---|---|
+| Fully supported | English, Spanish, French, German, Italian, Portuguese, Dutch, Polish, Ukrainian | Parakeet v3, ~0.7 GB |
+| | Russian | GigaAM v3, ~0.25 GB |
+| | Mandarin, Cantonese, Japanese, Korean | SenseVoice, ~0.26 GB |
+| Soft support (beta: less accurate) | Czech, Slovak, Romanian, Croatian, Bulgarian, Finnish, Swedish, Hungarian | Parakeet v3 |
+| Weak support (experimental: many words come out wrong) | Danish, Estonian, Latvian, Lithuanian, Slovenian, Greek, Maltese | Parakeet v3 |
+
+Several languages add the language detector (~0.1 GB). The first time a model is needed it downloads once; loading
+it takes 1.5 to 3.5 s.
 
 ## Run from source
 

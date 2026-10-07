@@ -7,7 +7,10 @@ use std::sync::Arc;
 fn candidates() -> Vec<(std::path::PathBuf, u32)> {
     let mut out = Vec::new();
     if cfg!(windows) {
-        let dir = std::env::var_os("WINDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into()).join("Fonts");
+        let dir = std::env::var_os("WINDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| "C:\\Windows".into())
+            .join("Fonts");
         // (YaHei has the Chinese characters and kana; Malgun Gothic the Hangul; SimSun if YaHei is missing)
         for (f, i) in [("msyh.ttc", 0), ("malgun.ttf", 0), ("simsun.ttc", 0)] {
             out.push((dir.join(f), i));
@@ -31,8 +34,13 @@ pub fn install(ctx: &eframe::egui::Context) {
     let mut defs = FontDefinitions::default();
     let mut added = 0;
     for (path, index) in candidates() {
-        let Ok(bytes) = std::fs::read(&path) else { continue };
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         let mut data = FontData::from_owned(bytes);
         data.index = index;
         defs.font_data.insert(name.clone(), Arc::new(data));

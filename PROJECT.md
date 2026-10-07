@@ -104,6 +104,12 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
   Listener end to end); the Python test_e2e.py passes against the Rust exe; selftest + installer cycle pass. Not yet:
   in-game with Teardown, Linux (CI builds it), a real update from one release to the next. Python 0.1 was never
   released: the first release is the Rust 0.2.
+- Languages (the user, 2026-10-06): the player ticks every language they speak in Kotodama's window (three tiers as
+  the mod's Voice page: full / soft (beta) / weak (experimental)); only their models load (the window lists each
+  model, loaded or not, ~memory), several = "auto" among exactly them (fewer candidates, fewer wrong stretches). None
+  ticked: the game's "Language I speak". A change waits 1.5 s to settle, then loads the new and unloads the rest.
+  Measured: en+ru 1.27 GB for the whole app (all 10 "auto" languages: ~1.5 GB). The mod's own language picker is
+  still there (whether to drop it: the user's call).
 - Idle memory of the window ~180 MB (measured with OpenGL; Windows now draws with wgpu). The detector ships with its
   weights stored as float16 (43 MB, was 86; the user's decision 2026-10-06, bench/lidquant.py: the same results; int8
   was REJECTED by the user - a third of the one-word callouts lost): 88 MB installed, a 52 MB installer.

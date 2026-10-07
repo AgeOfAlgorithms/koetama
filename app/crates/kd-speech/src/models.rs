@@ -1,5 +1,5 @@
 //! The models (asr.py Models, lid_dir, lid_probs): each loaded once, on first use (downloaded the first time).
-use crate::{lock, LID_NAME, MAX_LINE, MIXED_LANGS, MODELS, RATE, ROLL_EVERY, VAD_URL};
+use crate::{detector_label, lock, LID_NAME, MAX_LINE, MIXED_LANGS, MODELS, RATE, ROLL_EVERY, VAD_URL};
 use kd_common::text::{tidy, unit_times};
 use kd_common::{fetch, paths, Log};
 use sherpa_onnx::{
@@ -14,8 +14,18 @@ use std::time::Instant;
 /// A loaded model.
 enum Loaded {
     Asr(OfflineRecognizer),
-    /// the language detector: its session, and where each of MIXED_LANGS is among its labels
-    Lid { session: Mutex<ort::session::Session>, idx: Vec<usize> },
+    /// the language detector: its session, and its labels (the 107 languages' codes, in its output order)
+    Lid { session: Mutex<ort::session::Session>, labels: Vec<String> },
+}
+
+/// A model's state, for the window.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ModelState {
+    NotLoaded,
+    /// (file, bytes done, bytes total - 0 when unknown)
+    Downloading(String, u64, u64),
+    Loading,
+    Loaded,
 }
 
 /// Loads each model once, on first use (downloading it the first time). Shared by every part that transcribes
@@ -25,6 +35,7 @@ pub struct Models {
     log: Log,
     loaded: Mutex<HashMap<String, Arc<Loaded>>>,
     loading: Mutex<()>,                                   // (one load at a time: two callers never load the same twice)
+    loading_now: Mutex<Option<String>>,                   // (the model being loaded, for the window)
     downloading: Mutex<Option<(String, u64, u64)>>,       // (a download going on: (file, bytes done, bytes total), for the window)
     every: Mutex<f64>,                                    // (the live words' interval: ROLL_EVERY, longer on a slow PC)
 }
@@ -90,6 +101,7 @@ impl Models {
             log,
             loaded: Mutex::new(HashMap::new()),
             loading: Mutex::new(()),
+            loading_now: Mutex::new(None),
             downloading: Mutex::new(None),
             every: Mutex::new(ROLL_EVERY),
         })
@@ -164,13 +176,16 @@ impl Models {
             return Ok(m.clone());
         }
         let t0 = Instant::now();
-        let m = Arc::new(match name {
-            "gigaam" => self.load_gigaam()?,
-            "sensevoice" => self.load_sensevoice()?,
-            "parakeet" => self.load_parakeet()?,
-            "langid" => self.load_langid()?,
-            _ => return Err(format!("no speech model \"{name}\"")),
-        });
+        *lock(&self.loading_now) = Some(name.to_string());
+        let r = match name {
+            "gigaam" => self.load_gigaam(),
+            "sensevoice" => self.load_sensevoice(),
+            "parakeet" => self.load_parakeet(),
+            "langid" => self.load_langid(),
+            _ => Err(format!("no speech model \"{name}\"")),
+        };
+        *lock(&self.loading_now) = None;
+        let m = Arc::new(r?);
         lock(&self.loaded).insert(name.to_string(), m.clone());
         (self.log)(&format!("speech model \"{name}\" ready ({:.1} s)", t0.elapsed().as_secs_f64()));
         Ok(m)
@@ -179,6 +194,36 @@ impl Models {
     /// Loads a model now (the first line would wait for it otherwise): "parakeet" | "gigaam" | "sensevoice" | "langid".
     pub fn load(&self, name: &str) -> Result<(), String> {
         self.get(name).map(|_| ())
+    }
+
+    /// Lets a model go (its memory is freed once a pass still using it ends). True if it was loaded.
+    pub fn unload(&self, name: &str) -> bool {
+        let gone = lock(&self.loaded).remove(name).is_some();
+        if gone {
+            (self.log)(&format!("speech model \"{name}\" unloaded"));
+        }
+        gone
+    }
+
+    /// The models loaded now.
+    pub fn loaded(&self) -> Vec<String> {
+        let mut v: Vec<String> = lock(&self.loaded).keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// A model's state now, for the window.
+    pub fn state(&self, name: &str) -> ModelState {
+        if lock(&self.loaded).contains_key(name) {
+            return ModelState::Loaded;
+        }
+        if lock(&self.loading_now).as_deref() == Some(name) {
+            return match self.downloading() {
+                Some((f, done, total)) => ModelState::Downloading(f, done, total),
+                None => ModelState::Loading,
+            };
+        }
+        ModelState::NotLoaded
     }
 
     fn recognizer(&self, name: &str, mut cfg: OfflineRecognizerConfig, dir: &Path) -> Result<Loaded, String> {
@@ -236,12 +281,12 @@ impl Models {
         let json = d.join(format!("{LID_NAME}.json"));
         let text = std::fs::read_to_string(&json).map_err(|e| format!("{}: {e}", json.display()))?;
         let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", json.display()))?;
-        let labels: Vec<&str> = v["labels"].as_array().map(|a| a.iter().filter_map(|l| l.as_str()).collect()).unwrap_or_default();
-        let idx = MIXED_LANGS
-            .iter()
-            .map(|l| labels.iter().position(|x| x == l).ok_or_else(|| format!("{}: no label \"{l}\"", json.display())))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Loaded::Lid { session: Mutex::new(session), idx })
+        let labels: Vec<String> =
+            v["labels"].as_array().map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect()).unwrap_or_default();
+        if let Some(l) = MIXED_LANGS.iter().find(|l| !labels.iter().any(|x| x == *l)) {
+            return Err(format!("{}: no label \"{l}\"", json.display()));
+        }
+        Ok(Loaded::Lid { session: Mutex::new(session), labels })
     }
 
     /// A whole line through an offline model, and its tokens with their timestamps: (text, tokens, timestamps, seconds).
@@ -269,8 +314,21 @@ impl Models {
 
     /// The language detector's probabilities over MIXED_LANGS for a stretch of audio.
     pub fn lid_probs(&self, x: &[f32]) -> Result<Vec<f64>, String> {
+        let langs: Vec<String> = MIXED_LANGS.iter().map(|l| l.to_string()).collect();
+        self.lid_probs_in(x, &langs)
+    }
+
+    /// ... over these languages (the ones a player speaks: fewer candidates, fewer wrong stretches).
+    pub fn lid_probs_in(&self, x: &[f32], langs: &[String]) -> Result<Vec<f64>, String> {
         let m = self.get("langid")?;
-        let Loaded::Lid { session, idx } = &*m else { return Err("\"langid\" is not the language detector".into()) };
+        let Loaded::Lid { session, labels } = &*m else { return Err("\"langid\" is not the language detector".into()) };
+        let idx = langs
+            .iter()
+            .map(|l| {
+                let d = detector_label(l);
+                labels.iter().position(|x| x == d).ok_or_else(|| format!("the language detector does not know \"{l}\""))
+            })
+            .collect::<Result<Vec<usize>, String>>()?;
         let mut v = x.to_vec();
         if v.len() < 1600 {
             v.resize(1600, 0.0);

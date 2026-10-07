@@ -228,14 +228,17 @@ def link_cases():
 
 
 # ---------------------------------------------------------------- language stitching, with a made-up detector
-def fake_probs(x):
+def fake_probs(x, langs=None):
     """a stand-in detector: language k is how much of the window's energy sits on every 10th sample from k (the test
-    audio puts a "language" there). -> probabilities over the 10 MIXED_LANGS"""
+    audio puts a "language" there). -> probabilities over the 10 MIXED_LANGS (or over langs, some of them: the real
+    detector's softmax over just their logits)"""
     x = np.asarray(x, np.float64)
     if len(x) < 1600:
         x = np.concatenate([x, np.zeros(1600 - len(x))])
     e = np.array([np.mean(x[k::10] ** 2) for k in range(10)]) + 1e-12
     z = np.log(e) * 3.0
+    if langs is not None:
+        z = z[[asr.MIXED_LANGS.index(l) for l in langs]]
     p = np.exp(z - z.max())
     return p / p.sum()
 
@@ -255,7 +258,7 @@ def quiet(dur, rng):
 def segment_cases():
     rng = np.random.default_rng(11)
     real_probs = asr.lid_probs
-    asr.lid_probs = lambda models, x: fake_probs(x)
+    asr.lid_probs = lambda models, x, langs=None: fake_probs(x, langs)
     lines = {
         'one language': [quiet(0.5, rng), voice(0, 3.0, rng), quiet(0.5, rng)],
         'two languages': [quiet(0.3, rng), voice(1, 1.6, rng), voice(0, 1.8, rng), quiet(0.3, rng)],
@@ -272,6 +275,15 @@ def segment_cases():
         cache = {}
         segs = asr.segments(None, x, fallback='ko', cache=cache)
         cases.append(dict(name=name, x=floats(x, 6), fallback='ko', segs=[list(s) for s in segs],
+                          cache_keys=sorted(cache)))
+    # (a player's own languages: the candidates are only those - the same audio, other answers)
+    for name, langs in [('two languages', ['en', 'ru']), ('two languages', ['ru', 'de']), ('three, a short blip', ['zh', 'es']),
+                        ('three, a short blip', ['ja', 'ko', 'zh']), ('short call, sure', ['de', 'fr']),
+                        ('short call, sure', ['en', 'ru']), ('loud and soft', ['pt', 'ja'])]:
+        x = np.array(next(c['x'] for c in cases if c['name'] == name and 'langs' not in c), np.float32)
+        cache = {}
+        segs = asr.segments(None, x, fallback='ko', cache=cache, langs=langs)
+        cases.append(dict(name=name, langs=langs, x_from=name, fallback='ko', segs=[list(s) for s in segs],
                           cache_keys=sorted(cache)))
     qp = []
     x = np.concatenate([voice(0, 1.0, rng), quiet(0.2, rng), voice(1, 1.0, rng)])

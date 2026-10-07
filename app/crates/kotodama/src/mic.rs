@@ -16,7 +16,13 @@ pub struct Microphone {
 
 impl Microphone {
     pub fn new(listener: Listener, device: Option<String>, log: Log) -> Microphone {
-        Microphone { listener, device, log, input: None, level: Arc::new(AtomicU64::new((-120f64).to_bits())) }
+        Microphone {
+            listener,
+            device,
+            log,
+            input: None,
+            level: Arc::new(AtomicU64::new((-120f64).to_bits())),
+        }
     }
 }
 

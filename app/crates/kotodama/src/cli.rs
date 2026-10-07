@@ -41,7 +41,8 @@ struct Args {
     /// never open the microphone
     #[arg(long = "no-mic")]
     no_mic: bool,
-    /// the language spoken (en, ru, zh, es, de, ...; auto) - default: the game's setting "Language I speak"
+    /// the languages spoken: one (en, ru, zh, es, de, ...) or several, comma-separated (en,ru: "auto" among them;
+    /// auto: among the 10 default ones) - default: the game's setting "Language I speak"
     #[arg(long)]
     lang: Option<String>,
     /// CPU threads for the speech models
@@ -78,6 +79,21 @@ fn device(arg: &Option<String>, names: Vec<String>) -> Option<String> {
     }
 }
 
+/// --lang: "en", "en,ru", "auto" (the 10 default languages); none: [] (the game's setting).
+fn langs_arg(arg: &Option<String>) -> Vec<String> {
+    let Some(a) = arg else { return Vec::new() };
+    if a.trim() == "auto" {
+        return kd_speech::MIXED_LANGS
+            .iter()
+            .map(|l| l.to_string())
+            .collect();
+    }
+    a.split(',')
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
 /// One line: the game, the microphone, each voice, what is being heard / was said.
 fn status_line(st: &Status, needs: &str) -> String {
     if st.state == "waiting" {
@@ -103,9 +119,18 @@ fn status_line(st: &Status, needs: &str) -> String {
     }
     if !st.live.is_empty() {
         let n = st.live.chars().count();
-        parts.push(format!("hearing: {}", st.live.chars().skip(n.saturating_sub(40)).collect::<String>()));
+        parts.push(format!(
+            "hearing: {}",
+            st.live
+                .chars()
+                .skip(n.saturating_sub(40))
+                .collect::<String>()
+        ));
     } else if !st.last.is_empty() {
-        parts.push(format!("said: {}", st.last.chars().take(50).collect::<String>()));
+        parts.push(format!(
+            "said: {}",
+            st.last.chars().take(50).collect::<String>()
+        ));
     }
     parts.join(" | ")
 }
@@ -124,30 +149,65 @@ const AUTO_LINES: [&str; 7] = [
 /// --auto-speech: [(lang, audio, what is said)] from the benchmark's recordings (computer voices, the webcam-in-a-room
 /// versions): English lines, one-word callouts, Russian, Chinese, Spanish, German, and mixed-language lines.
 fn auto_speech_items() -> Result<Vec<(String, Vec<f32>, String)>, String> {
-    let root = paths::repo_root().ok_or("--auto-speech needs the benchmark recordings (a developer's copy of the repo)")?;
-    let lid = root.join("export").join("asrbench").join("lid").join("items.json");
+    let root = paths::repo_root()
+        .ok_or("--auto-speech needs the benchmark recordings (a developer's copy of the repo)")?;
+    let lid = root
+        .join("export")
+        .join("asrbench")
+        .join("lid")
+        .join("items.json");
     let text = std::fs::read_to_string(&lid).map_err(|_| "--auto-speech needs the benchmark recordings: run bench/make_clips.py and lid.py prep first".to_string())?;
     let items: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let pick = [
-        "en01_room", "en04_room", "en08_room", "en13_room", "w000_room", "w005_room", "w010_room", "w015_room", "ru02_room", "ru05_room",
-        "ru10_room", "zh03_room", "zh07_room", "es02_room", "de03_room", "m08", "m10", "m12", "m14", "m15", "m16", "m19",
+        "en01_room",
+        "en04_room",
+        "en08_room",
+        "en13_room",
+        "w000_room",
+        "w005_room",
+        "w010_room",
+        "w015_room",
+        "ru02_room",
+        "ru05_room",
+        "ru10_room",
+        "zh03_room",
+        "zh07_room",
+        "es02_room",
+        "de03_room",
+        "m08",
+        "m10",
+        "m12",
+        "m14",
+        "m15",
+        "m16",
+        "m19",
     ];
     let mut out = Vec::new();
     for k in pick {
-        let Some(it) = items.iter().find(|i| i["id"] == k) else { continue };
+        let Some(it) = items.iter().find(|i| i["id"] == k) else {
+            continue;
+        };
         let path = it["path"].as_str().unwrap_or_default();
-        let (x, sr) = kd_audio::read_wav(std::path::Path::new(path)).map_err(|e| format!("{path}: {e}"))?;
+        let (x, sr) =
+            kd_audio::read_wav(std::path::Path::new(path)).map_err(|e| format!("{path}: {e}"))?;
         let x = kd_audio::resample(&x, sr, kd_speech::RATE);
         let mixed = it["segs"].as_array().filter(|s| !s.is_empty());
         let said = match mixed {
             Some(s) => format!(
                 "{}  (MIXED: {})",
                 it["text"].as_str().unwrap_or_default(),
-                s.iter().map(|v| v["lang"].as_str().unwrap_or("?")).collect::<Vec<_>>().join("+")
+                s.iter()
+                    .map(|v| v["lang"].as_str().unwrap_or("?"))
+                    .collect::<Vec<_>>()
+                    .join("+")
             ),
             None => it["text"].as_str().unwrap_or_default().to_string(),
         };
-        let lang = if mixed.is_some() { "auto".to_string() } else { it["lang"].as_str().unwrap_or("en").to_string() };
+        let lang = if mixed.is_some() {
+            "auto".to_string()
+        } else {
+            it["lang"].as_str().unwrap_or("en").to_string()
+        };
         out.push((lang, x, said));
     }
     Ok(out)
@@ -183,7 +243,7 @@ fn transcribe(args: &Args, path: &str) -> i32 {
             return 1;
         }
     };
-    l.set_language(args.lang.as_deref().unwrap_or("en"));
+    l.set_languages(&langs_arg(&args.lang));
     let t0 = Instant::now();
     if let Err(e) = l.warm(None) {
         eprintln!("{e}");
@@ -196,7 +256,11 @@ fn transcribe(args: &Args, path: &str) -> i32 {
         l.feed(blk);
     }
     l.flush();
-    println!("{:.1} s of audio in {:.1} s", audio.len() as f64 / kd_speech::RATE as f64, t0.elapsed().as_secs_f64());
+    println!(
+        "{:.1} s of audio in {:.1} s",
+        audio.len() as f64 / kd_speech::RATE as f64,
+        t0.elapsed().as_secs_f64()
+    );
     0
 }
 
@@ -212,21 +276,38 @@ fn demo(args: &Args) -> i32 {
     mixer.volume = args.volume.clamp(0.0, 1.0);
     let mixer: kd_audio::SharedMixer = Arc::new(Mutex::new(mixer));
     let out = device(&args.device, kd_audio::output_devices());
-    let _stream = match kd_audio::Output::open(mixer.clone(), out.as_deref(), kd_common::stdout_log()) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("no sound output: {e}");
-            return 1;
-        }
-    };
+    let _stream =
+        match kd_audio::Output::open(mixer.clone(), out.as_deref(), kd_common::stdout_log()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("no sound output: {e}");
+                return 1;
+            }
+        };
     println!("demo: the speaker walks a circle around you, 4 m away (ahead, right, behind, left)");
     let t0 = Instant::now();
     let mut seq = 0;
     while args.seconds <= 0.0 || t0.elapsed().as_secs_f64() < args.seconds {
         seq += 1;
         let az = (t0.elapsed().as_secs_f64() * 45.0 + 180.0).rem_euclid(360.0) - 180.0; // (a turn in 8 s)
-        let mut f = Feed { seq, vol: 1.0, live: true, lang: "en".into(), ..Default::default() };
-        f.speakers.insert(1, Speaker { src: 2, talk: true, gain: 1.0, az, el: 0.0, muffle: 0.0 });
+        let mut f = Feed {
+            seq,
+            vol: 1.0,
+            live: true,
+            lang: "en".into(),
+            ..Default::default()
+        };
+        f.speakers.insert(
+            1,
+            Speaker {
+                src: 2,
+                talk: true,
+                gain: 1.0,
+                az,
+                el: 0.0,
+                muffle: 0.0,
+            },
+        );
         kd_audio::lock(&mixer).set_feed(f);
         std::thread::sleep(Duration::from_millis(50));
         if seq % 10 == 0 {
@@ -277,7 +358,9 @@ pub fn main(argv: Vec<String>) -> i32 {
                 return 1;
             }
         };
-        mic_source = Some(Box::new(move |l: Listener, log: Log| Box::new(PlaylistMicrophone::new(l, items, 2.5, log)) as Box<dyn Mic>));
+        mic_source = Some(Box::new(move |l: Listener, log: Log| {
+            Box::new(PlaylistMicrophone::new(l, items, 2.5, log)) as Box<dyn Mic>
+        }));
     } else if let Some(p) = &args.mic_wav {
         // (a recording instead of the microphone)
         let (audio, sr) = match kd_audio::read_wav(std::path::Path::new(p)) {
@@ -288,14 +371,20 @@ pub fn main(argv: Vec<String>) -> i32 {
             }
         };
         let audio = kd_audio::resample(&audio, sr, kd_speech::RATE);
-        mic_source = Some(Box::new(move |l: Listener, log: Log| Box::new(WavMicrophone::new(l, audio, log)) as Box<dyn Mic>));
+        mic_source = Some(Box::new(move |l: Listener, log: Log| {
+            Box::new(WavMicrophone::new(l, audio, log)) as Box<dyn Mic>
+        }));
     }
     let opts = Options {
         threads: args.threads,
         out_device: device(&args.device, kd_audio::output_devices()),
         mic_device: device(&args.mic_device, kd_audio::input_devices()),
         volume: args.volume,
-        lang: args.lang.clone().or_else(|| args.auto_speech.then(|| "en".to_string())),
+        langs: if args.lang.is_none() && args.auto_speech {
+            vec!["en".to_string()]
+        } else {
+            langs_arg(&args.lang)
+        },
         no_mic: args.no_mic || args.auto || args.type_,
         io_dir: args.io_dir.clone().map(Into::into),
     };
@@ -310,7 +399,14 @@ pub fn main(argv: Vec<String>) -> i32 {
                 let line = line.trim().to_string();
                 if !line.is_empty() {
                     let sent = game.lock().unwrap().send_text(&line);
-                    log(&format!("typed{}: {line}", if sent { "" } else { " [no game to tell - is a level running?]" }));
+                    log(&format!(
+                        "typed{}: {line}",
+                        if sent {
+                            ""
+                        } else {
+                            " [no game to tell - is a level running?]"
+                        }
+                    ));
                 }
             }
         });
@@ -340,11 +436,19 @@ pub fn main(argv: Vec<String>) -> i32 {
                         let k = (k + 2).min(words.len());
                         if k < words.len() {
                             g.send('l', utt, &words[..k].join(" "), None, None);
-                            auto_live = Some((utt, words, k, Instant::now() + Duration::from_millis(350)));
+                            auto_live =
+                                Some((utt, words, k, Instant::now() + Duration::from_millis(350)));
                         } else {
                             let line = words.join(" ");
                             let sent = g.send_text(&line); // (the finished line)
-                            log(&format!("typed{}: {line}", if sent { "" } else { " [no game to tell - is a level running?]" }));
+                            log(&format!(
+                                "typed{}: {line}",
+                                if sent {
+                                    ""
+                                } else {
+                                    " [no game to tell - is a level running?]"
+                                }
+                            ));
                         }
                     } else {
                         auto_live = Some((utt, words, k, nxt));
@@ -356,7 +460,10 @@ pub fn main(argv: Vec<String>) -> i32 {
                             auto_sent += 1;
                             auto_next = Some(Instant::now() + Duration::from_secs_f64(AUTO_GAP));
                             log(&format!("  (auto line {auto_sent} of {}: its words arrive live, then the line)", AUTO_LINES.len()));
-                            let words = AUTO_LINES[auto_sent - 1].split_whitespace().map(String::from).collect();
+                            let words = AUTO_LINES[auto_sent - 1]
+                                .split_whitespace()
+                                .map(String::from)
+                                .collect();
                             auto_live = Some((auto_sent as u32, words, 0, Instant::now()));
                         }
                         _ => {}

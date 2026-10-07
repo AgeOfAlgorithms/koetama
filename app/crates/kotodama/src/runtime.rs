@@ -3,14 +3,17 @@
 //! start(), then tick() a few times a second, stop() at the end; status() says what is going on.
 //!
 //! The microphone is open only while the game wants it (its feed's mic flag) and is running; the speech models load
-//! the first time it is wanted (downloaded once), and again for another language.
+//! the first time it is wanted (downloaded once). Which models: the languages the player speaks (chosen in the window;
+//! none chosen: the game's "Language I speak") - one language, its model; several, theirs and the language detector,
+//! choosing among exactly those. A change of languages loads what is new and lets go of what is no longer needed.
 use crate::mic::Microphone;
 use kd_audio::{Mixer, MixerSink, Output, SharedMixer, STALE};
 use kd_common::Log;
 use kd_games::{Game, GameKind};
-use kd_speech::{Callbacks, Listener, Mic, Models};
+use kd_speech::{Callbacks, Listener, Mic, ModelState, Models, MIXED_LANGS, MODEL_INFO};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Makes the microphone-like the listener hears instead of the real microphone (--mic-wav, --auto-speech).
@@ -21,8 +24,8 @@ pub struct Options {
     pub out_device: Option<String>,
     pub mic_device: Option<String>,
     pub volume: f64,
-    /// None: the game's setting; "auto speech" sets its own per line
-    pub lang: Option<String>,
+    /// the languages the player speaks (empty: the game's "Language I speak"); "auto speech" sets its own per line
+    pub langs: Vec<String>,
     pub no_mic: bool,
     /// where the mod looks for Kotodama's files (None: the game module's own)
     pub io_dir: Option<PathBuf>,
@@ -30,7 +33,15 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { threads: 4, out_device: None, mic_device: None, volume: 1.0, lang: None, no_mic: false, io_dir: None }
+        Options {
+            threads: 4,
+            out_device: None,
+            mic_device: None,
+            volume: 1.0,
+            langs: Vec::new(),
+            no_mic: false,
+            io_dir: None,
+        }
     }
 }
 
@@ -57,6 +68,15 @@ pub struct SpeakerStatus {
     pub muffle: f64,
 }
 
+/// A speech model as the window shows it.
+pub struct ModelRow {
+    pub title: &'static str,
+    pub memory_mb: u32,
+    /// the chosen languages need it
+    pub needed: bool,
+    pub state: ModelState,
+}
+
 pub struct Status {
     /// "waiting" (no feed yet: the game is not running the mod), "paused", "connected"
     pub state: &'static str,
@@ -64,7 +84,10 @@ pub struct Status {
     pub mic: &'static str,
     pub download: Option<(String, u64, u64)>,
     pub level: f64,
-    pub lang: String,
+    /// the languages in use (the player's choice, or the game's setting) and whether they are the game's
+    pub langs: Vec<String>,
+    pub langs_from_game: bool,
+    pub models: Vec<ModelRow>,
     pub live: String,
     pub last: String,
     pub speakers: Vec<SpeakerStatus>,
@@ -83,13 +106,23 @@ pub struct Runtime {
     /// the microphone is a recording or a playlist (not switched with the device setting)
     mic_is_source: bool,
     ready: Arc<Mutex<Ready>>,
-    loaded_lang: String,
+    loaded_key: String,
+    /// the languages as last seen, and since when (a change waits until it settles: ticking boxes one by one does
+    /// not load and unload models for each step)
+    seen_key: String,
+    seen_since: std::time::Instant,
+    warming: Arc<AtomicBool>,
     said: Arc<Mutex<Said>>,
 }
 
 impl Runtime {
     // ---- start / stop
-    pub fn start(kind: GameKind, log: Log, opts: Options, mic_source: Option<MicSource>) -> Runtime {
+    pub fn start(
+        kind: GameKind,
+        log: Log,
+        opts: Options,
+        mic_source: Option<MicSource>,
+    ) -> Runtime {
         let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
         let sink: Arc<dyn kd_common::feed::FeedSink> = Arc::new(MixerSink(mixer.clone()));
@@ -116,7 +149,10 @@ impl Runtime {
             mic: None,
             mic_is_source: mic_source.is_some(),
             ready: Arc::new(Mutex::new(Ready::NotAsked)),
-            loaded_lang: String::new(),
+            loaded_key: String::new(),
+            seen_key: String::new(),
+            seen_since: std::time::Instant::now(),
+            warming: Arc::new(AtomicBool::new(false)),
             said: Arc::new(Mutex::new(Said::default())),
         };
         rt.open_output();
@@ -129,7 +165,11 @@ impl Runtime {
 
     fn open_output(&mut self) {
         self.output = None;
-        match Output::open(self.mixer.clone(), self.opts.out_device.as_deref(), self.log.clone()) {
+        match Output::open(
+            self.mixer.clone(),
+            self.opts.out_device.as_deref(),
+            self.log.clone(),
+        ) {
             Ok(o) => self.output = Some(o),
             Err(e) => {
                 let msg = format!("no sound output: {e}");
@@ -151,15 +191,23 @@ impl Runtime {
             }),
             on_live: Box::new(move |utt, words, info| {
                 s1.lock().unwrap().live_now = words.to_string();
-                g2.lock().unwrap().send('l', utt, words, Some(&info.times), Some(info.t0));
+                g2.lock()
+                    .unwrap()
+                    .send('l', utt, words, Some(&info.times), Some(info.t0));
             }),
             on_final: Box::new(move |utt, text, info| {
-                let sent = g3.lock().unwrap().send('f', utt, text, Some(&info.times), Some(info.t0));
+                let sent =
+                    g3.lock()
+                        .unwrap()
+                        .send('f', utt, text, Some(&info.times), Some(info.t0));
                 let mut s = s2.lock().unwrap();
                 s.live_now.clear();
                 if !text.is_empty() {
                     s.last_said = text.to_string();
-                    log(&format!("you said{}: {text}", if sent { "" } else { " [no game to tell]" }));
+                    log(&format!(
+                        "you said{}: {text}",
+                        if sent { "" } else { " [no game to tell]" }
+                    ));
                 }
             }),
         };
@@ -167,7 +215,11 @@ impl Runtime {
             Ok(l) => {
                 self.mic = Some(match mic_source {
                     Some(make) => make(l.clone(), self.log.clone()),
-                    None => Box::new(Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone())),
+                    None => Box::new(Microphone::new(
+                        l.clone(),
+                        self.opts.mic_device.clone(),
+                        self.log.clone(),
+                    )),
                 });
                 self.listener = Some(l);
             }
@@ -213,7 +265,11 @@ impl Runtime {
         if let Some(m) = self.mic.as_mut() {
             m.close();
         }
-        let mut m: Box<dyn Mic> = Box::new(Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone()));
+        let mut m: Box<dyn Mic> = Box::new(Microphone::new(
+            l.clone(),
+            self.opts.mic_device.clone(),
+            self.log.clone(),
+        ));
         if was {
             m.open();
         }
@@ -221,15 +277,38 @@ impl Runtime {
     }
 
     // ---- a few times a second
-    pub fn language(&self) -> String {
-        self.opts.lang.clone().unwrap_or_else(|| self.game.lock().unwrap().language())
+    /// The languages in use: the player's choice, else the game's "Language I speak" ("auto": MIXED_LANGS); and
+    /// whether they came from the game.
+    pub fn languages(&self) -> (Vec<String>, bool) {
+        if !self.opts.langs.is_empty() {
+            return (self.opts.langs.clone(), false);
+        }
+        let lang = self.game.lock().unwrap().language();
+        if lang == "auto" {
+            (MIXED_LANGS.iter().map(|l| l.to_string()).collect(), true)
+        } else {
+            (vec![lang], true)
+        }
     }
 
-    fn warm(&self, lang: String) {
-        let (l, ready, said, log) = (self.listener.clone(), self.ready.clone(), self.said.clone(), self.log.clone());
+    /// The player's languages (empty: follow the game's setting). The models follow on the next tick.
+    pub fn set_languages(&mut self, langs: Vec<String>) {
+        self.opts.langs = langs;
+    }
+
+    fn warm(&mut self, langs: Vec<String>) {
+        let (l, ready, said, log, warming) = (
+            self.listener.clone(),
+            self.ready.clone(),
+            self.said.clone(),
+            self.log.clone(),
+            self.warming.clone(),
+        );
         let Some(l) = l else { return };
+        self.loaded_key = langs.join(",");
+        warming.store(true, Ordering::SeqCst);
         std::thread::spawn(move || {
-            l.set_language(&lang);
+            l.set_languages(&langs);
             match l.warm(None) {
                 Ok(()) => *ready.lock().unwrap() = Ready::Loaded,
                 Err(e) => {
@@ -239,34 +318,49 @@ impl Runtime {
                     *ready.lock().unwrap() = Ready::NotAsked;
                 }
             }
+            warming.store(false, Ordering::SeqCst);
         });
     }
 
     pub fn tick(&mut self) {
-        let Some(l) = self.listener.clone() else { return };
+        let Some(l) = self.listener.clone() else {
+            return;
+        };
         let (want, live) = {
             let g = self.game.lock().unwrap();
             (g.wants_mic() && g.connected(), g.live_words())
         };
-        let lang = self.language();
+        let (langs, _) = self.languages();
+        let key = langs.join(",");
         let ready = *self.ready.lock().unwrap();
-        if want && ready == Ready::NotAsked {
+        let warming = self.warming.load(Ordering::SeqCst);
+        if key != self.seen_key {
+            self.seen_key = key.clone();
+            self.seen_since = std::time::Instant::now();
+        }
+        let settled = self.seen_since.elapsed().as_secs_f64() >= 1.5;
+        if want && ready == Ready::NotAsked && !warming {
             // (load the models first: downloaded the first time)
             *self.ready.lock().unwrap() = Ready::Loading;
-            self.loaded_lang = lang.clone();
-            (self.log)(&format!("loading the speech models for \"{lang}\" (the first time they are downloaded)..."));
-            self.warm(lang.clone());
-        } else if ready == Ready::Loaded && lang != self.loaded_lang {
-            // (another language: its model in the background)
-            self.loaded_lang = lang.clone();
-            (self.log)(&format!("language: {lang}"));
-            self.warm(lang.clone());
+            (self.log)(&format!(
+                "loading the speech models for {key} (the first time they are downloaded)..."
+            ));
+            self.warm(langs.clone());
+        } else if ready == Ready::Loaded && key != self.loaded_key && !warming && settled {
+            // (other languages: their models in the background; the ones no longer needed let go)
+            (self.log)(&format!("languages: {key}"));
+            self.warm(langs.clone());
         }
+        let lang = kd_speech::plan(&langs).0;
         l.set_live(live);
         let ready = *self.ready.lock().unwrap();
         let Some(mic) = self.mic.as_mut() else { return };
         if want && ready == Ready::Loaded && !mic.is_open() {
-            l.set_language(&lang);
+            if lang == "auto" || !self.mic_is_source {
+                l.set_languages(&langs);
+            } else {
+                l.set_language(&lang);
+            }
             if !l.started() {
                 l.start();
             }
@@ -307,16 +401,45 @@ impl Runtime {
         let mut speakers = Vec::new();
         if let (Some(f), "connected") = (&feed, state) {
             for sp in f.speakers.values() {
-                speakers.push(SpeakerStatus { name: g.speaker_name(sp.src), talk: sp.talk, gain: sp.gain, az: sp.az, muffle: sp.muffle });
+                speakers.push(SpeakerStatus {
+                    name: g.speaker_name(sp.src),
+                    talk: sp.talk,
+                    gain: sp.gain,
+                    az: sp.az,
+                    muffle: sp.muffle,
+                });
             }
         }
+        let (langs, langs_from_game) = {
+            drop(g);
+            self.languages()
+        };
+        let need = kd_speech::models_for(&langs);
+        let models = self.listener.as_ref().map(|l| l.models());
+        let rows = MODEL_INFO
+            .iter()
+            .map(|m| ModelRow {
+                title: m.title,
+                memory_mb: m.memory_mb,
+                needed: need.contains(&m.name),
+                state: models
+                    .as_ref()
+                    .map(|ms| ms.state(m.name))
+                    .unwrap_or(ModelState::NotLoaded),
+            })
+            .collect();
         let said = self.said.lock().unwrap();
         Status {
             state,
             mic,
-            download: self.listener.as_ref().and_then(|l| l.models().downloading()),
+            download: self
+                .listener
+                .as_ref()
+                .and_then(|l| l.models().downloading()),
             level: self.mic.as_ref().map(|m| m.level()).unwrap_or(-120.0),
-            lang: self.opts.lang.clone().unwrap_or_else(|| g.language()),
+            langs,
+            langs_from_game,
+            models: rows,
             live: said.live_now.clone(),
             last: said.last_said.clone(),
             speakers,
@@ -325,7 +448,9 @@ impl Runtime {
     }
 
     pub fn output_info(&self) -> Option<(String, f64)> {
-        self.output.as_ref().map(|o| (o.device_name(), o.latency_ms()))
+        self.output
+            .as_ref()
+            .map(|o| (o.device_name(), o.latency_ms()))
     }
 }
 

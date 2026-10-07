@@ -6,9 +6,18 @@ use std::time::Duration;
 
 pub fn run() -> i32 {
     let mut failed = 0;
-    let mut step = |name: &str, f: &dyn Fn() -> Result<String, String>| {
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
-            Ok(Ok(s)) => println!("ok   {name}{}", if s.is_empty() { String::new() } else { format!(": {s}") }),
+    let mut step =
+        |name: &str, f: &dyn Fn() -> Result<String, String>| match std::panic::catch_unwind(
+            std::panic::AssertUnwindSafe(f),
+        ) {
+            Ok(Ok(s)) => println!(
+                "ok   {name}{}",
+                if s.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {s}")
+                }
+            ),
             Ok(Err(e)) => {
                 failed += 1;
                 println!("FAIL {name}: {e}");
@@ -17,11 +26,21 @@ pub fn run() -> i32 {
                 failed += 1;
                 println!("FAIL {name}: it panicked");
             }
-        }
-    };
-    println!("{} {} selftest ({})", paths::APP_NAME, paths::VERSION, paths::app_root().display());
+        };
+    println!(
+        "{} {} selftest ({})",
+        paths::APP_NAME,
+        paths::VERSION,
+        paths::app_root().display()
+    );
     step("the window", &window);
-    step("sound", &|| Ok(format!("{} output devices, {} microphones", kd_audio::output_devices().len(), kd_audio::input_devices().len())));
+    step("sound", &|| {
+        Ok(format!(
+            "{} output devices, {} microphones",
+            kd_audio::output_devices().len(),
+            kd_audio::input_devices().len()
+        ))
+    });
     step("sherpa-onnx (the speech models' engine)", &|| {
         // (the library loads and runs: its resampler, which needs no model)
         sherpa_check()
@@ -31,7 +50,11 @@ pub fn run() -> i32 {
         let m = kd_speech::Models::new(1, kd_common::null_log());
         m.load("langid")?;
         let p = m.lid_probs(&vec![0.0f32; 16000])?;
-        Ok(format!("{} ({} languages)", kd_speech::lid_dir()?.display(), p.len()))
+        Ok(format!(
+            "{} ({} languages)",
+            kd_speech::lid_dir()?.display(),
+            p.len()
+        ))
     });
     step("model downloads (HTTPS)", &|| {
         let d = std::env::temp_dir().join(format!("kotodama-selftest-{}", std::process::id()));
@@ -82,10 +105,24 @@ fn window() -> Result<String, String> {
     }
     let r = crate::gui::renderer();
     let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([200.0, 80.0]).with_visible(false),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([200.0, 80.0])
+            .with_visible(false),
         renderer: r,
         ..Default::default()
     };
-    eframe::run_native("Kotodama selftest", opts, Box::new(|_| Ok(Box::new(One(0))))).map_err(|e| e.to_string())?;
-    Ok(format!("egui, {}", if r == eframe::Renderer::Wgpu { "wgpu" } else { "OpenGL" }))
+    eframe::run_native(
+        "Kotodama selftest",
+        opts,
+        Box::new(|_| Ok(Box::new(One(0)))),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "egui, {}",
+        if r == eframe::Renderer::Wgpu {
+            "wgpu"
+        } else {
+            "OpenGL"
+        }
+    ))
 }

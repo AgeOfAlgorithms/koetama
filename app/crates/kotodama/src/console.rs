@@ -5,9 +5,12 @@
 #[cfg(windows)]
 pub fn attach() {
     use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
     use windows_sys::Win32::System::Console::{
-        AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
+        STD_OUTPUT_HANDLE,
     };
     unsafe {
         let out = GetStdHandle(STD_OUTPUT_HANDLE);

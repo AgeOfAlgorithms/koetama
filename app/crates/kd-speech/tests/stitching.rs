@@ -20,6 +20,11 @@ fn f64s(v: &Value) -> Vec<f64> {
 
 /// make_fixtures.py fake_probs: language k is how much of the window's energy sits on every 10th sample from k.
 fn fake_probs(x: &[f32]) -> Vec<f64> {
+    fake_probs_in(x, &MIXED_LANGS.iter().map(|l| l.to_string()).collect::<Vec<_>>())
+}
+
+/// ... over some of MIXED_LANGS (the real detector's softmax over just their logits)
+fn fake_probs_in(x: &[f32], langs: &[String]) -> Vec<f64> {
     let mut x: Vec<f64> = x.iter().map(|&v| v as f64).collect();
     if x.len() < 1600 {
         x.resize(1600, 0.0);
@@ -30,7 +35,8 @@ fn fake_probs(x: &[f32]) -> Vec<f64> {
             s.iter().sum::<f64>() / s.len() as f64 + 1e-12
         })
         .collect();
-    let z: Vec<f64> = e.iter().map(|v| v.ln() * 3.0).collect();
+    let all: Vec<f64> = e.iter().map(|v| v.ln() * 3.0).collect();
+    let z: Vec<f64> = langs.iter().map(|l| all[MIXED_LANGS.iter().position(|m| m == l).unwrap()]).collect();
     let top = z.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let p: Vec<f64> = z.iter().map(|v| (v - top).exp()).collect();
     let sum: f64 = p.iter().sum();
@@ -69,11 +75,23 @@ fn fake_probs_as_python() {
 #[test]
 fn segments_as_python() {
     let f = fixture("segments.json");
-    for case in f["cases"].as_array().unwrap() {
+    let cases = f["cases"].as_array().unwrap();
+    for case in cases {
         let name = case["name"].as_str().unwrap();
-        let x = f32s(&case["x"]);
+        // (a player's own languages: the same audio as the case it names, only these candidates)
+        let x = match case["x_from"].as_str() {
+            Some(from) => f32s(&cases.iter().find(|c| c["name"] == from && c["x"].is_array()).unwrap()["x"]),
+            None => f32s(&case["x"]),
+        };
+        let langs: Vec<String> = match case["langs"].as_array() {
+            Some(a) => a.iter().map(|l| l.as_str().unwrap().to_string()).collect(),
+            None => MIXED_LANGS.iter().map(|l| l.to_string()).collect(),
+        };
+        let name = &format!("{name} {langs:?}");
         let mut cache = HashMap::new();
-        let segs = segments(&x, case["fallback"].as_str().unwrap(), Some(&mut cache), &mut |w: &[f32]| Ok(fake_probs(w))).unwrap();
+        let segs =
+            segments_in(&langs, &x, case["fallback"].as_str().unwrap(), Some(&mut cache), &mut |w: &[f32]| Ok(fake_probs_in(w, &langs)))
+                .unwrap();
         let want = case["segs"].as_array().unwrap();
         assert_eq!(segs.len(), want.len(), "{name}: {segs:?} != {want:?}");
         for (s, w) in segs.iter().zip(want) {
@@ -87,9 +105,9 @@ fn segments_as_python() {
         assert_eq!(keys, want_keys, "{name}: cache keys");
         // (a second run on the cache: the same stretches, the detector not asked again)
         let mut asked = 0;
-        let again = segments(&x, case["fallback"].as_str().unwrap(), Some(&mut cache), &mut |w: &[f32]| {
+        let again = segments_in(&langs, &x, case["fallback"].as_str().unwrap(), Some(&mut cache), &mut |w: &[f32]| {
             asked += 1;
-            Ok(fake_probs(w))
+            Ok(fake_probs_in(w, &langs))
         })
         .unwrap();
         assert_eq!(again, segs, "{name}: from the cache");

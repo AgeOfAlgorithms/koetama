@@ -10,42 +10,33 @@ use std::time::{Duration, Instant};
 
 const DEFAULT: &str = "(system default)";
 
-/// The languages the game offers, by their own names (the game's "Language I speak").
+/// A language as the window shows it: its own name, and the English one when it differs.
 fn lang_name(code: &str) -> String {
-    let n = match code {
-        "en" => "English",
-        "es" => "Español",
-        "fr" => "Français",
-        "de" => "Deutsch",
-        "it" => "Italiano",
-        "pt" => "Português",
-        "nl" => "Nederlands",
-        "pl" => "Polski",
-        "uk" => "Українська",
-        "ru" => "Русский",
-        "zh" => "中文 (普通话)",
-        "yue" => "粵語",
-        "ja" => "日本語",
-        "ko" => "한국어",
-        "auto" => "Auto (guess)",
-        "cs" => "Čeština",
-        "sk" => "Slovenčina",
-        "ro" => "Română",
-        "hr" => "Hrvatski",
-        "bg" => "Български",
-        "fi" => "Suomi",
-        "sv" => "Svenska",
-        "hu" => "Magyar",
-        "da" => "Dansk",
-        "et" => "Eesti",
-        "lv" => "Latviešu",
-        "lt" => "Lietuvių",
-        "sl" => "Slovenščina",
-        "el" => "Ελληνικά",
-        "mt" => "Malti",
-        other => other,
-    };
-    n.to_string()
+    match kd_speech::lang_info(code) {
+        Some(l) if l.name != l.english => format!("{} ({})", l.name, l.english),
+        Some(l) => l.name.to_string(),
+        None => code.to_string(),
+    }
+}
+
+/// A model's state in words, and its colour.
+fn model_state(row: &crate::runtime::ModelRow) -> (String, Color32) {
+    use kd_speech::ModelState::*;
+    let grey = Color32::GRAY;
+    match &row.state {
+        Loaded if row.needed => ("loaded".into(), Color32::from_rgb(0x2a, 0x9d, 0x4b)),
+        Loaded => ("loaded (no longer needed: letting go)".into(), grey),
+        Loading => ("loading...".into(), Color32::from_rgb(0xd0, 0xa0, 0x00)),
+        Downloading(f, d, t) => (
+            format!("downloading, {}", download_text(&(f.clone(), *d, *t))),
+            Color32::from_rgb(0xd0, 0xa0, 0x00),
+        ),
+        NotLoaded if row.needed => (
+            "not loaded yet (loads when the game wants your voice)".into(),
+            Color32::from_rgb(0xd0, 0xa0, 0x00),
+        ),
+        NotLoaded => ("not needed".into(), grey),
+    }
 }
 
 /// (file, bytes done, bytes total) -> "42 % of 640 MB" (or "120 MB" when the size is not known)
@@ -87,6 +78,9 @@ struct App {
     upd_text: String,
     upd_busy: bool,
     check_at: Option<Instant>,
+    /// the languages the player speaks (empty: the game's "Language I speak")
+    langs: Vec<String>,
+    choosing_langs: bool,
 }
 
 impl App {
@@ -97,13 +91,20 @@ impl App {
         let (upd_tx, upd_rx) = channel();
         let ins = kd_audio::input_devices();
         let outs = kd_audio::output_devices();
-        let pick = |devs: &Vec<String>, name: Option<String>| name.filter(|n| devs.contains(n)).unwrap_or_else(|| DEFAULT.to_string());
+        let pick = |devs: &Vec<String>, name: Option<String>| {
+            name.filter(|n| devs.contains(n))
+                .unwrap_or_else(|| DEFAULT.to_string())
+        };
         let mut app = App {
             mic: pick(&ins, settings.str("mic")),
             out: pick(&outs, settings.str("out")),
             volume: settings.f64("volume", 1.0) * 100.0,
-            game_id: settings.str("game").unwrap_or_else(|| kd_games::games()[0].id.to_string()),
-            check_at: settings.bool("auto_update_check", true).then(|| Instant::now() + Duration::from_secs(3)),
+            game_id: settings
+                .str("game")
+                .unwrap_or_else(|| kd_games::games()[0].id.to_string()),
+            check_at: settings
+                .bool("auto_update_check", true)
+                .then(|| Instant::now() + Duration::from_secs(3)),
             settings,
             rt: None,
             where_text: String::new(),
@@ -119,7 +120,20 @@ impl App {
             update: None,
             upd_text: String::new(),
             upd_busy: false,
+            langs: Vec::new(),
+            choosing_langs: false,
         };
+        app.langs = app
+            .settings
+            .0
+            .get("languages")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|l| l.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
         app.start_game();
         app
     }
@@ -142,15 +156,135 @@ impl App {
             out_device: Self::device(&self.out),
             mic_device: Self::device(&self.mic),
             volume: self.volume / 100.0,
+            langs: self.langs.clone(),
             ..Default::default()
         };
         let rt = Runtime::start(kind, self.logger(), opts, None);
         let (found, where_) = rt.game.lock().unwrap().locate();
-        self.where_text = if found { format!("{}: {where_}", kind.name) } else { where_ };
+        self.where_text = if found {
+            format!("{}: {where_}", kind.name)
+        } else {
+            where_
+        };
         self.game_id = kind.id.to_string();
         self.settings.set("game", kind.id);
         self.settings.save();
         self.rt = Some(rt);
+    }
+
+    /// The player ticked or unticked a language (none: follow the game's setting).
+    fn set_langs(&mut self, langs: Vec<String>) {
+        self.langs = langs;
+        self.settings
+            .set("languages", serde_json::Value::from(self.langs.clone()));
+        self.settings.save();
+        if let Some(rt) = self.rt.as_mut() {
+            rt.set_languages(self.langs.clone());
+        }
+    }
+
+    /// "Languages I speak": what is in use, and (Choose) every language by how well it is written.
+    fn languages_ui(&mut self, ui: &mut egui::Ui) {
+        let (langs, from_game) = match &self.status {
+            Some(st) => (st.langs.clone(), st.langs_from_game),
+            None => (self.langs.clone(), self.langs.is_empty()),
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Languages I speak:");
+            let names: Vec<String> = langs.iter().map(|l| lang_name(l)).collect();
+            ui.label(RichText::new(names.join(", ")).strong());
+            if from_game {
+                ui.label(RichText::new("(the game's setting)").color(Color32::GRAY));
+            } else if langs.len() > 1 {
+                ui.label(RichText::new("(it tells them apart as you speak)").color(Color32::GRAY));
+            }
+            let label = if self.choosing_langs {
+                "Done"
+            } else {
+                "Choose..."
+            };
+            if ui.button(label).clicked() {
+                self.choosing_langs = !self.choosing_langs;
+            }
+        });
+        if !self.choosing_langs {
+            return;
+        }
+        let mut chosen = self.langs.clone();
+        let mut changed = false;
+        egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| egui::Frame::new().fill(ui.visuals().faint_bg_color).inner_margin(8.0).show(ui, |ui| {
+            ui.label(RichText::new("Tick every language you speak. Fewer is lighter and more accurate: each needs its speech \
+                model in memory, and with several, Kotodama tells them apart as you speak.").color(Color32::GRAY));
+            for tier in [kd_speech::Tier::Full, kd_speech::Tier::Soft, kd_speech::Tier::Weak] {
+                ui.add_space(4.0);
+                ui.label(RichText::new(tier.label()).strong());
+                egui::Grid::new(format!("langs-{tier:?}")).num_columns(3).spacing([18.0, 2.0]).show(ui, |ui| {
+                    for (k, l) in kd_speech::LANGS.iter().filter(|l| l.tier == tier).enumerate() {
+                        let mut on = chosen.iter().any(|c| c == l.code);
+                        if ui.checkbox(&mut on, lang_name(l.code)).changed() {
+                            changed = true;
+                            if on {
+                                chosen.push(l.code.to_string());
+                            } else {
+                                chosen.retain(|c| c != l.code);
+                            }
+                        }
+                        if k % 3 == 2 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            }
+            ui.add_space(4.0);
+            if ui.add_enabled(!chosen.is_empty(), egui::Button::new("Use the game's setting instead")).clicked() {
+                chosen.clear();
+                changed = true;
+            }
+        }));
+        if changed {
+            // (in the order of the list: the first is the fallback for a short line before any other was heard)
+            chosen.sort_by_key(|c| kd_speech::LANGS.iter().position(|l| l.code == c));
+            self.set_langs(chosen);
+        }
+    }
+
+    /// The speech models: which the languages need, which are loaded, and about how much memory each takes.
+    fn models_ui(&self, ui: &mut egui::Ui) {
+        let Some(st) = &self.status else { return };
+        let loaded: u32 = st
+            .models
+            .iter()
+            .filter(|m| m.state == kd_speech::ModelState::Loaded)
+            .map(|m| m.memory_mb)
+            .sum();
+        ui.label(
+            RichText::new(format!(
+                "Speech models (about {:.1} GB in memory now)",
+                loaded as f64 / 1000.0
+            ))
+            .color(Color32::GRAY),
+        );
+        egui::Grid::new("models")
+            .num_columns(4)
+            .spacing([10.0, 2.0])
+            .show(ui, |ui| {
+                for row in &st.models {
+                    if !row.needed && row.state == kd_speech::ModelState::NotLoaded {
+                        continue; // (not needed, not loaded: nothing to show)
+                    }
+                    let (text, colour) = model_state(row);
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 14.0), egui::Sense::hover());
+                    ui.painter().circle_filled(rect.center(), 4.0, colour);
+                    ui.label(row.title);
+                    ui.label(
+                        RichText::new(format!("~{:.1} GB", row.memory_mb as f64 / 1000.0))
+                            .color(Color32::GRAY),
+                    );
+                    ui.label(RichText::new(text).color(colour));
+                    ui.end_row();
+                }
+            });
     }
 
     fn switch_game(&mut self, id: &str) {
@@ -179,7 +313,9 @@ impl App {
     }
 
     fn do_update(&mut self) {
-        let Some(info) = self.update.clone() else { return };
+        let Some(info) = self.update.clone() else {
+            return;
+        };
         if !(cfg!(windows) && info.installer_url.is_some()) {
             open_url(&info.page);
             return;
@@ -205,7 +341,9 @@ impl App {
                     self.upd_text = match &r {
                         None if quiet => String::new(),
                         None => "You have the latest version.".into(),
-                        Some(i) if cfg!(windows) && i.installer_url.is_some() => "A new version is ready.".into(),
+                        Some(i) if cfg!(windows) && i.installer_url.is_some() => {
+                            "A new version is ready.".into()
+                        }
                         Some(_) => "A new version is out (download page).".into(),
                     };
                     self.update = r;
@@ -239,10 +377,19 @@ impl App {
 
     fn licenses(&self) {
         let p = paths::app_root().join("THIRD_PARTY_NOTICES.txt");
-        let p = if p.exists() { Some(p) } else { paths::repo_root().map(|r| r.join("THIRD_PARTY_NOTICES.txt")).filter(|p| p.exists()) };
+        let p = if p.exists() {
+            Some(p)
+        } else {
+            paths::repo_root()
+                .map(|r| r.join("THIRD_PARTY_NOTICES.txt"))
+                .filter(|p| p.exists())
+        };
         match p {
             Some(p) => open_url(&p.display().to_string()),
-            None => open_url(&format!("https://github.com/{}/blob/main/THIRD_PARTY_NOTICES.txt", paths::REPO)),
+            None => open_url(&format!(
+                "https://github.com/{}/blob/main/THIRD_PARTY_NOTICES.txt",
+                paths::REPO
+            )),
         }
     }
 
@@ -263,13 +410,16 @@ impl App {
 
     fn device_box(ui: &mut egui::Ui, id: &str, current: &mut String, devs: &[String]) -> bool {
         let mut changed = false;
-        egui::ComboBox::from_id_salt(id).width(330.0).selected_text(current.clone()).show_ui(ui, |ui| {
-            for name in std::iter::once(DEFAULT.to_string()).chain(devs.iter().cloned()) {
-                if ui.selectable_value(current, name.clone(), name).changed() {
-                    changed = true;
+        egui::ComboBox::from_id_salt(id)
+            .width(330.0)
+            .selected_text(current.clone())
+            .show_ui(ui, |ui| {
+                for name in std::iter::once(DEFAULT.to_string()).chain(devs.iter().cloned()) {
+                    if ui.selectable_value(current, name.clone(), name).changed() {
+                        changed = true;
+                    }
                 }
-            }
-        });
+            });
         changed
     }
 }
@@ -277,7 +427,9 @@ impl App {
 /// Opens a web page or a file with the system's program for it.
 fn open_url(target: &str) {
     #[cfg(windows)]
-    let _ = std::process::Command::new("cmd").args(["/C", "start", "", target]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", target])
+        .spawn();
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(target).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -294,7 +446,10 @@ fn clock() -> String {
     }
     #[cfg(not(windows))]
     {
-        let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         format!("{:02}:{:02}:{:02}", (s / 3600) % 24, (s / 60) % 60, s % 60)
     }
 }
@@ -322,20 +477,37 @@ impl eframe::App for App {
             let mut switch = None;
             ui.horizontal(|ui| {
                 ui.label("Game");
-                egui::ComboBox::from_id_salt("game").width(200.0).selected_text(game_name).show_ui(ui, |ui| {
-                    for g in kd_games::games() {
-                        if ui.selectable_label(g.id == self.game_id, g.name).clicked() && g.id != self.game_id {
-                            switch = Some(g.id.to_string());
+                egui::ComboBox::from_id_salt("game")
+                    .width(200.0)
+                    .selected_text(game_name)
+                    .show_ui(ui, |ui| {
+                        for g in kd_games::games() {
+                            if ui.selectable_label(g.id == self.game_id, g.name).clicked()
+                                && g.id != self.game_id
+                            {
+                                switch = Some(g.id.to_string());
+                            }
                         }
-                    }
-                });
+                    });
                 let (text, colour) = match &self.status {
-                    Some(st) if !st.error.is_empty() => (st.error.clone(), Color32::from_rgb(0xc0, 0x39, 0x2b)),
-                    Some(st) if st.state == "connected" => (format!("Connected to {game_name}"), Color32::from_rgb(0x2a, 0x9d, 0x4b)),
-                    Some(st) if st.state == "paused" => (format!("{game_name} paused (or the level ended)"), Color32::from_rgb(0xd0, 0xa0, 0x00)),
-                    _ => (format!("Waiting for {game_name}: start a level with {needs}"), Color32::from_rgb(0xd0, 0xa0, 0x00)),
+                    Some(st) if !st.error.is_empty() => {
+                        (st.error.clone(), Color32::from_rgb(0xc0, 0x39, 0x2b))
+                    }
+                    Some(st) if st.state == "connected" => (
+                        format!("Connected to {game_name}"),
+                        Color32::from_rgb(0x2a, 0x9d, 0x4b),
+                    ),
+                    Some(st) if st.state == "paused" => (
+                        format!("{game_name} paused (or the level ended)"),
+                        Color32::from_rgb(0xd0, 0xa0, 0x00),
+                    ),
+                    _ => (
+                        format!("Waiting for {game_name}: start a level with {needs}"),
+                        Color32::from_rgb(0xd0, 0xa0, 0x00),
+                    ),
                 };
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
                 ui.painter().circle_filled(rect.center(), 5.0, colour);
                 ui.add(egui::Label::new(text).wrap());
             });
@@ -346,49 +518,75 @@ impl eframe::App for App {
             ui.add_space(4.0);
 
             // ---- sound
-            let inner = ui.available_width() - 2.0 * (ui.style().spacing.window_margin.left as f32).max(6.0) - 2.0;
+            let inner = ui.available_width()
+                - 2.0 * (ui.style().spacing.window_margin.left as f32).max(6.0)
+                - 2.0;
             ui.group(|ui| {
                 ui.set_width(inner);
                 ui.label(RichText::new("Sound").strong());
-                egui::Grid::new("sound").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
-                    ui.label("Microphone");
-                    if Self::device_box(ui, "mic", &mut self.mic, &self.ins) {
-                        self.settings.set("mic", self.mic.clone());
-                        self.settings.save();
-                        let d = Self::device(&self.mic);
-                        if let Some(rt) = self.rt.as_mut() {
-                            rt.set_mic(d);
+                egui::Grid::new("sound")
+                    .num_columns(3)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label("Microphone");
+                        if Self::device_box(ui, "mic", &mut self.mic, &self.ins) {
+                            self.settings.set("mic", self.mic.clone());
+                            self.settings.save();
+                            let d = Self::device(&self.mic);
+                            if let Some(rt) = self.rt.as_mut() {
+                                rt.set_mic(d);
+                            }
                         }
-                    }
-                    let st = self.status.as_ref();
-                    let lvl = st.filter(|s| s.mic == "listening" || s.mic == "talking").map(|s| ((s.level + 60.0) / 60.0).clamp(0.0, 1.0)).unwrap_or(0.0);
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 12.0), egui::Sense::hover());
-                    ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Inside);
-                    let mut bar = rect;
-                    bar.set_width(120.0 * lvl as f32);
-                    let talking = st.is_some_and(|s| s.mic == "talking");
-                    ui.painter().rect_filled(bar, 0.0, if talking { Color32::from_rgb(0x2a, 0x9d, 0x4b) } else { Color32::from_rgb(0x7f, 0xbf, 0x8f) });
-                    ui.end_row();
-                    ui.label("Speakers");
-                    if Self::device_box(ui, "out", &mut self.out, &self.outs) {
-                        self.settings.set("out", self.out.clone());
-                        self.settings.save();
-                        let d = Self::device(&self.out);
-                        if let Some(rt) = self.rt.as_mut() {
-                            rt.set_output(d);
+                        let st = self.status.as_ref();
+                        let lvl = st
+                            .filter(|s| s.mic == "listening" || s.mic == "talking")
+                            .map(|s| ((s.level + 60.0) / 60.0).clamp(0.0, 1.0))
+                            .unwrap_or(0.0);
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(120.0, 12.0), egui::Sense::hover());
+                        ui.painter().rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(1.0, Color32::GRAY),
+                            egui::StrokeKind::Inside,
+                        );
+                        let mut bar = rect;
+                        bar.set_width(120.0 * lvl as f32);
+                        let talking = st.is_some_and(|s| s.mic == "talking");
+                        ui.painter().rect_filled(
+                            bar,
+                            0.0,
+                            if talking {
+                                Color32::from_rgb(0x2a, 0x9d, 0x4b)
+                            } else {
+                                Color32::from_rgb(0x7f, 0xbf, 0x8f)
+                            },
+                        );
+                        ui.end_row();
+                        ui.label("Speakers");
+                        if Self::device_box(ui, "out", &mut self.out, &self.outs) {
+                            self.settings.set("out", self.out.clone());
+                            self.settings.save();
+                            let d = Self::device(&self.out);
+                            if let Some(rt) = self.rt.as_mut() {
+                                rt.set_output(d);
+                            }
                         }
-                    }
-                    ui.end_row();
-                    ui.label("Volume");
-                    ui.spacing_mut().slider_width = 330.0;
-                    if ui.add(egui::Slider::new(&mut self.volume, 0.0..=100.0).show_value(false)).changed() {
-                        self.settings.set("volume", (self.volume / 100.0 * 100.0).round() / 100.0);
-                        if let Some(rt) = self.rt.as_mut() {
-                            rt.set_volume(self.volume / 100.0);
+                        ui.end_row();
+                        ui.label("Volume");
+                        ui.spacing_mut().slider_width = 330.0;
+                        if ui
+                            .add(egui::Slider::new(&mut self.volume, 0.0..=100.0).show_value(false))
+                            .changed()
+                        {
+                            self.settings
+                                .set("volume", (self.volume / 100.0 * 100.0).round() / 100.0);
+                            if let Some(rt) = self.rt.as_mut() {
+                                rt.set_volume(self.volume / 100.0);
+                            }
                         }
-                    }
-                    ui.end_row();
-                });
+                        ui.end_row();
+                    });
             });
             if ui.ctx().input(|i| i.pointer.any_released()) {
                 self.settings.save(); // (the volume: saved when the slider is let go)
@@ -398,16 +596,20 @@ impl eframe::App for App {
             ui.group(|ui| {
                 ui.set_width(inner);
                 ui.label(RichText::new("Speech to text").strong());
+                self.languages_ui(ui);
+                self.models_ui(ui);
                 if let Some(st) = &self.status {
                     let mic = match (&st.download, st.mic) {
-                        (Some(d), _) => format!("downloading the speech model, {}", download_text(d)),
+                        (Some(d), _) => {
+                            format!("downloading the speech model, {}", download_text(d))
+                        }
                         (None, "wanted") => "starting".into(),
                         (None, "loading") => "loading the speech models...".into(),
                         (None, "listening") => "listening".into(),
                         (None, "talking") => "hearing you".into(),
                         _ => "off".into(),
                     };
-                    ui.label(format!("Language: {}  (set in the game)    Microphone: {mic}", lang_name(&st.lang)));
+                    ui.label(format!("Microphone: {mic}"));
                     let hear = if !st.live.is_empty() {
                         format!("Hearing: {}", st.live)
                     } else if !st.last.is_empty() {
@@ -416,28 +618,45 @@ impl eframe::App for App {
                         String::new()
                     };
                     let n = hear.chars().count();
-                    ui.add(egui::Label::new(hear.chars().skip(n.saturating_sub(160)).collect::<String>()).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            hear.chars().skip(n.saturating_sub(160)).collect::<String>(),
+                        )
+                        .wrap(),
+                    );
                 }
             });
 
             // ---- the log, the buttons
             let bottom_h = 34.0;
             let h = (ui.available_height() - bottom_h).max(60.0);
-            egui::Frame::new().fill(ui.visuals().extreme_bg_color).inner_margin(6.0).show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                egui::ScrollArea::vertical().max_height(h).stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                    for line in &self.log_lines {
-                        ui.label(RichText::new(line).monospace().size(12.0));
-                    }
+            egui::Frame::new()
+                .fill(ui.visuals().extreme_bg_color)
+                .inner_margin(6.0)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    egui::ScrollArea::vertical()
+                        .max_height(h)
+                        .stick_to_bottom(true)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            for line in &self.log_lines {
+                                ui.label(RichText::new(line).monospace().size(12.0));
+                            }
+                        });
                 });
-            });
             ui.horizontal(|ui| {
                 let label = match &self.update {
-                    Some(i) if cfg!(windows) && i.installer_url.is_some() => format!("Update to {}", i.version),
+                    Some(i) if cfg!(windows) && i.installer_url.is_some() => {
+                        format!("Update to {}", i.version)
+                    }
                     Some(i) => format!("Get {}", i.version),
                     None => "Check for updates".into(),
                 };
-                if ui.add_enabled(!self.upd_busy, egui::Button::new(label)).clicked() {
+                if ui
+                    .add_enabled(!self.upd_busy, egui::Button::new(label))
+                    .clicked()
+                {
                     self.check_updates(false);
                 }
                 if ui.button("Licenses").clicked() {
@@ -477,29 +696,48 @@ pub fn main() -> i32 {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{} {}", paths::APP_NAME, paths::VERSION))
-            .with_inner_size([760.0, 520.0])
-            .with_min_inner_size([560.0, 460.0]),
+            .with_inner_size([780.0, 640.0])
+            .with_min_inner_size([600.0, 520.0]),
         renderer: first,
         ..Default::default()
     };
-    match eframe::run_native(paths::APP_NAME, opts, Box::new(|cc| Ok(Box::new(App::new(cc))))) {
+    match eframe::run_native(
+        paths::APP_NAME,
+        opts,
+        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+    ) {
         Ok(()) => 0,
         Err(e) if std::env::var_os("KOTODAMA_RENDERER").is_none() => {
             // (that renderer would not start here: once more with the other one - in a new process, as a window
             //  system can be set up only once per process)
-            let other = if first == eframe::Renderer::Wgpu { "glow" } else { "wgpu" };
+            let other = if first == eframe::Renderer::Wgpu {
+                "glow"
+            } else {
+                "wgpu"
+            };
             crate::instance::release();
             let args: Vec<String> = std::env::args().skip(1).collect();
-            match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(args).env("KOTODAMA_RENDERER", other).status()) {
+            match std::env::current_exe().and_then(|exe| {
+                std::process::Command::new(exe)
+                    .args(args)
+                    .env("KOTODAMA_RENDERER", other)
+                    .status()
+            }) {
                 Ok(st) => st.code().unwrap_or(1),
                 Err(e2) => {
-                    message(&format!("{} could not open its window: {e} ({e2})", paths::APP_NAME));
+                    message(&format!(
+                        "{} could not open its window: {e} ({e2})",
+                        paths::APP_NAME
+                    ));
                     1
                 }
             }
         }
         Err(e) => {
-            message(&format!("{} could not open its window: {e}", paths::APP_NAME));
+            message(&format!(
+                "{} could not open its window: {e}",
+                paths::APP_NAME
+            ));
             1
         }
     }
@@ -512,7 +750,12 @@ fn message(text: &str) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
         let t: Vec<u16> = format!("{text}\0").encode_utf16().collect();
         let c: Vec<u16> = format!("{}\0", paths::APP_NAME).encode_utf16().collect();
-        MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(
+            std::ptr::null_mut(),
+            t.as_ptr(),
+            c.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
     }
     #[cfg(not(windows))]
     eprintln!("{text}");

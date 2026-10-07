@@ -9,7 +9,10 @@ fn main() {
         let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
         let mut res = winresource::WindowsResource::new();
         res.set("ProductName", "Kotodama")
-            .set("FileDescription", "Kotodama: proximity voice chat with live speech to text")
+            .set(
+                "FileDescription",
+                "Kotodama: proximity voice chat with live speech to text",
+            )
             .set("CompanyName", "Kotodama")
             .set("LegalCopyright", "Copyright (c) 2026 AgeOfAlgorithms (MIT)")
             .set("OriginalFilename", "Kotodama.exe")
