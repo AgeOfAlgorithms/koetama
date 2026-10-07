@@ -420,7 +420,8 @@ impl App {
             });
     }
 
-    /// The buttons at the bottom: updates (the gradient: the main action), the licenses, what the update check says.
+    /// The bottom row: updates (the gradient: the main action) and what the update check says. (No licenses button -
+    /// the user, 2026-10-06: players do not need it; THIRD_PARTY_NOTICES.txt ships in the install folder.)
     fn footer_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let label = match &self.update {
@@ -432,9 +433,6 @@ impl App {
             };
             if theme::primary_button(ui, &label, !self.upd_busy).clicked() {
                 self.check_updates(false);
-            }
-            if ui.button("Licenses").clicked() {
-                self.licenses();
             }
             ui.label(RichText::new(&self.upd_text).color(theme::MUTED));
         });
@@ -598,24 +596,6 @@ impl App {
                     self.upd_busy = false;
                 }
             }
-        }
-    }
-
-    fn licenses(&self) {
-        let p = paths::app_root().join("THIRD_PARTY_NOTICES.txt");
-        let p = if p.exists() {
-            Some(p)
-        } else {
-            paths::repo_root()
-                .map(|r| r.join("THIRD_PARTY_NOTICES.txt"))
-                .filter(|p| p.exists())
-        };
-        match p {
-            Some(p) => open_url(&p.display().to_string()),
-            None => open_url(&format!(
-                "https://github.com/{}/blob/main/THIRD_PARTY_NOTICES.txt",
-                paths::REPO
-            )),
         }
     }
 

@@ -42,7 +42,7 @@ WizardSmallImageFile={#ArtDir}\small-100.bmp,{#ArtDir}\small-125.bmp,{#ArtDir}\s
 #endif
 CloseApplications=yes
 RestartApplications=no
-; (no license page: MIT needs no click-through - the license ships with the app, its Licenses button)
+; (no license page: MIT needs no click-through - LICENSE and THIRD_PARTY_NOTICES.txt ship in the install folder)
 DisableWelcomePage=no
 #ifdef IconFile
 SetupIconFile={#IconFile}
