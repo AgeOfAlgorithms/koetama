@@ -1,6 +1,6 @@
 [package]
 name = "kd-games"
-description = "Kotodama: the Game trait, finding Steam games, the Teardown link"
+description = "Kotodama: the Game trait, game mod profiles and their connectors (files, socket), finding Steam games"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,9 +8,8 @@ license.workspace = true
 [dependencies]
 kd-common.workspace = true
 regex.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true

@@ -108,7 +108,7 @@ fn teardown_module_end_to_end() {
     put(&save, &xml("4|1|1.00|5|0|1|0|en|1|"));
     let sink = Arc::new(Sink::default());
     let mut g = Teardown::new(sink.clone(), kd_common::null_log(), Some(save.clone()), Some(vec![mods.clone()]));
-    assert_eq!((g.id(), g.name()), ("teardown", "Teardown"));
+    assert_eq!((g.id(), g.name()), ("teardown-proximity-babble-chat", "Teardown"));
     assert!(g.feed().is_none() && !g.wants_mic() && g.language() == "en" && g.live_words() && !g.connected());
     let lines = g.describe();
     assert_eq!(lines[0], format!("reading {}", save.display()));

@@ -389,7 +389,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         io_dir: args.io_dir.clone().map(Into::into),
     };
     println!("preparing...");
-    let mut rt = Runtime::start(kd_games::by_id("teardown"), log.clone(), opts, mic_source);
+    let mut rt = Runtime::start(kd_games::by_id("teardown-proximity-babble-chat"), log.clone(), opts, mic_source);
     let game = rt.game.clone();
     if args.type_ {
         // (lines piped in: a test)
@@ -420,7 +420,7 @@ pub fn main(argv: Vec<String>) -> i32 {
     if args.auto {
         println!("auto test: {} lines, {AUTO_GAP:.0} s apart, once a level is running. Stay in the game and watch the chat.", AUTO_LINES.len());
     }
-    let needs = rt.kind.needs;
+    let needs = rt.kind.needs.clone();
     let t0 = Instant::now();
     let mut auto_sent = 0usize;
     let mut auto_next: Option<Instant> = None;
@@ -476,7 +476,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         for line in pending {
             println!("\r{line:<118}");
         }
-        let st = status_line(&rt.status(), needs);
+        let st = status_line(&rt.status(), &needs);
         print!("\r{:<118.118}", st);
         let _ = std::io::stdout().flush();
     }

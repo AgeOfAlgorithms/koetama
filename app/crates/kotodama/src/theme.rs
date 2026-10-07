@@ -1,17 +1,17 @@
-//! Kotodama's look (the user's pick, 2026-10-06: "Ember", with the voice-wave icon): warm graphite, a red-to-amber
+//! Kotodama's look (the user's pick, 2026-10-06: "Ember", with the voice-wave icon; near-black, the user's ask): warm near-black, a red-to-amber
 //! accent, rounded cards, the system's own UI font (fonts.rs). Dark only: it sits next to a game.
 use eframe::egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Margin, Mesh, Pos2, Rect, RichText, Sense,
     Stroke, TextStyle, Vec2,
 };
 
-pub const BG: Color32 = Color32::from_rgb(0x1a, 0x15, 0x15);
-pub const CARD: Color32 = Color32::from_rgb(0x26, 0x1d, 0x1d);
+pub const BG: Color32 = Color32::from_rgb(0x0b, 0x09, 0x09);
+pub const CARD: Color32 = Color32::from_rgb(0x16, 0x11, 0x11);
 /// inputs, the log, the "hearing" box: sunk below the cards
-pub const SUNK: Color32 = Color32::from_rgb(0x13, 0x0f, 0x0f);
-pub const LINE: Color32 = Color32::from_rgb(0x3a, 0x2c, 0x2b);
-pub const WIDGET: Color32 = Color32::from_rgb(0x30, 0x25, 0x24);
-pub const WIDGET_HOVER: Color32 = Color32::from_rgb(0x3d, 0x2e, 0x2c);
+pub const SUNK: Color32 = Color32::from_rgb(0x05, 0x04, 0x04);
+pub const LINE: Color32 = Color32::from_rgb(0x2a, 0x20, 0x1f);
+pub const WIDGET: Color32 = Color32::from_rgb(0x20, 0x18, 0x17);
+pub const WIDGET_HOVER: Color32 = Color32::from_rgb(0x2c, 0x21, 0x1f);
 pub const FG: Color32 = Color32::from_rgb(0xee, 0xe7, 0xe6);
 pub const MUTED: Color32 = Color32::from_rgb(0xa8, 0x98, 0x96);
 pub const RED: Color32 = Color32::from_rgb(0xef, 0x44, 0x44);
@@ -278,101 +278,57 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
-/// A game mod as the picker shows it: a tile with the game's initial in the gradient, the game, the mod under it.
-fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: bool, selected: bool) {
+/// A game mod as the picker shows it: a tile with the game's initial in the gradient, the game, the mod under it,
+/// and a badge (a community profile).
+fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: bool, selected: bool, badge: Option<&str>) {
     let p = ui.painter();
-    let fill = if hovered {
-        WIDGET_HOVER
-    } else if selected {
-        CARD
-    } else {
-        WIDGET
-    };
+    let fill = if hovered { WIDGET_HOVER } else if selected { CARD } else { WIDGET };
     p.rect_filled(rect, CornerRadius::same(10), fill);
-    let stroke = if hovered {
-        ACCENT.gamma_multiply(0.7)
-    } else {
-        LINE
-    };
-    p.rect_stroke(
-        rect,
-        CornerRadius::same(10),
-        Stroke::new(1.0, stroke),
-        egui::StrokeKind::Inside,
-    );
-    let tile = Rect::from_min_size(
-        rect.min + Vec2::new(8.0, (rect.height() - 30.0) / 2.0),
-        Vec2::splat(30.0),
-    );
+    let stroke = if hovered { ACCENT.gamma_multiply(0.7) } else { LINE };
+    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+    let tile = Rect::from_min_size(rect.min + Vec2::new(8.0, (rect.height() - 30.0) / 2.0), Vec2::splat(30.0));
     gradient(p, tile, RED, AMBER, 8.0);
-    let letter = game
-        .chars()
-        .next()
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    p.text(
-        tile.center(),
-        egui::Align2::CENTER_CENTER,
-        letter,
-        FontId::new(16.0, semibold()),
-        Color32::WHITE,
-    );
+    let letter = game.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    p.text(tile.center(), egui::Align2::CENTER_CENTER, letter, FontId::new(16.0, semibold()), Color32::WHITE);
     let x = tile.right() + 10.0;
-    p.text(
-        Pos2::new(x, rect.center().y - 9.0),
-        egui::Align2::LEFT_CENTER,
-        game,
-        FontId::new(14.5, semibold()),
-        FG,
-    );
-    p.text(
+    p.text(Pos2::new(x, rect.center().y - 9.0), egui::Align2::LEFT_CENTER, game, FontId::new(14.5, semibold()), FG);
+    let sub = p.text(
         Pos2::new(x, rect.center().y + 9.0),
         egui::Align2::LEFT_CENTER,
         format!("{mod_name} mod"),
         FontId::new(12.5, FontFamily::Proportional),
         MUTED,
     );
+    if let Some(b) = badge {
+        let g = p.layout_no_wrap(b.to_string(), FontId::new(10.5, semibold()), ACCENT_TEXT);
+        let r = Rect::from_min_size(Pos2::new(sub.right() + 8.0, sub.center().y - 8.0), g.size() + Vec2::new(12.0, 4.0));
+        p.rect_filled(r, CornerRadius::same(255), ACCENT.gamma_multiply(0.18));
+        p.galley(r.min + Vec2::new(6.0, 2.0), g, ACCENT_TEXT);
+    }
 }
 
 /// The game mod picker's button: the chosen one, and a chevron.
 pub fn game_button(ui: &mut egui::Ui, game: &str, mod_name: &str, width: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 46.0), Sense::click());
-    game_face(ui, rect, game, mod_name, resp.hovered(), false);
+    game_face(ui, rect, game, mod_name, resp.hovered(), false, None);
     let c = Pos2::new(rect.right() - 18.0, rect.center().y);
-    ui.painter().line(
-        vec![
-            c + Vec2::new(-5.0, -2.5),
-            c + Vec2::new(0.0, 2.5),
-            c + Vec2::new(5.0, -2.5),
-        ],
-        Stroke::new(1.8, MUTED),
-    );
+    ui.painter().line(vec![c + Vec2::new(-5.0, -2.5), c + Vec2::new(0.0, 2.5), c + Vec2::new(5.0, -2.5)], Stroke::new(1.8, MUTED));
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     resp
 }
 
-/// A game mod in the picker's list.
-pub fn game_row(
-    ui: &mut egui::Ui,
-    game: &str,
-    mod_name: &str,
-    selected: bool,
-    width: f32,
-) -> egui::Response {
+/// A game mod in the picker's list (community: a profile file, not built in).
+pub fn game_row(ui: &mut egui::Ui, game: &str, mod_name: &str, selected: bool, community: bool, width: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 46.0), Sense::click());
-    game_face(ui, rect, game, mod_name, resp.hovered(), selected);
+    game_face(ui, rect, game, mod_name, resp.hovered(), selected, community.then_some("community"));
     if selected {
         let c = Pos2::new(rect.right() - 18.0, rect.center().y);
-        ui.painter().line(
-            vec![
-                c + Vec2::new(-5.0, 0.0),
-                c + Vec2::new(-1.5, 3.5),
-                c + Vec2::new(5.0, -4.0),
-            ],
-            Stroke::new(2.0, ACCENT_TEXT),
-        );
+        ui.painter().line(vec![c + Vec2::new(-5.0, 0.0), c + Vec2::new(-1.5, 3.5), c + Vec2::new(5.0, -4.0)], Stroke::new(2.0, ACCENT_TEXT));
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     resp
 }

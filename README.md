@@ -1,105 +1,116 @@
-# Kotodama
+<p align="center">
+  <img src="app/assets/kotodama-256.png" width="128" height="128" alt="Kotodama">
+</p>
 
-**Proximity voice chat with live speech-to-text, for games.** Kotodama ("word spirit" in Japanese) runs next to
-your game. It plays the other players' voices placed where they stand: louder when close, from their side, muffled
-behind walls. It also writes what you say as you say it, in many languages, so the game can show your words in
-speech bubbles and a chat history. A spoken line can even open a door.
+<h1 align="center">Kotodama</h1>
 
-Everything runs on your own PC: no audio or text is sent to any service. **Status:** early prototype (version 0.2:
-the app is written in Rust; the first version was Python).
+<p align="center">
+  <b>Proximity voice chat with live speech-to-text, for game mods.</b><br>
+  Hear other players where they stand. Your words appear in the game as you say them.
+</p>
 
-## Games
+<p align="center">
+  <a href="https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/releases"><img src="https://img.shields.io/github/v/release/AgeOfAlgorithms/proximity-voice-chat-STT-engine?include_prereleases&label=release&color=f26d2a" alt="Release"></a>
+  <a href="https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/actions/workflows/build.yml"><img src="https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3a2c2b" alt="Windows | Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f59e0b" alt="MIT license"></a>
+</p>
 
-Pick the game in Kotodama's window. Each game is a small module in [`app/crates/kd-games`](app/crates/kd-games/).
+Kotodama ("word spirit" in Japanese) runs next to your game. It plays the other players' voices placed where they
+stand: louder when close, from their side, muffled behind walls. It also writes what you say as you say it, so the
+game can show your words in speech bubbles and a chat history. A spoken line can even open a door.
 
-| Game | What it needs |
-|---|---|
-| Teardown | The [Proximity Babble Chat](https://github.com/AgeOfAlgorithms/teardown-prox-text-chat-mod) mod (Steam Workshop) |
+**Everything runs on your own PC.** No audio or text is sent to any service, and no account is needed.
 
-Adding a game: see [PROTOCOL.md](PROTOCOL.md), "Adding a game".
+> **Status:** early prototype, version 0.2.
 
-## Install (Windows)
+## Highlights
 
-1. Download `Kotodama-Setup-<version>.exe` from [Releases](https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/releases).
-2. Run it. It installs for your user only, so it needs no administrator rights.
-3. Start Kotodama, pick your game, then start the game.
+- **Positional voices.** Each voice gets the game's volume, direction and muffling, with a short delay.
+- **Live words.** Your line appears while you talk and is finished when you stop. Words already shown never jump back.
+- **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line.
+- **Fair proximity.** Each word carries the time it was said, so a player who walks up mid-sentence sees only what
+  they could have heard.
+- **Light on your PC.** Only the speech models for your languages load: about 0.9 GB of memory for one language, up
+  to 1.5 GB for several. It runs on the CPU, below the game's priority, and stays idle while you are silent.
+- **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
 
-The first time you speak, Kotodama downloads the speech model for your language once: about 670 MB for English and
-the other European languages, 225 MB for Russian, 240 MB for Chinese, Cantonese, Japanese and Korean. The window
-shows the download's progress, and a broken download picks up where it stopped. Updates: **Check for updates** in the
-window installs the new version and restarts Kotodama. Uninstalling keeps your settings and downloaded models in
-`%LOCALAPPDATA%\Kotodama`; delete that folder to remove them too.
+## Install
 
-**Linux / Steam Deck:** download `Kotodama-<version>-linux.tar.gz`, unpack it, run `Kotodama/Kotodama`. Teardown
-runs through Proton; Kotodama finds its files inside Teardown's Proton folder.
+**Windows:** download `Kotodama-Setup-<version>.exe` from
+[Releases](https://github.com/AgeOfAlgorithms/proximity-voice-chat-STT-engine/releases) and run it. It installs for
+your user only, with no administrator rights. Then start Kotodama, pick your game mod and start the game.
 
-## What it does
+**Linux / Steam Deck:** download `Kotodama-<version>-linux.tar.gz`, unpack it and run `Kotodama/Kotodama`. Games
+running through Proton are found inside their Proton folder.
 
-| Part | What |
-|---|---|
-| Voices | Each voice gets the game's volume, direction and muffling (distance, walls), mixed with a short delay. |
-| Speech detection | Silero VAD v5 finds where a line starts and ends. |
-| Speech to text | The line so far is written again every second (the live words: only what two passes agree on, so they never jump back), then once more when you stop. Each language has its own model: Parakeet TDT 0.6B v3 (English, other European languages), GigaAM v3 (Russian), SenseVoice Small (Mandarin, Cantonese, Japanese, Korean). |
-| Word times | Each word's start time travels with the text, so a player who walks up mid-sentence sees only what was said after they arrived. |
-| Several languages | Pick every language you speak. With several, SpeechBrain's VoxLingua107 detector splits a line by language (choosing among exactly yours), and each stretch is written by its own model. A line can mix languages. |
+The first time you speak, Kotodama downloads the speech model for your language once, showing its progress:
+
+| Model | Languages | Download |
+|---|---|---|
+| Parakeet v3 | English and the other European languages | 670 MB |
+| GigaAM v3 | Russian | 225 MB |
+| SenseVoice | Mandarin, Cantonese, Japanese, Korean | 240 MB |
+
+**Updates:** the window's **Check for updates** installs a new version and restarts Kotodama. Uninstalling keeps your
+settings and models in `%LOCALAPPDATA%\Kotodama`; delete that folder to remove them too.
+
+## Game mods
+
+| Game | Mod | Uses |
+|---|---|---|
+| Teardown | [Proximity Babble Chat](https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496) | voices and speech to text |
+
+**Adding a game:** a mod made for Kotodama comes with a small profile file (`.json`). In the window, open the game
+mod list and choose **Add game mod...**. Kotodama shows what the profile reads, writes and listens on before adding
+it. A profile is not a program: it only points Kotodama's built-in connectors at a game's files or at a local port,
+and it can ask for voices, speech to text, or both.
+
+**Making a mod for Kotodama:** see [PROTOCOL.md](PROTOCOL.md) for the profile format and the two connectors (files,
+or a local socket), with an example profile and test client in [`examples/`](examples/).
 
 ## Languages
 
-In Kotodama's window, **Languages I speak** → **Choose...**: tick every language you speak. Kotodama loads only the
-speech models those need, and shows each model, whether it is loaded and about how much memory it takes. Fewer
-languages are lighter and more accurate. Until you choose, it follows the game's setting ("Language I speak").
+Open **Languages I speak → Choose...** and tick every language you speak. Fewer languages are lighter and more
+accurate. With several, Kotodama tells them apart as you speak, choosing only among yours. Until you choose, it
+follows the game's own language setting.
 
-| Support | Languages | Model, memory |
-|---|---|---|
-| Fully supported | English, Spanish, French, German, Italian, Portuguese, Dutch, Polish, Ukrainian | Parakeet v3, ~0.7 GB |
-| | Russian | GigaAM v3, ~0.25 GB |
-| | Mandarin, Cantonese, Japanese, Korean | SenseVoice, ~0.26 GB |
-| Soft support (beta: less accurate) | Czech, Slovak, Romanian, Croatian, Bulgarian, Finnish, Swedish, Hungarian | Parakeet v3 |
-| Weak support (experimental: many words come out wrong) | Danish, Estonian, Latvian, Lithuanian, Slovenian, Greek, Maltese | Parakeet v3 |
+| Support | Languages |
+|---|---|
+| **Fully supported** | English, Spanish, French, German, Italian, Portuguese, Dutch, Polish, Ukrainian, Russian, Mandarin, Cantonese, Japanese, Korean |
+| **Beta** (less accurate) | Czech, Slovak, Romanian, Croatian, Bulgarian, Finnish, Swedish, Hungarian |
+| **Experimental** (many words come out wrong) | Danish, Estonian, Latvian, Lithuanian, Slovenian, Greek, Maltese |
 
-Several languages add the language detector (~0.1 GB). The first time a model is needed it downloads once; loading
-it takes 1.5 to 3.5 s.
+## How it works
 
-## Run from source
+| Part | How |
+|---|---|
+| Voices | The game sends each speaker's volume, direction and muffle; Kotodama mixes them in stereo, low-passed behind walls. |
+| Speech detection | Silero VAD v5 finds where a line starts and ends. |
+| Speech to text | The line so far is transcribed again every second; only words two passes agree on are shown. One more pass when you stop gives the finished line. |
+| Language detection | SpeechBrain's VoxLingua107 detector splits a mixed-language line into stretches, each written by its language's model. |
+| Engine | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and ONNX Runtime, on the CPU. |
 
-Kotodama is a Rust program ([`app/`](app/)): a few small crates, listed in [`app/DESIGN.md`](app/DESIGN.md). It needs
-Rust (stable; on Windows the MSVC build tools).
+## For developers
 
-    cd app
-    cargo run -p kotodama                       # the window
-    cargo run -p kotodama -- --cli --help       # the command line, with test modes (no microphone needed)
+Kotodama is a Rust program in [`app/`](app/), split into small crates ([`app/DESIGN.md`](app/DESIGN.md)). It needs
+stable Rust, and on Windows the MSVC build tools.
 
-The speech engine is [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with ONNX Runtime; its libraries download
-with the first build. The language detector is built once with `python engine/export_lid.py` (needs torch,
-speechbrain and onnx, in a separate environment if you like) and found in `export/lid/`.
+```sh
+cd app
+cargo run -p kotodama                     # the window
+cargo run -p kotodama -- --cli --help     # the command line, with test modes (no microphone needed)
+cargo test --workspace                    # every part against the Python reference's answers
+python build.py                           # dist/Kotodama/ and, with Inno Setup 6, the Windows installer
+```
 
-The first version was Python ([`engine/`](engine/)). It stays as the reference the Rust app is tested against:
-`app/fixtures/make_fixtures.py` writes its answers, and the Rust tests compare. The benchmarks behind every model
-choice are in [`bench/`](bench/).
-
-## Build
-
-    python build.py          # dist/Kotodama/ and, on Windows with Inno Setup 6, dist/Kotodama-Setup-<version>.exe
-
-The installed app is one program (`Kotodama.exe`, with the C runtime built in), the speech engine's two libraries
-(`sherpa-onnx-c-api.dll`, `onnxruntime.dll`) and the language detector: about 90 MB, a 52 MB installer. GitHub
-Actions builds Windows and Linux on every push ([`.github/workflows/build.yml`](.github/workflows/build.yml)); a
-`v<version>` tag makes a draft release.
-
-`Kotodama --selftest` checks that a build's native parts load: the window, sound, sherpa-onnx, the shipped language
-detector, HTTPS for the model downloads and the update check. CI runs it on each build, and on Windows also on the
-installed copy, before it uninstalls it again. The installer takes `/VERYSILENT` for an install without questions;
-add `/RELAUNCH=1` to start Kotodama afterwards (the updater does).
-
-## Tests
-
-    cd app
-    cargo test --workspace                          # each part against the Python reference's answers
-    cargo test --workspace -- --include-ignored     # + the real speech models and the sound devices (this PC)
-    python engine/test_e2e.py                       # with KOTODAMA_EXE=dist/Kotodama/Kotodama.exe: a fake game,
-                                                    # the built app end to end
+- The language detector is built once with `python engine/export_lid.py` (torch, speechbrain and onnx).
+- The first version was Python ([`engine/`](engine/)). It stays as the reference the Rust tests compare against, and
+  [`bench/`](bench/) holds the benchmarks behind every model choice.
+- `Kotodama --selftest` checks a build's native parts. CI runs it on every build, and on Windows also installs,
+  tests and uninstalls the installer.
 
 ## License
 
-MIT (see [LICENSE](LICENSE)). The models and libraries Kotodama uses, with their licenses, are listed in
+MIT, see [LICENSE](LICENSE). The models and libraries Kotodama uses are listed with their licenses in
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).

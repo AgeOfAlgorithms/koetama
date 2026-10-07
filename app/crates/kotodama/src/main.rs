@@ -8,6 +8,7 @@
 
 mod cli;
 mod console;
+mod dialog;
 mod fonts;
 mod gui;
 mod instance;

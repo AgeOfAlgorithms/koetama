@@ -106,7 +106,7 @@ fn voices_as_python() {
 fn the_game_list() {
     let all = games();
     assert_eq!(all.len(), 1);
-    assert_eq!(by_id("teardown").name, "Teardown");
+    assert_eq!(by_id("teardown-proximity-babble-chat").name, "Teardown");
     assert_eq!(by_id("no such game").id, all[0].id);
     for g in &all {
         assert!(!g.id.is_empty() && !g.name.is_empty() && !g.needs.is_empty());

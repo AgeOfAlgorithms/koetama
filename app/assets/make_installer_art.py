@@ -14,7 +14,7 @@ import make_icon
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, 'installer')
-BG = (0x1a, 0x15, 0x15)
+BG = (0x0b, 0x09, 0x09)
 FG = (0xee, 0xe7, 0xe6)
 MUTED = (0xa8, 0x98, 0x96)
 SCALES = [100, 125, 150, 200, 250]

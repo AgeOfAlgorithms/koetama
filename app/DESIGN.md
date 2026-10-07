@@ -10,7 +10,7 @@ itself; each crate's tests compare against them. Do not change the Python side t
       crates/kd-common        names, folders, word units, model downloads, the Feed type          (engine/paths.py, fetch.py, asr.py text helpers)
       crates/kd-audio         the voice mixer, the muffle low-pass, wav, resampling, sound devices (engine/audio.py)
       crates/kd-speech        speech to text: models, VAD, language stitching, live words, mics  (engine/asr.py)
-      crates/kd-games         the Game trait, Steam, the Teardown link                            (engine/games/, steam.py)
+      crates/kd-games         the Game trait, game mod profiles, connectors (files, socket), Steam (engine/games/, steam.py)
       crates/kd-update        updates from GitHub Releases                                        (engine/updater.py)
       crates/kotodama         the program: runtime, window (egui), command line, selftest         (runtime.py, kotodama.py, teardown_helper.py)
 
@@ -160,14 +160,19 @@ pub trait Game: Send {
     fn updates(&self) -> u64;                                            // live feeds read
     fn describe(&self) -> Vec<String>;                                   // "reading <save>", "my files ... go to: <dirs>"
 }
-pub struct GameKind { pub id: &'static str, pub name: &'static str, pub needs: &'static str,
-                      pub make: fn(Arc<dyn FeedSink>, Log, Option<PathBuf>) -> Box<dyn Game> }   // (io_dir override)
-pub fn games() -> Vec<GameKind>;  pub fn by_id(id: &str) -> GameKind;  // unknown: the first
+pub struct GameKind;  pub fn games();  pub fn by_id();  ...                // see "Game mod profiles" below
 pub mod steam { steam_root, libraries, app_library, install_dir, workshop_dir, proton_user, documents_dir }
+pub mod profile { Profile, Connector, FilesConfig, SocketConfig, MessageFormat, TestVoice, PathTemplate, PathSpec,
+                  Place, safe_prefix, this_pc }                          // the profile format, validation, summary
+pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, parse_feed, find_feeds, text_prefab,
+                json_message, times_hex }                               // the files connector
+pub mod socket { SocketGame, parse_socket_feed, PROTOCOL, MAX_LINE }   // the socket connector
+pub mod voices { make_in, for_profile }                                 // test voices (Windows SAPI)
 pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedReader, times_hex, text_prefab, Link,
-                   make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown }
+                   make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown (= FilesGame), profile() }
 ```
-Env overrides as Python: SAVEPROBE_DIR (the savegame's folder), HFP_MODS (the mods folder) - test_e2e.py uses them.
+Env overrides as Python: SAVEPROBE_DIR (the feed file's folder; the file keeps the profile's name), HFP_MODS (the
+only output folder) - test_e2e.py uses them; KOTODAMA_PROFILES_DIR (tests: the profiles folder).
 
 ## kd-update (engine/updater.py)
 
@@ -196,3 +201,48 @@ Each crate builds and tests on its own: `cargo test -p <crate>` from `app/`. Whi
 once, each uses its own target folder (`CARGO_TARGET_DIR=app/target/<crate>`) so builds do not wait on each other.
 Tests that need the real models (the Hugging Face cache on this PC, export/ from the benchmarks) are `#[ignore]`d and
 run with `cargo test -p <crate> -- --include-ignored`.
+
+## Game mod profiles (2026-10-06: the user - games are added without code review)
+
+A game mod is a PROFILE (a small JSON file), never code: Kotodama's built-in CONNECTORS do the talking, a profile
+only names one and gives its settings. Built-in profiles (Teardown) are compiled in; others are `*.json` files in
+`kd_games::profiles_dir()` (= `paths::data_dir()/games`), added from the window ("Add game mod...": a preview of what
+the profile reads, writes and listens on, then a copy into that folder) or dropped there by hand.
+
+Connectors:
+- `files`: the link PROTOCOL.md describes (Teardown's): a feed string read from a file (a regex finds it; the tag of
+  the mod copy that wrote it chooses the output folder), message files written next to the mod. Paths take
+  placeholders: {documents} {localappdata} {home} {steam_app:ID} (install folder) {steam_workshop:ID}
+  {proton_user:ID} {env:NAME}; an entry may be a list of candidates (the first that resolves and exists is used).
+  It deletes only the files it writes (`<prefix>on`, `<prefix>p<n>`, `<prefix>t<n>.<ext>`, `<prefix>w<n>.tmp`), the
+  prefix must be 3+ letters/digits/_ ending in `_`, and it writes only into folders that exist.
+- `socket`: a TCP server on 127.0.0.1 (the profile's port): newline-separated JSON both ways; the mod sends its
+  feed, Kotodama sends what the player said (no acks or pings: the connection is the liveness).
+
+```rust
+// kd-games (the interface the window and the runtime use)
+#[derive(Clone)] pub struct GameKind {
+    pub id: String, pub name: String, pub mod_name: String, pub mod_url: String, pub author: String,
+    pub needs: String,                 // "the Proximity Babble Chat mod" (the waiting line)
+    pub builtin: bool,                 // compiled in (else a profile file)
+    pub source: Option<PathBuf>,       // the profile file
+    pub summary: Vec<String>,          // what it does, for the import preview: "reads <file>", "writes into <dir>",
+                                       // "listens on 127.0.0.1:<port>" (placeholders already resolved here)
+    pub voices: bool,                  // "uses": "voices" - Kotodama plays the speakers from the feed (audio output)
+    pub speech: bool,                  // "uses": "speech" - Kotodama listens to the mic, sends what was said
+    pub profile: Arc<Profile>,         // the parsed profile
+}
+impl GameKind { pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game>; }
+pub fn games() -> Vec<GameKind>;                                   // built-ins, then the profiles folder's valid ones
+pub fn by_id(id: &str) -> GameKind;                                // unknown: the first
+pub fn profiles_dir() -> PathBuf;
+pub fn load_profile(path: &Path) -> Result<GameKind, String>;      // parse + validate (the preview)
+pub fn install_profile(path: &Path) -> Result<GameKind, String>;   // validate, copy into profiles_dir (replaces the same id)
+pub fn remove_profile(id: &str) -> Result<(), String>;             // a profile file's game (not a built-in)
+pub fn bad_profiles() -> Vec<(PathBuf, String)>;                   // files in the folder that do not load, and why
+```
+games()/by_id()/bad_profiles() are cached until the folder's *.json files change (cheap every frame; the first call
+resolves the placeholders: registry + Steam's .vdf files, a few ms). make() is cheap; Game::start() starts the
+connector's thread; Game::test_voices() blocks (PowerShell makes missing wavs, seconds each). A profile's "uses"
+lists "voices" and/or "speech" (default both): a speech-only game's feed has no speakers, a voices-only game's feed
+never asks for the microphone (the connectors enforce both).

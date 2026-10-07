@@ -126,10 +126,12 @@ impl Runtime {
         let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
         let sink: Arc<dyn kd_common::feed::FeedSink> = Arc::new(MixerSink(mixer.clone()));
-        let game = (kind.make)(sink, log.clone(), opts.io_dir.clone());
+        let game = kind.make(sink, log.clone(), opts.io_dir.clone());
         // (no test voices: the game's test speakers are silent)
         let mut clips = HashMap::new();
-        for (src, path) in game.test_voices() {
+        // (a speech-only game mod plays no voices: no test voices, no sound output)
+        let voices = if kind.voices { game.test_voices() } else { HashMap::new() };
+        for (src, path) in voices {
             match kd_audio::load_wav(&path) {
                 Ok(x) => {
                     clips.insert(src, Arc::new(x));
@@ -155,9 +157,12 @@ impl Runtime {
             warming: Arc::new(AtomicBool::new(false)),
             said: Arc::new(Mutex::new(Said::default())),
         };
-        rt.open_output();
+        if rt.kind.voices {
+            rt.open_output();
+        }
         rt.game.lock().unwrap().start();
-        if !rt.opts.no_mic {
+        // (a voices-only game mod: no microphone, no speech models)
+        if !rt.opts.no_mic && rt.kind.speech {
             rt.make_listener(mic_source);
         }
         rt
@@ -252,7 +257,9 @@ impl Runtime {
 
     pub fn set_output(&mut self, device: Option<String>) {
         self.opts.out_device = device;
-        self.open_output();
+        if self.kind.voices {
+            self.open_output();
+        }
     }
 
     pub fn set_mic(&mut self, device: Option<String>) {

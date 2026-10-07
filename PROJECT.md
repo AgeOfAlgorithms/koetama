@@ -6,7 +6,7 @@ player says into text - live words while they talk, the finished line after - on
 nothing sent anywhere). Games are modules (`app/crates/kd-games`), picked in the app's window; the first is Teardown,
 through the mod Proximity Babble Chat (repo teardown-mods, folder `proxchat/`; the mod's side is `voice.lua`). The
 link: PROTOCOL.md. Moved out of the mod's repo on 2026-10-05 (the user: its own project, decoupled from the chat mod,
-for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026 AgeOfAlgorithms" as the mod's.
+for other games later). License: MIT (the user, 2026-10-06), "Copyright (c) 2026 AgeOfAlgorithms" (the user's pseudonym; their real name kept out of the repo and its history, 2026-10-06).
 
 ## Layout
 
@@ -68,13 +68,13 @@ native program); `engine/` is the Python version it was ported from, kept as the
 
 The Python reference:
 
-    P=C:/Users/user/miniconda3/envs/pcvoice/python.exe
+    P=<conda>/envs/pcvoice/python.exe
     $P engine/kotodama.py                 # the app
     $P engine/test_app.py ; $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
     $P engine/teardown_helper.py          # the command line (Teardown running, a level with the mod)
     dist/Kotodama/Kotodama.exe --selftest # the build's window, sound, ONNX, detector, HTTPS, updates (CI runs it)
     KOTODAMA_EXE=dist/Kotodama/Kotodama.exe $P engine/test_e2e.py   # the built exe end to end
-    C:/Users/user/miniconda3/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
+    <conda>/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
     $P engine/make_notices.py             # after any model or package change
 
 Heavy jobs (benchmarks, long tests, builds) only while the user is not playing: they stream the game over Moonlight
@@ -397,7 +397,7 @@ console) never reached the helper over Moonlight, neither by reading stdin nor b
 - **Environment: conda env `pcvoice`, pip packages only** (python 3.12 + pip from conda-forge, then
   `pip install numpy scipy sounddevice faster-whisper`). With conda-forge's numpy / scipy (MKL +
   llvm-openmp) in the same env the first `transcribe` killed the process (exit 127, no message): the
-  wheel's own OpenMP runtime against conda's. Run: `C:/Users/user/miniconda3/envs/pcvoice/python.exe
+  wheel's own OpenMP runtime against conda's. Run: `<conda>/envs/pcvoice/python.exe
   engine/teardown_helper.py`. The model (~145 MB) is in `~/.cache/huggingface`.
 - Open: the helper's files (for a local mod) are in Documents/Teardown/mods, which OneDrive syncs here (a
   transcript is a file there for a moment); the game's sound from loudspeakers reaches the microphone and

@@ -34,8 +34,8 @@ SolidCompression=yes
 ; (the app's Ember look: dark, the window's graphite, its own title bar; the pictures from app/assets/
 ;  make_installer_art.py, one per screen scale)
 WizardStyle=modern dark includetitlebar hidebevels
-WizardBackColor=#1a1515
-WizardImageBackColor=#1a1515
+WizardBackColor=#0b0909
+WizardImageBackColor=#0b0909
 #ifdef ArtDir
 WizardImageFile={#ArtDir}\wizard-100.bmp,{#ArtDir}\wizard-125.bmp,{#ArtDir}\wizard-150.bmp,{#ArtDir}\wizard-200.bmp,{#ArtDir}\wizard-250.bmp
 WizardSmallImageFile={#ArtDir}\small-100.bmp,{#ArtDir}\small-125.bmp,{#ArtDir}\small-150.bmp,{#ArtDir}\small-200.bmp,{#ArtDir}\small-250.bmp

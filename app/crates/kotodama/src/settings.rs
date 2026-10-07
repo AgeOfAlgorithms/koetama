@@ -10,7 +10,8 @@ impl Settings {
     pub fn load() -> Settings {
         std::fs::read_to_string(paths::settings_path())
             .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            // (a byte order mark - Notepad, PowerShell - is not JSON: without this the whole file was dropped)
+            .and_then(|s| serde_json::from_str::<Value>(s.trim_start_matches('\u{feff}')).ok())
             .and_then(|v| v.as_object().cloned())
             .map(Settings)
             .unwrap_or_default()

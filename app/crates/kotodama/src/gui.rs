@@ -80,6 +80,15 @@ struct App {
     choosing_langs: bool,
     /// the window's look done once it exists (its dark title bar)
     dressed: bool,
+    /// the game mods (built-in, then profile files) and the one in use
+    kinds: Vec<kd_games::GameKind>,
+    kind: kd_games::GameKind,
+    /// adding a profile: the file dialog's answer, then the preview of what it does (or why it does not load)
+    picking: Option<Receiver<Option<std::path::PathBuf>>>,
+    preview: Option<(std::path::PathBuf, Result<kd_games::GameKind, String>)>,
+    /// a community game mod to remove, once the player confirms
+    removing: Option<kd_games::GameKind>,
+    profile_msg: String,
 }
 
 impl App {
@@ -123,7 +132,14 @@ impl App {
             langs: Vec::new(),
             choosing_langs: false,
             dressed: false,
+            kinds: Vec::new(),
+            kind: kd_games::by_id(""),
+            picking: None,
+            preview: None,
+            removing: None,
+            profile_msg: String::new(),
         };
+        app.kinds = kd_games::games();
         app.langs = app
             .settings
             .0
@@ -160,17 +176,118 @@ impl App {
             langs: self.langs.clone(),
             ..Default::default()
         };
-        let rt = Runtime::start(kind, self.logger(), opts, None);
+        let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
         let (found, where_) = rt.game.lock().unwrap().locate();
-        self.where_text = if found {
-            format!("{}: {where_}", kind.name)
-        } else {
-            where_
-        };
-        self.game_id = kind.id.to_string();
-        self.settings.set("game", kind.id);
+        self.where_text = if found { format!("{}: {where_}", kind.name) } else { where_ };
+        self.game_id = kind.id.clone();
+        self.settings.set("game", kind.id.clone());
         self.settings.save();
+        self.kind = kind;
         self.rt = Some(rt);
+    }
+
+    // ---- game mod profiles: add (a file -> a preview of what it does -> installed), remove
+    fn add_profile(&mut self) {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::dialog::pick_profile());
+        });
+        self.picking = Some(rx);
+    }
+
+    fn profiles_ui(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.picking {
+            if let Ok(picked) = rx.try_recv() {
+                self.picking = None;
+                if let Some(path) = picked {
+                    let r = kd_games::load_profile(&path);
+                    self.preview = Some((path, r));
+                }
+            }
+        }
+        if let Some((path, r)) = self.preview.clone() {
+            let mut close = false;
+            egui::Modal::new(egui::Id::new("profile-preview")).show(ctx, |ui| {
+                ui.set_width(520.0);
+                match &r {
+                    Ok(k) => {
+                        ui.label(RichText::new("Add this game mod?").size(18.0).family(theme::semibold()));
+                        theme::game_row(ui, &k.name, &k.mod_name, false, true, 500.0);
+                        ui.label(RichText::new(format!("by {} · {}", k.author, k.mod_url)).size(12.5).color(theme::MUTED));
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("What it does on this PC").family(theme::semibold()));
+                        for line in &k.summary {
+                            ui.label(format!("• {line}"));
+                        }
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new("A profile is not a program: it only points Kotodama's own connectors at these \
+                                 files and ports. Add it if you trust where it came from.")
+                                .size(12.5)
+                                .color(theme::MUTED),
+                        );
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            if theme::primary_button(ui, "Add game mod", true).clicked() {
+                                match kd_games::install_profile(&path) {
+                                    Ok(k) => {
+                                        self.kinds = kd_games::games();
+                                        self.profile_msg = format!("Added {} ({} mod).", k.name, k.mod_name);
+                                        self.switch_game(&k.id.clone());
+                                    }
+                                    Err(e) => self.profile_msg = format!("Could not add it: {e}"),
+                                }
+                                close = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                close = true;
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        ui.label(RichText::new("This file is not a game mod profile Kotodama can use").size(16.0).family(theme::semibold()));
+                        ui.label(RichText::new(path.display().to_string()).size(12.5).color(theme::MUTED));
+                        ui.label(RichText::new(e).color(theme::BAD));
+                        if ui.button("Close").clicked() {
+                            close = true;
+                        }
+                    }
+                }
+            });
+            if close {
+                self.preview = None;
+            }
+        }
+        if let Some(k) = self.removing.clone() {
+            let mut close = false;
+            egui::Modal::new(egui::Id::new("profile-remove")).show(ctx, |ui| {
+                ui.set_width(420.0);
+                ui.label(RichText::new(format!("Remove {} ({} mod)?", k.name, k.mod_name)).size(16.0).family(theme::semibold()));
+                ui.label(RichText::new("Its profile file is deleted. You can add it again later.").color(theme::MUTED));
+                ui.horizontal(|ui| {
+                    if ui.button("Remove").clicked() {
+                        match kd_games::remove_profile(&k.id) {
+                            Ok(()) => {
+                                self.profile_msg = format!("Removed {}.", k.name);
+                                self.kinds = kd_games::games();
+                                if self.game_id == k.id {
+                                    let first = self.kinds[0].id.clone();
+                                    self.switch_game(&first);
+                                }
+                            }
+                            Err(e) => self.profile_msg = format!("Could not remove it: {e}"),
+                        }
+                        close = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            if close {
+                self.removing = None;
+            }
+        }
     }
 
     /// The player ticked or unticked a language (none: follow the game's setting).
@@ -325,60 +442,50 @@ impl App {
 
     /// The game mod picker (a card; its list in a popup, each with its mod's page) and the connection.
     fn header_ui(&mut self, ui: &mut egui::Ui) {
-        let kind = kd_games::by_id(&self.game_id);
+        let kind = self.kind.clone();
         let mut switch = None;
+        let mut remove = None;
+        let mut add = false;
         ui.horizontal(|ui| {
-            let resp = theme::game_button(ui, kind.name, kind.mod_name, 330.0);
-            egui::Popup::from_toggle_button_response(&resp)
-                .width(330.0)
-                .show(|ui| {
-                    ui.label(
-                        RichText::new("GAME MODS")
-                            .size(11.5)
-                            .family(theme::semibold())
-                            .color(theme::MUTED),
-                    );
-                    for g in kd_games::games() {
-                        if theme::game_row(ui, g.name, g.mod_name, g.id == self.game_id, 316.0)
-                            .clicked()
-                            && g.id != self.game_id
-                        {
-                            switch = Some(g.id.to_string());
-                        }
-                        if ui
-                            .link(
-                                RichText::new(format!("{} mod page ↗", g.mod_name))
-                                    .size(12.5)
-                                    .color(theme::ACCENT_TEXT),
-                            )
-                            .clicked()
-                        {
-                            open_url(g.mod_url);
-                        }
-                        ui.add_space(4.0);
+            let resp = theme::game_button(ui, &kind.name, &kind.mod_name, 330.0);
+            egui::Popup::from_toggle_button_response(&resp).width(360.0).show(|ui| {
+                ui.label(RichText::new("GAME MODS").size(11.5).family(theme::semibold()).color(theme::MUTED));
+                for g in &self.kinds {
+                    if theme::game_row(ui, &g.name, &g.mod_name, g.id == self.game_id, !g.builtin, 346.0).clicked() && g.id != self.game_id {
+                        switch = Some(g.id.clone());
                     }
-                    ui.label(
-                        RichText::new("More games come as their mods add Kotodama.")
-                            .size(12.0)
-                            .color(theme::MUTED),
-                    );
+                    ui.horizontal(|ui| {
+                        if !g.mod_url.is_empty() && ui.link(RichText::new("Mod page ↗").size(12.5).color(theme::ACCENT_TEXT)).clicked() {
+                            open_url(&g.mod_url);
+                        }
+                        if !g.builtin && ui.link(RichText::new("Remove").size(12.5).color(theme::MUTED)).clicked() {
+                            remove = Some(g.clone());
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+                for (path, why) in kd_games::bad_profiles() {
+                    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    ui.label(RichText::new(format!("{name} not loaded: {why}")).size(12.0).color(theme::WARN));
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Add game mod...").clicked() {
+                        add = true;
+                    }
+                    if ui.link(RichText::new("Open the profiles folder").size(12.5).color(theme::ACCENT_TEXT)).clicked() {
+                        let dir = kd_games::profiles_dir();
+                        let _ = std::fs::create_dir_all(&dir);
+                        open_url(&dir.display().to_string());
+                    }
                 });
+                ui.label(RichText::new("A game mod made for Kotodama comes with a profile file (.json): add it here.").size(12.0).color(theme::MUTED));
+            });
             let (text, colour) = match &self.status {
                 Some(st) if !st.error.is_empty() => (st.error.clone(), theme::BAD),
-                Some(st) if st.state == "connected" => {
-                    (format!("Connected to {}", kind.name), theme::GOOD)
-                }
-                Some(st) if st.state == "paused" => (
-                    format!("{} paused (or the level ended)", kind.name),
-                    theme::WARN,
-                ),
-                _ => (
-                    format!(
-                        "Waiting for {}: start a level with {}",
-                        kind.name, kind.needs
-                    ),
-                    theme::WARN,
-                ),
+                Some(st) if st.state == "connected" => (format!("Connected to {}", kind.name), theme::GOOD),
+                Some(st) if st.state == "paused" => (format!("{} paused (or the level ended)", kind.name), theme::WARN),
+                _ => (format!("Waiting for {}: start it with {}", kind.name, kind.needs), theme::WARN),
             };
             ui.add_space(4.0);
             theme::dot(ui, colour, true);
@@ -387,21 +494,21 @@ impl App {
         if let Some(id) = switch {
             self.switch_game(&id);
         }
+        if let Some(k) = remove {
+            self.removing = Some(k);
+        }
+        if add {
+            self.add_profile();
+        }
         ui.horizontal_wrapped(|ui| {
-            ui.label(
-                RichText::new(&self.where_text)
-                    .size(12.5)
-                    .color(theme::MUTED),
-            );
-            if ui
-                .link(
-                    RichText::new(format!("Get the {} mod ↗", kind.mod_name))
-                        .size(12.5)
-                        .color(theme::ACCENT_TEXT),
-                )
-                .clicked()
+            ui.label(RichText::new(&self.where_text).size(12.5).color(theme::MUTED));
+            if !kind.mod_url.is_empty()
+                && ui.link(RichText::new(format!("Get the {} mod ↗", kind.mod_name)).size(12.5).color(theme::ACCENT_TEXT)).clicked()
             {
-                open_url(kind.mod_url);
+                open_url(&kind.mod_url);
+            }
+            if !self.profile_msg.is_empty() {
+                ui.label(RichText::new(&self.profile_msg).size(12.5).color(theme::MUTED));
             }
         });
     }
@@ -611,6 +718,7 @@ impl eframe::App for App {
             self.check_updates(true);
         }
         self.handle_updates(&ctx);
+        self.profiles_ui(&ctx);
         ctx.request_repaint_after(Duration::from_millis(250));
 
         if !self.dressed {
@@ -654,7 +762,8 @@ impl eframe::App for App {
                                 .num_columns(3)
                                 .spacing([12.0, 8.0])
                                 .show(ui, |ui| {
-                                    ui.label(RichText::new("Microphone").color(theme::MUTED));
+                                    if self.kind.speech {
+ui.label(RichText::new("Microphone").color(theme::MUTED));
                                     if Self::device_box(ui, "mic", &mut self.mic, &self.ins) {
                                         self.settings.set("mic", self.mic.clone());
                                         self.settings.save();
@@ -675,7 +784,9 @@ impl eframe::App for App {
                                         st.is_some_and(|s| s.mic == "talking"),
                                     );
                                     ui.end_row();
-                                    ui.label(RichText::new("Speakers").color(theme::MUTED));
+                                    }
+if self.kind.voices {
+ui.label(RichText::new("Speakers").color(theme::MUTED));
                                     if Self::device_box(ui, "out", &mut self.out, &self.outs) {
                                         self.settings.set("out", self.out.clone());
                                         self.settings.save();
@@ -706,6 +817,7 @@ impl eframe::App for App {
                                             .color(theme::MUTED),
                                     );
                                     ui.end_row();
+}
                                 });
                         });
                         if ui.ctx().input(|i| i.pointer.any_released()) {
@@ -714,7 +826,7 @@ impl eframe::App for App {
                         ui.add_space(2.0);
 
                         // ---- speech to text
-                        theme::card(ui, "Speech to text", |ui| {
+                        if self.kind.speech { theme::card(ui, "Speech to text", |ui| {
                             self.languages_ui(ui);
                             ui.add_space(2.0);
                             self.models_ui(ui);
@@ -771,7 +883,7 @@ impl eframe::App for App {
                                     });
                                 });
                             }
-                        });
+                        }); }
                         ui.add_space(2.0);
 
                         // ---- the log
