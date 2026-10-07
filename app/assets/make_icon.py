@@ -18,7 +18,9 @@ U = S / 128
 
 # the voice wave: (x, top, length) per bar, on the 128 grid (bars loudest in the middle, as a voice)
 BARS = [(32, 59, 4), (41, 55, 12), (50, 48, 26), (59, 43, 36), (68, 47, 28), (77, 52, 18), (86, 49, 24), (95, 56, 10)]
-BARS_SMALL = [(38, 55, 12), (52, 45, 32), (66, 50, 22), (80, 46, 30), (94, 56, 10)]
+# the small sizes (the title bar, the taskbar: 16-32 px; the user's pick "D", 2026-10-06): three bold bars CUT OUT of
+# the bubble, the gradient showing through - two colours only, so it still reads at 16 px
+BARS_SMALL = [(42, 61, 20), (64, 61, 38), (86, 61, 26)]   # (x, centre, length)
 
 
 def lerp(a, b, t):
@@ -36,13 +38,24 @@ def icon(small=False):
     mask = Image.new('L', (S, S), 0)
     ImageDraw.Draw(mask).rounded_rectangle([4 * U, 4 * U, 124 * U, 124 * U], radius=28 * U, fill=255)
     img.paste(grad, (0, 0), mask)
+    if small:
+        # the bubble, bigger in the square (less margin), with the bars cut out of it
+        bubble = Image.new('L', (S, S), 0)
+        b = ImageDraw.Draw(bubble)
+        b.rounded_rectangle([15 * U, 26 * U, 113 * U, 90 * U], radius=15 * U, fill=255)
+        b.polygon([(36 * U, 88 * U), (59 * U, 88 * U), (36 * U, 110 * U)], fill=255)
+        w = 14 * U
+        for x, cy, n in BARS_SMALL:
+            b.rounded_rectangle([x * U - w / 2, (cy - n / 2) * U, x * U + w / 2, (cy + n / 2) * U], radius=w / 2, fill=0)
+        img.paste(Image.new('RGBA', (S, S), (255, 255, 255, 255)), (0, 0), bubble)
+        return img
     d = ImageDraw.Draw(img)
     # the bubble: a rounded box and its tail, lower left
     d.rounded_rectangle([16 * U, 36 * U, 112 * U, 86 * U], radius=10 * U, fill='white')
     d.polygon([(46 * U, 84 * U), (62 * U, 84 * U), (46 * U, 100 * U)], fill='white')
     # the wave: each bar a round-capped line, coloured along the same red-to-amber run (left to right)
-    width = (9 if small else 5) * U
-    for x, top, n in (BARS_SMALL if small else BARS):
+    width = 5 * U
+    for x, top, n in BARS:
         c = lerp(RED, AMBER, (x - 30) / 68)
         x0, y0, y1 = x * U, top * U, (top + n) * U
         d.rounded_rectangle([x0 - width / 2, y0 - width / 2, x0 + width / 2, y1 + width / 2], radius=width / 2, fill=c)
