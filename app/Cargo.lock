@@ -2119,6 +2119,7 @@ dependencies = [
  "kd-games",
  "kd-speech",
  "kd-update",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "sherpa-onnx",

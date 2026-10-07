@@ -74,7 +74,9 @@ pub fn run() -> i32 {
             Ok(Some(r)) => Ok(format!("{} is out", r.version)),
             Ok(None) => Ok("no newer release".into()),
             // (GitHub's limit on unsigned-in requests - CI machines share their address: HTTPS itself worked)
-            Err(e) if e.contains("403") || e.contains("429") => Ok(format!("GitHub's rate limit answered ({e}); not checked")),
+            Err(e) if e.contains("403") || e.contains("429") => {
+                Ok(format!("GitHub's rate limit answered ({e}); not checked"))
+            }
             Err(e) => Err(e),
         }
     });

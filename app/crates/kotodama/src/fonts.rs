@@ -30,8 +30,44 @@ fn candidates() -> Vec<(std::path::PathBuf, u32)> {
     out
 }
 
+/// The system's UI faces (regular, semibold): Segoe UI on Windows; elsewhere egui's own stay first.
+fn ui_faces() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let dir = std::env::var_os("WINDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| "C:\\Windows".into())
+        .join("Fonts");
+    let (r, b) = (dir.join("segoeui.ttf"), dir.join("seguisb.ttf"));
+    (r.exists() && b.exists()).then_some((r, b))
+}
+
 pub fn install(ctx: &eframe::egui::Context) {
     let mut defs = FontDefinitions::default();
+    // the UI face first (egui's own after it: their symbols), and a semibold family for headings and labels
+    let mut semibold: Vec<String> = Vec::new();
+    if let Some((regular, bold)) = ui_faces() {
+        if let (Ok(r), Ok(b)) = (std::fs::read(&regular), std::fs::read(&bold)) {
+            defs.font_data
+                .insert("ui".into(), Arc::new(FontData::from_owned(r)));
+            defs.font_data
+                .insert("ui-semibold".into(), Arc::new(FontData::from_owned(b)));
+            defs.families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .insert(0, "ui".into());
+            semibold.push("ui-semibold".into());
+        }
+    }
+    semibold.extend(
+        defs.families
+            .get(&FontFamily::Proportional)
+            .cloned()
+            .unwrap_or_default(),
+    );
+    defs.families
+        .insert(FontFamily::Name("semibold".into()), semibold);
     let mut added = 0;
     for (path, index) in candidates() {
         let Ok(bytes) = std::fs::read(&path) else {
@@ -44,8 +80,12 @@ pub fn install(ctx: &eframe::egui::Context) {
         let mut data = FontData::from_owned(bytes);
         data.index = index;
         defs.font_data.insert(name.clone(), Arc::new(data));
-        for fam in [FontFamily::Proportional, FontFamily::Monospace] {
-            defs.families.entry(fam).or_default().push(name.clone()); // (after egui's own: Latin stays as it is)
+        for fam in [
+            FontFamily::Proportional,
+            FontFamily::Monospace,
+            FontFamily::Name("semibold".into()),
+        ] {
+            defs.families.entry(fam).or_default().push(name.clone()); // (after the others: Latin stays as it is)
         }
         added += 1;
         if added >= 2 {

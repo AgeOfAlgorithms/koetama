@@ -25,6 +25,9 @@ pub const MODTAG: &str = r#"(?-u)<((?:local|steam)-[^\s/>]+)>"#;
 pub const ID: &str = "teardown";
 pub const NAME: &str = "Teardown";
 pub const NEEDS: &str = "the Proximity Babble Chat mod (Steam Workshop)";
+pub const MOD_NAME: &str = "Proximity Babble Chat";
+/// the mod on the Steam Workshop (its id.txt)
+pub const MOD_URL: &str = "https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496";
 
 /// the three test voices of the mod's voice dummies (/dummy voice): (Windows voice, speaking rate -10..10, what it says)
 pub const VOICES: [(&str, i32, &str); 3] = [

@@ -35,6 +35,9 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 LicenseFile={#SourceDir}\LICENSE
+#ifdef IconFile
+SetupIconFile={#IconFile}
+#endif
 UninstallDisplayIcon={app}\{#AppName}.exe
 
 [Tasks]

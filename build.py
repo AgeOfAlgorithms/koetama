@@ -79,6 +79,7 @@ def inno(ver):
         print('no Inno Setup (ISCC.exe): no installer')
         return None
     run([iscc, '/DAppVersion=' + ver, '/DAppName=' + NAME, '/DSourceDir=' + APP, '/DOutDir=' + DIST,
+         '/DIconFile=' + os.path.join(APP_SRC, 'assets', 'kotodama.ico'),
          os.path.join(ROOT, 'installer', 'kotodama.iss')])
     return os.path.join(DIST, '%s-Setup-%s.exe' % (NAME, ver))
 

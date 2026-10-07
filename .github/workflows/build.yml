@@ -34,11 +34,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app
-          prefix-key: v1-rust
-      - name: sherpa-onnx's libraries (a restored build cache lacks them - its tidying drops them - so their build script runs again)
+          prefix-key: v2-rust
+      - name: sherpa-onnx's libraries, downloaded here (SHERPA_ONNX_LIB_DIR - not by its build script into target/, where a restored build cache left them broken)
         shell: bash
-        working-directory: app
-        run: if [ ! -d target/sherpa-onnx-prebuilt ]; then cargo clean -p sherpa-onnx-sys; cargo clean -p sherpa-onnx-sys --release; fi
+        run: |
+          A=sherpa-onnx-v1.13.8-win-x64-shared-MT-Release-lib
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o "$A.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$A.tar.bz2"
+          tar -xjf "$A.tar.bz2"
+          ls "$A/lib"
+          echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/$A/lib" >> "$GITHUB_ENV"
       - name: The language detector (SpeechBrain VoxLingua107 ECAPA as ONNX)
         run: |
           python -m pip install --upgrade pip
@@ -94,11 +99,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app
-          prefix-key: v1-rust
-      - name: sherpa-onnx's libraries (a restored build cache lacks them - its tidying drops them - so their build script runs again)
+          prefix-key: v2-rust
+      - name: sherpa-onnx's libraries, downloaded here (SHERPA_ONNX_LIB_DIR - not by its build script into target/, where a restored build cache left them broken)
         shell: bash
-        working-directory: app
-        run: if [ ! -d target/sherpa-onnx-prebuilt ]; then cargo clean -p sherpa-onnx-sys; cargo clean -p sherpa-onnx-sys --release; fi
+        run: |
+          A=sherpa-onnx-v1.13.8-linux-x64-shared-lib
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o "$A.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$A.tar.bz2"
+          tar -xjf "$A.tar.bz2"
+          ls "$A/lib"
+          echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/$A/lib" >> "$GITHUB_ENV"
       - name: System libraries (ALSA for sound; a virtual screen and GL for the selftest's window)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config xvfb libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libx11-xcb1
       - name: The language detector

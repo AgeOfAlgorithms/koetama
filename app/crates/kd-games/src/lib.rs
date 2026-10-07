@@ -91,11 +91,17 @@ pub trait Game: Send + Sync {
 /// usual ones - --io-dir).
 pub type MakeGame = fn(Arc<dyn FeedSink>, Log, Option<PathBuf>) -> Box<dyn Game>;
 
-/// A game the program can make: its names, and how to make its module.
+/// A game mod the program works with (the window's picker lists these): the game, the mod that links it to Kotodama
+/// and where to get that mod, and how to make its module.
 #[derive(Clone, Copy)]
 pub struct GameKind {
     pub id: &'static str,
+    /// the game: "Teardown"
     pub name: &'static str,
+    /// the mod: "Proximity Babble Chat"
+    pub mod_name: &'static str,
+    /// the mod's page (where players get it)
+    pub mod_url: &'static str,
     pub needs: &'static str,
     pub make: MakeGame,
 }
@@ -108,7 +114,14 @@ impl std::fmt::Debug for GameKind {
 
 /// The games, in the picker's order.
 pub fn games() -> Vec<GameKind> {
-    vec![GameKind { id: teardown::ID, name: teardown::NAME, needs: teardown::NEEDS, make: teardown::make }]
+    vec![GameKind {
+        id: teardown::ID,
+        name: teardown::NAME,
+        mod_name: teardown::MOD_NAME,
+        mod_url: teardown::MOD_URL,
+        needs: teardown::NEEDS,
+        make: teardown::make,
+    }]
 }
 
 /// The game with this id; an unknown id: the first.

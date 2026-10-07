@@ -15,6 +15,7 @@ mod mic;
 mod runtime;
 mod selftest;
 mod settings;
+mod theme;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
