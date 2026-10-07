@@ -80,6 +80,7 @@ def inno(ver):
         return None
     run([iscc, '/DAppVersion=' + ver, '/DAppName=' + NAME, '/DSourceDir=' + APP, '/DOutDir=' + DIST,
          '/DIconFile=' + os.path.join(APP_SRC, 'assets', 'kotodama.ico'),
+         '/DArtDir=' + os.path.join(APP_SRC, 'assets', 'installer'),
          os.path.join(ROOT, 'installer', 'kotodama.iss')])
     return os.path.join(DIST, '%s-Setup-%s.exe' % (NAME, ver))
 

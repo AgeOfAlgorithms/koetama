@@ -31,10 +31,19 @@ OutputDir={#OutDir}
 OutputBaseFilename={#AppName}-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
-WizardStyle=modern
+; (the app's Ember look: dark, the window's graphite, its own title bar; the pictures from app/assets/
+;  make_installer_art.py, one per screen scale)
+WizardStyle=modern dark includetitlebar hidebevels
+WizardBackColor=#1a1515
+WizardImageBackColor=#1a1515
+#ifdef ArtDir
+WizardImageFile={#ArtDir}\wizard-100.bmp,{#ArtDir}\wizard-125.bmp,{#ArtDir}\wizard-150.bmp,{#ArtDir}\wizard-200.bmp,{#ArtDir}\wizard-250.bmp
+WizardSmallImageFile={#ArtDir}\small-100.bmp,{#ArtDir}\small-125.bmp,{#ArtDir}\small-150.bmp,{#ArtDir}\small-200.bmp,{#ArtDir}\small-250.bmp
+#endif
 CloseApplications=yes
 RestartApplications=no
-LicenseFile={#SourceDir}\LICENSE
+; (no license page: MIT needs no click-through - the license ships with the app, its Licenses button)
+DisableWelcomePage=no
 #ifdef IconFile
 SetupIconFile={#IconFile}
 #endif
@@ -61,3 +70,9 @@ function Relaunch: Boolean;
 begin
   Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
 end;
+
+[Messages]
+WelcomeLabel1=Welcome to [name]
+WelcomeLabel2=Kotodama plays the other players' voices where they stand in the game, and writes what you say as you say it.%n%nIt installs for you only (no administrator rights). The speech model for your language downloads the first time you speak.
+FinishedHeadingLabel=[name] is ready
+FinishedLabel=Start a game with a mod that works with Kotodama (for example Teardown with Proximity Babble Chat): Kotodama connects by itself.
