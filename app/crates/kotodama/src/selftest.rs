@@ -70,10 +70,13 @@ pub fn run() -> i32 {
         Ok(format!("{n} bytes"))
     });
     step("updates (GitHub)", &|| {
-        kd_update::check(Duration::from_secs(15)).map(|r| match r {
-            Some(r) => format!("{} is out", r.version),
-            None => "no newer release".into(),
-        })
+        match kd_update::check(Duration::from_secs(15)) {
+            Ok(Some(r)) => Ok(format!("{} is out", r.version)),
+            Ok(None) => Ok("no newer release".into()),
+            // (GitHub's limit on unsigned-in requests - CI machines share their address: HTTPS itself worked)
+            Err(e) if e.contains("403") || e.contains("429") => Ok(format!("GitHub's rate limit answered ({e}); not checked")),
+            Err(e) => Err(e),
+        }
     });
     println!("{failed} failed");
     if failed > 0 {
