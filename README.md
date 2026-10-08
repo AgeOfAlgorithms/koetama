@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="640" alt="Koetama's window: connected to Teardown, English and Japanese picked, the speech models loaded">
+  <img src="docs/screenshot.png" width="640" alt="Koetama's window: connected to Teardown's Proximity Babble Chat mod, English and Japanese picked">
 </p>
 
 Koetama (声魂, "voice spirit" in Japanese) runs next to your game. It plays the other players' voices placed where they
