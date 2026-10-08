@@ -27,8 +27,15 @@
 </p>
 
 Kotodama ("word spirit" in Japanese) runs next to your game. It plays the other players' voices placed where they
-stand: louder when close, from their side, muffled behind walls. It also writes what you say as you say it, so the
-game can show your words in speech bubbles and a chat history. A spoken line can even open a door.
+stand: louder when close, muffled behind walls. It also writes what you say as you say it, so the
+game can show your words in text to other players. By extension, your game or mod gains speech recognition capability, which easily lets you build speech-activated events in the game.
+
+**What kind of mods can I build with Kotodama?**
+- Proximity voice chat in a game that never had voice chat before.
+- Seamless voice vs text communication between Kotodama users and players without Kotodama.
+- A multiplayer chat history that records spoken words into multilingual text.
+- A door that opens when a player verbally says "open sesame".
+- A wand that shoots out a variety of magic spells on specific voice commands.
 
 **Speech to text runs on your own PC**, and no account is needed. Your voice reaches the other players through a
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
