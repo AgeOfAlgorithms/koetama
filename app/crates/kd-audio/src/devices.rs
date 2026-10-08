@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 /// the output's block (frames at RATE: 10 ms, as Python's blocksize=480)
 pub const OUT_BLOCK: u32 = 480;
 /// the microphone's block (s, as asr.py's blocksize)
-pub const IN_BLOCK_S: f64 = 0.05;
+pub const IN_BLOCK_S: f64 = 0.02;
 
 fn name_of(d: &cpal::Device) -> String {
     d.description().map(|x| x.name().to_string()).unwrap_or_else(|_| "(a device without a name)".into())

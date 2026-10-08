@@ -51,6 +51,9 @@ fn serve(s: TcpStream, rooms: Rooms, delivered: Arc<Mutex<HashMap<u16, u64>>>) {
     let (tx, rx) = channel::<Vec<u8>>();
     rooms.lock().unwrap().entry(room.clone()).or_default().insert(me, tx);
     ws.get_ref().set_read_timeout(Some(Duration::from_millis(2))).unwrap();
+    // (no Nagle: small voice packets go at once, as a real relay sends them - with it, the delayed-ACK stall held a
+    //  packet ~200 ms and the listener concealed the gap)
+    ws.get_ref().set_nodelay(true).unwrap();
     loop {
         match ws.read() {
             Ok(Message::Binary(b)) => {
@@ -169,8 +172,8 @@ fn four_players(relay: &str, delivered: Option<Arc<Mutex<HashMap<u16, u64>>>>, x
         }
         if (i + 1) * block <= x.len() {
             a.push_mic(&x[i * block..(i + 1) * block], false);
-        } else if (i + 1) * block <= x.len() + block * 2 {
-            // (the key let go: silence through the tail)
+        } else if (i + 1) * block <= x.len() + block * 6 {
+            // (the key let go: silence through the tail - 300 ms, past PTT_TAIL, so the last packet goes out flagged)
             let mut fa = feeds[0].clone();
             fa.ptt = Some(false);
             a.set_feed(&fa);

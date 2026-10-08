@@ -126,7 +126,7 @@ line, which does nothing. (The socket connector: `{"type":"msg","kind":"r","text
 - **Payload** = `nonce (12 random bytes) | ChaCha20-Poly1305(key, nonce, plaintext, aad = from as u16 big-endian)`
   (the 16-byte tag at the end). A packet that does not decrypt is dropped. Plaintext:
   `[1][seq: u32 big-endian][flags: u8, 1 = the last packet of a stretch of talking][k][k x (len: u16 big-endian, Opus bytes)]`.
-- **Playing:** per sender a jitter buffer (start at 60 ms buffered, at most 300 ms: older audio is dropped),
+- **Playing:** per sender a jitter buffer (start at 60 ms buffered and 40 ms after the first packet arrived - a cushion for a packet that comes a little late -, at most 300 ms: older audio is dropped),
   Opus loss concealment for a missing packet, ended after 0.5 s without packets or after the last packet. Mixed
   like the test voices: the feed's gain, direction and muffle for that player id.
 

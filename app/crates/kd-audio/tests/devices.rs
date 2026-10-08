@@ -116,7 +116,7 @@ fn default_input_gives_16k_blocks_or_a_readable_error() {
                 inp.priority()
             );
             assert!(blocks.load(Ordering::Relaxed) >= 10, "about 20 blocks of 50 ms in a second");
-            assert!(sizes.lock().unwrap().iter().all(|&n| n == 800), "50 ms at 16 kHz each");
+            assert!(sizes.lock().unwrap().iter().all(|&n| n == 320), "20 ms at 16 kHz each");
         }
         Err(e) => {
             println!("no microphone: {e}");

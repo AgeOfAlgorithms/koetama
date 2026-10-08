@@ -1,5 +1,6 @@
 //! One sender's voice as it arrives -> steady audio (PROTOCOL.md "Playing"). Packets come late, out of order or not at
-//! all; the audio output takes the voice at a steady pace. A stretch of talking starts once START is buffered; a
+//! all; the audio output takes the voice at a steady pace. A stretch of talking starts once START is buffered and HOLD
+//! has passed since its first packet arrived (a cushion: packets come a packet's time apart, give or take); a
 //! missing packet is concealed by Opus frame by frame (if it turns up within one packet's time it still plays: the
 //! voice then runs that much later), then given up; more than MAX buffered drops the oldest audio (the delay never
 //! grows past it). A stretch ends after its last packet, or END_AFTER s without packets.
@@ -10,6 +11,9 @@ use std::collections::VecDeque;
 
 /// samples buffered before a stretch starts playing (60 ms)
 pub const START: usize = (RATE as usize) * 60 / 1000;
+/// s after a stretch's first packet before it plays: room for the next packet to come a little late (the sender's
+/// microphone blocks and the network both move packets by tens of ms; without it the buffer ran dry and concealed)
+pub const HOLD: f64 = 0.04;
 /// samples buffered at most (300 ms): older audio is dropped
 pub const MAX: usize = (RATE as usize) * 300 / 1000;
 /// s without a packet: the stretch is over
@@ -38,6 +42,8 @@ pub struct Jitter<D: FrameDecoder> {
     ending: bool,
     /// when the last packet arrived (s)
     last_t: f64,
+    /// when the first packet of the stretch to come arrived (s; the HOLD before it plays)
+    first_t: Option<f64>,
     frame: Vec<f32>,
     /// packets that came too late, duplicates, packets given up, packets dropped as too much (counts, for tests)
     pub late: u64,
@@ -56,6 +62,7 @@ impl<D: FrameDecoder> Jitter<D> {
             concealed: 0,
             ending: false,
             last_t: f64::NEG_INFINITY,
+            first_t: None,
             frame: vec![0.0; FRAME],
             late: 0,
             lost: 0,
@@ -81,6 +88,9 @@ impl<D: FrameDecoder> Jitter<D> {
     /// A packet arrived at `now` (s).
     pub fn insert(&mut self, p: Packet, now: f64) {
         self.last_t = now;
+        if self.next.is_none() && self.first_t.is_none() {
+            self.first_t = Some(now);
+        }
         let reference = self.next.or(self.played.map(|s| s.wrapping_add(1)));
         if let Some(r) = reference {
             let d = diff(p.seq, r);
@@ -101,6 +111,7 @@ impl<D: FrameDecoder> Jitter<D> {
     }
 
     fn restart(&mut self) {
+        self.first_t = None;
         self.packets.clear();
         self.pcm.clear();
         self.next = None;
@@ -139,10 +150,12 @@ impl<D: FrameDecoder> Jitter<D> {
     pub fn pull(&mut self, out: &mut [f32], now: f64) -> bool {
         if self.next.is_none() {
             let complete = self.packets.iter().any(|p| p.last);
-            if self.packets.is_empty() || (self.buffered() < START && !complete) {
+            let held = self.first_t.is_some_and(|t| now - t >= HOLD);
+            if self.packets.is_empty() || ((self.buffered() < START || !held) && !complete) {
                 out.fill(0.0);
                 return false;
             }
+            self.first_t = None;
             // (a stretch starts)
             let i = self.earliest().unwrap_or(0);
             self.next = Some(self.packets[i].seq);
@@ -263,6 +276,20 @@ mod tests {
     }
 
     #[test]
+    fn a_stretch_waits_for_its_cushion() {
+        let mut j = Jitter::new(Fake);
+        j.insert(pk(1, false), 1.0);
+        // (60 ms buffered, but only 20 ms since it came: not yet - the next packet may come a little late)
+        assert_eq!(play(&mut j, 1, 1.02), vec![None]);
+        j.insert(pk(2, false), 1.03);
+        assert_eq!(play(&mut j, 4, 1.0 + HOLD), [10.0, 11.0, 12.0, 20.0].map(Some).to_vec(), "then it plays");
+        // (a stretch that is complete plays at once: there is nothing more to wait for)
+        let mut k = Jitter::new(Fake);
+        k.insert(pk(1, true), 2.0);
+        assert_eq!(play(&mut k, 1, 2.0), vec![Some(10.0)]);
+    }
+
+    #[test]
     fn at_most_300_ms_and_the_end_after_silence() {
         let mut j = Jitter::new(Fake);
         // (nobody pulling: 8 packets = 480 ms arrive; only the newest 300 ms are kept)
@@ -270,7 +297,7 @@ mod tests {
             j.insert(pk(s, false), 0.0);
         }
         assert!(j.buffered() <= MAX && j.dropped == 3, "{} {}", j.buffered(), j.dropped);
-        let got = play(&mut j, 2, 0.0);
+        let got = play(&mut j, 2, 0.05);
         assert_eq!(got, vec![Some(40.0), Some(41.0)], "the oldest went");
         // no more packets: played out, then concealed until END_AFTER, then over
         play(&mut j, 13, 0.1);

@@ -111,13 +111,18 @@ fn release_from(rel: &Value, current: &str) -> Option<Release> {
     })
 }
 
-/// The latest release if it is newer than this copy; else None. Err on network trouble (the caller says "could
-/// not check").
+/// what check() says when GitHub has no release to give (none published, or the repository is gone or private) - not
+/// "the latest version": a copy pointed at the wrong place must not look up to date (0.2.0 builds asked the old
+/// repository, and said so)
+pub const NO_RELEASES: &str = "no releases found";
+
+/// The latest release if it is newer than this copy; else None. Err on network trouble ("could not check: ...") and
+/// when there is no release at all (NO_RELEASES ...).
 pub fn check(timeout: Duration) -> Result<Option<Release>, String> {
     let text = match fetch::get_text(&api_url(), Some(ACCEPT), timeout) {
         Ok(t) => t,
-        // (GitHub's answer while there is no published release yet - or the repository is not public)
-        Err(e) if e.to_string().contains("404") => return Ok(None),
+        // (GitHub's answer while there is no published release - or the repository is not public, or gone)
+        Err(e) if e.to_string().contains("404") => return Err(format!("{NO_RELEASES} at github.com/{}", paths::REPO)),
         Err(e) => return Err(format!("could not check: {e}")),
     };
     let rel: Value = serde_json::from_str(&text).map_err(|e| format!("could not check: {e}"))?;

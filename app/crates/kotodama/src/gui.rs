@@ -585,7 +585,11 @@ impl App {
                 }
                 UpdateMsg::Failed(e, quiet) => {
                     if !quiet {
-                        self.upd_text = format!("could not check for updates ({e})");
+                        self.upd_text = match e.strip_prefix(kd_update::NO_RELEASES) {
+                            // (not "the latest version": nothing to compare with - the page may have moved)
+                            Some(at) => format!("No releases found on GitHub ({}).", at.trim_start_matches(" at ")),
+                            None => format!("could not check for updates ({e})"),
+                        };
                     }
                 }
                 UpdateMsg::Progress(f) => self.upd_text = format!("downloading {:.0} %", f * 100.0),
