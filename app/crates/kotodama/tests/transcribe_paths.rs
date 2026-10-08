@@ -147,8 +147,18 @@ fn the_voice_chats_audio_path_keeps_the_words() {
 /// chunks). Now: opened at 48 kHz (no conversion there), then mic.rs's tap converts (the same Rechunk, the same chunks).
 #[test]
 fn a_48_khz_microphone_gives_the_listener_the_same_audio_as_before() {
-    let (x, sr) = read_wav(root().join("export/asrbench/clips/en04_room.wav")).unwrap();
-    let mic = convert(&x, sr, kd_voice::RATE); // (a 48 kHz microphone's audio)
+    // (a 48 kHz microphone's audio, made here - export/ is not in the repository, so CI has no recordings: 3 s of
+    //  tones up to 18 kHz, swelling and fading like syllables, with a little noise)
+    let mut seed = 7u64;
+    let mic: Vec<f32> = (0..3 * kd_voice::RATE as usize)
+        .map(|i| {
+            let t = i as f64 / kd_voice::RATE as f64;
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let noise = ((seed >> 40) as f64 / (1u64 << 24) as f64 - 0.5) * 0.02;
+            let tones: f64 = [180.0, 720.0, 2400.0, 9000.0, 18000.0].iter().map(|f| (2.0 * std::f64::consts::PI * f * t).sin()).sum();
+            (0.06 * tones * (0.5 + 0.5 * (2.0 * std::f64::consts::PI * 4.0 * t).sin()) + noise) as f32
+        })
+        .collect();
     let blocks = |x: &[f32], n: usize| -> Vec<f32> {
         // (in the microphone's 50 ms blocks, as the device hands them over)
         let mut r = Rechunk::new(kd_voice::RATE, RATE, kd_voice::RATE as usize / 100, 1).unwrap();
