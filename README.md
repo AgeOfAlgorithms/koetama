@@ -168,6 +168,25 @@ python build.py                           # dist/Kotodama/ and, with Inno Setup 
 - `Kotodama --selftest` checks a build's native parts. CI runs it on every build, and on Windows also installs,
   tests and uninstalls the installer.
 
+## Privacy
+
+Speech to text runs on your PC, and Kotodama has no accounts or telemetry. Your voice goes to the other players
+end-to-end encrypted through the voice relay; models and updates come from Hugging Face and GitHub. Details:
+[PRIVACY.md](PRIVACY.md).
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+- **What is signed:** the Windows program (`Kotodama.exe`) and its installer (`Kotodama-Setup.exe`), built by
+  [GitHub Actions](.github/workflows/build.yml) from this repository's source for each release. Nothing built
+  elsewhere is signed.
+- **Team:** committers and reviewers: [AgeOfAlgorithms](https://github.com/AgeOfAlgorithms); approvers (each signing
+  request is approved by hand): [AgeOfAlgorithms](https://github.com/AgeOfAlgorithms).
+- **Privacy:** see [PRIVACY.md](PRIVACY.md). Kotodama sends nothing to its author; it only connects to the services
+  listed there, for the features you use.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). The models and libraries Kotodama uses are listed with their licenses in
