@@ -159,7 +159,22 @@ def feed_cases():
     feeds = ['4|12|0.80|5|3|7|1|ru|0|1,2,1,0.5,-30.0,5.0,0.25;9,3,0,1,180,-10,1',
              '4|1|1.00|5|0|1|0|auto|1|', '3|99|1|11|4|2|1|en|', '2|1|0.5|3|0|1|1|7,1,1,1,0,0,0',
              '4|1|1|5|0|1|0||1|', '4|x|1|5|0|1|0|en|1|', '5|1|1|1|1|1|1|en|1|', '4|1|1|5|0|1|0|en|1|1,2,3', '',
-             '3|1|1|1|1|1|1|en|1,1,1,nan,0,0,0', '4|1|1|5|0|1|0|en|1|;;3,1,1,1,0,0,0;']
+             '3|1|1|1|1|1|1|en|1,1,1,nan,0,0,0', '4|1|1|5|0|1|0|en|1|;;3,1,1,1,0,0,0;',
+             '4|2|1|5|0|1|2|en|1|', '4|3|1|5|0|1|3|ja|0|']
+    # version 5: the voice room, its key, my id, whom my voice goes to (a bad room / key / id: no room; bad ids skipped)
+    room, key = '0123456789abcdef' * 2, 'fedcba9876543210' * 4
+    feeds += ['5|7|1|5|0|1|3|en|1|%s|%s|7|2,3|2,0,0,0.8,30,0,0.1;3,0,1,0,0,0,0' % (room, key),
+              '5|8|1|5|0|1|1|en|1|%s|%s|7|2,x,70000,3,2,,0, 4|' % (room, key),
+              '5|9|1|5|0|1|1|en|1|%s|%s|7||' % (room.upper(), key), '5|9|1|5|0|1|1|en|1|%s|%s|7||' % (room, key[:-1]),
+              '5|9|1|5|0|1|1|en|1|%s|%s|0|1|' % (room, key), '5|9|1|5|0|1|1|en|1|%s|%s|65536|1|' % (room, key),
+              '5|9|1|5|0|1|1|en|1|%s|%s|+7|1|' % (room, key), '5|1|1|5|0|1|0|en|1|||||',
+              '5|2|1|5|0|1|2|en|1|%s|%s|65535|%s|' % (room, key, ','.join(str(i) for i in range(1, 71))),
+              '5|1|1|5|0|1|0|en|1|%s|%s|7|2' % (room, key)]
+    # (the region before the speakers: a well-formed version 5 line has 15 fields; one without stays malformed)
+    feeds = [f.rsplit('|', 1)[0] + '||' + f.rsplit('|', 1)[1] if f.startswith('5|') and f.count('|') == 13 else f
+             for f in feeds]
+    feeds += ['5|3|1|5|0|1|1|en|1|%s|%s|7|2|weur|' % (room, key), '5|3|1|5|0|1|1|en|1|%s|%s|7|2|auto|' % (room, key),
+              '5|3|1|5|0|1|1|en|1|%s|%s|7|2|WEUR|' % (room, key), '5|3|1|5|0|1|1|en|1||||weur|']
     parse = []
     for f in feeds:
         p = td.parse_feed(f)

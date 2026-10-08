@@ -1,8 +1,10 @@
-//! The microphone (engine/asr.py Microphone): the chosen (or default) input at 16 kHz, its blocks to the listener;
-//! open only while the game wants it.
-use kd_audio::Input;
+//! The microphone (engine/asr.py Microphone): the chosen (or default) input, its blocks to the listener at 16 kHz;
+//! open only while the game wants it. With the voice chat (kd_voice) it runs at 48 kHz: each block goes to the voice
+//! chat as it is (with whether the speech detector hears speech) and, resampled to 16 kHz, to the listener.
+use kd_audio::{Input, Rechunk};
 use kd_common::Log;
 use kd_speech::{Listener, Mic, RATE};
+use kd_voice::Voice;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -12,6 +14,7 @@ pub struct Microphone {
     log: Log,
     input: Option<Input>,
     level: Arc<AtomicU64>, // (f64 bits: dBFS of the last block)
+    voice: Option<Voice>,
 }
 
 impl Microphone {
@@ -22,7 +25,14 @@ impl Microphone {
             log,
             input: None,
             level: Arc::new(AtomicU64::new((-120f64).to_bits())),
+            voice: None,
         }
+    }
+
+    /// The voice chat gets the microphone's audio too (None: only the listener).
+    pub fn with_voice(mut self, voice: Option<Voice>) -> Microphone {
+        self.voice = voice;
+        self
     }
 }
 
@@ -45,11 +55,39 @@ impl Mic for Microphone {
             return true;
         }
         let (l, level) = (self.listener.clone(), self.level.clone());
-        let on_block = Box::new(move |x: &[f32]| {
-            level.store(level_db(x).to_bits(), Ordering::Relaxed);
-            l.push(x);
+        // (the voice chat: 48 kHz in, the listener's 16 kHz made here; 10 ms chunks: little delay)
+        let tap = self.voice.clone().and_then(|v| match Rechunk::new(kd_voice::RATE, RATE, kd_voice::RATE as usize / 100, 1) {
+            Ok(down) => Some((v, down)),
+            Err(e) => {
+                (self.log)(&format!("voice: the microphone cannot be shared ({e}): your voice is not sent"));
+                None
+            }
         });
-        match Input::open(self.device.as_deref(), RATE, on_block, self.log.clone()) {
+        let (rate, on_block): (u32, kd_audio::BlockFn) = match tap {
+            Some((v, mut down)) => {
+                let mut low = Vec::new();
+                (
+                    kd_voice::RATE,
+                    Box::new(move |x: &[f32]| {
+                        level.store(level_db(x).to_bits(), Ordering::Relaxed);
+                        v.push_mic(x, l.talking());
+                        low.clear();
+                        down.push(x, &mut |y| low.extend_from_slice(y));
+                        if !low.is_empty() {
+                            l.push(&low);
+                        }
+                    }),
+                )
+            }
+            None => (
+                RATE,
+                Box::new(move |x: &[f32]| {
+                    level.store(level_db(x).to_bits(), Ordering::Relaxed);
+                    l.push(x);
+                }),
+            ),
+        };
+        match Input::open(self.device.as_deref(), rate, on_block, self.log.clone()) {
             Ok(i) => {
                 (self.log)(&format!("microphone on: {}", i.device_name()));
                 self.input = Some(i);

@@ -92,8 +92,8 @@ fn raise_priority() -> u8 {
 // ---------------------------------------------------------------- a streaming resampler
 
 /// Resampling a stream: any number of frames in, whatever is ready out (rubato's FFT resampler takes fixed chunks).
-/// The same rate: passed straight through.
-struct Rechunk {
+/// The same rate: passed straight through. (The microphone: 48 kHz for the voice chat, 16 kHz for the speech.)
+pub struct Rechunk {
     rs: Option<Fft<f32>>,
     ch: usize,
     pending: Vec<f32>,
@@ -101,7 +101,8 @@ struct Rechunk {
 }
 
 impl Rechunk {
-    fn new(from: u32, to: u32, chunk: usize, ch: usize) -> Result<Rechunk, String> {
+    /// from Hz to Hz, in chunks of `chunk` input frames of `ch` channels
+    pub fn new(from: u32, to: u32, chunk: usize, ch: usize) -> Result<Rechunk, String> {
         let rs = if from == to {
             None
         } else if !fft_ok(from, to) {
@@ -118,7 +119,7 @@ impl Rechunk {
     }
 
     /// x: interleaved frames in; sink gets each resampled piece.
-    fn push(&mut self, x: &[f32], sink: &mut dyn FnMut(&[f32])) {
+    pub fn push(&mut self, x: &[f32], sink: &mut dyn FnMut(&[f32])) {
         let Some(rs) = self.rs.as_mut() else {
             sink(x);
             return;

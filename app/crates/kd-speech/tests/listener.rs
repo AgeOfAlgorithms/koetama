@@ -254,3 +254,59 @@ fn auto_line_without_live_words() {
     assert!(h.lives.is_empty(), "live words off");
     assert_eq!(h.finals[0].2.passes, 0);
 }
+
+#[test]
+#[ignore]
+fn push_to_talk() {
+    let _one = serial();
+    // (the key up: speech is no line; held: a line as usual, and it ends PTT_TAIL s after the key is let go)
+    let (lst, heard) = listener(false);
+    lst.set_language("en");
+    lst.warm(None).unwrap();
+    lst.set_push_to_talk(Some(false));
+    let mut x = read_wav("export/asrbench/clips/en01_room.wav");
+    x.resize(x.len() + RATE as usize, 0.0);
+    for blk in x.chunks(800) {
+        lst.feed(blk);
+    }
+    assert!(heard.lock().unwrap().starts.is_empty() && !lst.talking(), "the key up: no line");
+    // held from the start, let go 2 s into a ~4.2 s line: the line ends there, the rest is not heard
+    let x = read_wav("export/asrbench/clips/en04_room.wav");
+    lst.set_push_to_talk(Some(true));
+    let mut fed = 0;
+    let mut ended_at = None;
+    for blk in x.chunks(800) {
+        if fed >= 2 * RATE as usize {
+            lst.set_push_to_talk(Some(false));
+        }
+        lst.feed(blk);
+        fed += blk.len();
+        if ended_at.is_none() && !heard.lock().unwrap().finals.is_empty() {
+            ended_at = Some(fed as f64 / RATE as f64);
+        }
+    }
+    let quiet = vec![0f32; RATE as usize];
+    for blk in quiet.chunks(800) {
+        lst.feed(blk);
+    }
+    lst.flush();
+    let h = heard.lock().unwrap();
+    let lines: Vec<&str> = h.finals.iter().map(|f| f.1.as_str()).collect();
+    println!("push to talk: {lines:?}, ended {ended_at:?} s into the clip");
+    assert_eq!(h.starts.len(), 1, "one line");
+    assert_eq!(h.finals.len(), 1, "one line: {lines:?}");
+    let ended = ended_at.expect("the line ended while the clip went on");
+    assert!(ended < 2.0 + PTT_TAIL + 0.15, "ended {ended} s in: soon after the key was let go");
+    assert!(lines[0].starts_with("There"), "{lines:?}");
+    assert!(!lines[0].contains("alone"), "the end was not heard: {lines:?}");
+    // the key back to always on: the speech detector decides again
+    drop(h);
+    lst.set_push_to_talk(None);
+    let mut x = read_wav("export/asrbench/clips/en01_room.wav");
+    x.resize(x.len() + RATE as usize, 0.0);
+    for blk in x.chunks(800) {
+        lst.feed(blk);
+    }
+    lst.flush();
+    assert_eq!(heard.lock().unwrap().finals.len(), 2, "always on again: a line");
+}

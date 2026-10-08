@@ -22,6 +22,8 @@ native program); `engine/` is the Python version it was ported from, kept as the
 | `app/crates/kd-speech` | speech to text through sherpa-onnx (shared libraries) and the language detector through ort (the same onnxruntime.dll): VAD, rolling passes, LocalAgreement, "auto" stitching, the recording microphones |
 | `app/crates/kd-games` | the Game trait, Steam, the Teardown link (feed reader, message files, test voices) |
 | `app/crates/kd-update` | updates from GitHub Releases (a 404 = no release yet) |
+| `app/crates/kd-voice` | real voices between players (PROTOCOL.md version 5): the relay client (WebSocket), ChaCha20-Poly1305, Opus (opus-rs), the jitter buffer, the send gate |
+| `relay/` | the voice relay (a Cloudflare Worker, deployed at kotodama-relay.ageofalgorithms.workers.dev) |
 | `app/fixtures/` | the Python reference's answers (make_fixtures.py, make_speech_fixtures.py) the Rust tests compare against |
 | `app/.cargo/config.toml` | the C runtime built into the exe (no VC++ redistributable needed) |
 | `engine/kotodama.py` | the app's window (tkinter): game picker, connection state, microphone / speakers / volume, what it hears, updates, licenses; `--cli` = the command line |
@@ -92,6 +94,15 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
 
 ## Open
 
+- **Real voices (2026-10-07; built and tested offline and through the live relay, NOT tried in-game):** feed version
+  5 (room, key, me, to; Python reference and fixtures too), the `r` message (a fresh room once per game session; the
+  socket connector: once per connection), the crate kd-voice (the relay client, end-to-end encryption, Opus 24 kbit/s
+  in 60 ms packets, a jitter buffer 60..300 ms with Opus loss concealment, the send gate: push to talk + 0.25 s, or
+  the speech detector from 0.3 s before it noticed), the mixer plays real players (src 0) from it, the window's
+  Sound card and the command line show the voice chat's state. The microphone runs at 48 kHz when the game plays
+  voices (16 kHz for the speech made from it). Opus is opus-rs (pure Rust, no CMake): unsafe-libopus was tried
+  first and REJECTED - its SILK loss concealment gives full-scale noise. `cargo test -p kd-voice --test relay --
+  --include-ignored` also runs four Kotodamas through the live relay.
 - The models mirror (our own GitHub release) - after the repo is public.
 - Linux build: made by CI, not tried on a real Linux / Steam Deck; no auto-update there (the app opens the page).
 - The voice dummies' test voices are made with the Windows computer voices: none on Linux (silent dummies).
@@ -408,3 +419,10 @@ Not measured: a joiner's machine (client scripts of a Workshop mod), `MOD/../` f
 `LoadSound` again on a name whose file changed, several speakers at once (clips loaded per second), a long
 session (memory after many loads / unloads), a real microphone voice with room noise, deeper `../`.
 
+**2026-10-07: the voice server's region, Kotodama's version, the voice server's state.** The host picks where a
+session's voice room lives (the mod's Settings, "Voice server": Auto or a Cloudflare region; feed v5's `region` field,
+the relay's `&region=` location hint; the region is part of the room's name, so a change moves everyone to a new
+room). Measured from Toronto, one hop: Auto 61 ms, North America East 62, West 108, Europe West 138, Asia-Pacific 185.
+Kotodama writes `pcvx_v5` (each feed version it reads) next to `pcvx_on`: a mod that doesn't find its version tells
+its player to update Kotodama. And `pcvx_vc` / `pcvx_vx` (in the room / the relay can't be reached: two failed
+tries in a row), shown on the mod's Voice page; the socket connector gets a `voice` line instead.

@@ -52,6 +52,10 @@ class Game:
     def wants_mic(self):
         return bool(self.feed and self.feed.get('mic'))
 
+    def push_to_talk(self):
+        """push to talk: True / False (the key is held or not); None - always on (the speech detector decides)"""
+        return self.feed.get('ptt') if self.wants_mic() else None
+
     def language(self):
         return (self.feed or {}).get('lang', 'en') or 'en'
 

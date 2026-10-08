@@ -139,6 +139,7 @@ class Runtime:
             self.log('language: %s' % lang)
             threading.Thread(target=self._warm, args=(lang,), daemon=True).start()
         self.listener.live = self.game.live_words()
+        self.listener.set_push_to_talk(self.game.push_to_talk())
         if want and self.ready and not self.mic.is_open():
             self.listener.set_language(lang)
             if self.listener.thread is None:

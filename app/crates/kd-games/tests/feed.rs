@@ -1,6 +1,6 @@
 //! The feed and the message files against the Python answers (app/fixtures/feed.json, make_fixtures.py feed_cases):
-//! parse_feed (versions 4/3/2, what is refused), find_feeds (each feed with its copy of the mod), text_prefab
-//! byte for byte, times_hex. Plus test_helper.py's feed checks.
+//! parse_feed (versions 5/4/3/2, the voice room, what is refused), find_feeds (each feed with its copy of the mod),
+//! text_prefab byte for byte, times_hex. Plus test_helper.py's feed checks.
 use kd_games::teardown::{find_feeds, parse_feed, text_prefab, times_hex, TEXT_MAX};
 use serde_json::Value;
 
@@ -22,7 +22,7 @@ fn same_f64(want: &Value, got: f64) -> bool {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 11);
+    assert_eq!(cases.len(), 27);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -38,8 +38,15 @@ fn parse_as_python() {
         assert_eq!(f.ack, want["ack"].as_i64().unwrap(), "{text}");
         assert_eq!(f.ping, want["ping"].as_i64().unwrap(), "{text}");
         assert_eq!(f.mic, want["mic"].as_bool().unwrap(), "{text}");
+        assert_eq!(f.ptt, want["ptt"].as_bool(), "{text}");
         assert_eq!(f.lang, want["lang"].as_str().unwrap(), "{text}");
         assert_eq!(f.live, want["live"].as_bool().unwrap(), "{text}");
+        assert_eq!(f.room, want["room"].as_str().unwrap(), "{text}");
+        assert_eq!(f.key, want["key"].as_str().unwrap(), "{text}");
+        assert_eq!(f.me, want["me"].as_i64().unwrap(), "{text}");
+        assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
+        let to: Vec<i64> = want["to"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+        assert_eq!(f.to, to, "{text}");
         let sp = want["speakers"].as_object().unwrap();
         assert_eq!(f.speakers.len(), sp.len(), "{text}");
         for (k, v) in sp {

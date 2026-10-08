@@ -259,3 +259,56 @@ fn a_busy_port_is_retried() {
     assert_eq!(lines.lock().unwrap().iter().filter(|l| l.contains("busy")).count(), 1, "said once, not every retry");
     g.stop();
 }
+
+#[test]
+fn push_to_talk_field() {
+    // ptt: left out / null - always on; true / false - the key held / up; anything else is refused
+    let p = |s: &str| kd_games::socket::parse_socket_feed(&serde_json::from_str(s).unwrap(), 1);
+    assert_eq!(p(r#"{"mic":true}"#).unwrap().ptt, None);
+    assert_eq!(p(r#"{"mic":true,"ptt":null}"#).unwrap().ptt, None);
+    assert_eq!(p(r#"{"mic":true,"ptt":true}"#).unwrap().ptt, Some(true));
+    assert_eq!(p(r#"{"mic":true,"ptt":false}"#).unwrap().ptt, Some(false));
+    assert!(p(r#"{"mic":true,"ptt":1}"#).is_err());
+}
+
+#[test]
+fn voice_room_fields() {
+    // version 5's room, key, me and to (PROTOCOL.md): kept when all good, else no room; bad ids in "to" skipped
+    let p = |s: &str| kd_games::socket::parse_socket_feed(&serde_json::from_str(s).unwrap(), 1);
+    let (room, key) = ("0123456789abcdef".repeat(2), "fedcba9876543210".repeat(4));
+    let f = p(&format!(r#"{{"room":"{room}","key":"{key}","me":7,"to":[2,3,2,0,70000,4]}}"#)).unwrap();
+    assert!(f.has_room() && f.room == room && f.key == key && f.me == 7 && f.to == vec![2, 3, 4]);
+    let none = p(&format!(r#"{{"room":"{}","key":"{key}","me":7}}"#, room.to_uppercase())).unwrap();
+    assert!(!none.has_room() && none.key.is_empty() && none.me == 0);
+    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}"}}"#)).unwrap().has_room(), "no id: no room");
+    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":65536}}"#)).unwrap().has_room());
+    assert!(!p(r#"{"mic":true}"#).unwrap().has_room());
+    let many: Vec<String> = (1..=70).map(|i| i.to_string()).collect();
+    assert_eq!(p(&format!(r#"{{"to":[{}]}}"#, many.join(","))).unwrap().to.len(), 64, "at most 64");
+    assert!(p(r#"{"room":7}"#).is_err() && p(r#"{"me":"7"}"#).is_err() && p(r#"{"to":[1.5]}"#).is_err() && p(r#"{"to":3}"#).is_err());
+}
+
+#[test]
+fn a_connection_is_a_session_and_gets_its_room() {
+    // each connection's feeds carry its number as the session (Kotodama sends each a new room: kind "r")
+    let port = free_port();
+    let sink = Arc::new(Sink::default());
+    let (log, _) = logger();
+    let mut g = SocketGame::new(Arc::new(profile(port, json!(["voices", "speech"]))), false, sink.clone(), log);
+    g.start();
+    let mut c = Client::connect(port);
+    c.line();
+    c.send(r#"{"type":"feed"}"#);
+    wait_until("the feed arrives", || g.feed().is_some());
+    let first = g.feed().unwrap().sid;
+    let text = format!("{}:{}", "a".repeat(32), "b".repeat(64));
+    assert!(g.send('r', 0, &text, None, None));
+    let m = c.line();
+    assert!(m["type"] == "msg" && m["kind"] == "r" && m["text"] == text.as_str(), "{m}");
+    let mut c2 = Client::connect(port);
+    c2.line();
+    c2.send(r#"{"type":"feed"}"#);
+    wait_until("the second connection's feed", || sink.0.lock().unwrap().len() == 2);
+    assert_eq!(g.feed().unwrap().sid, first + 1);
+    g.stop();
+}

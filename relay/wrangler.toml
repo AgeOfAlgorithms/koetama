@@ -1,0 +1,16 @@
+# Kotodama's voice relay: `npm run deploy` (from relay/, with the `relay` conda env: Node.js 22)
+name = "kotodama-relay"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# (SQLite-backed Durable Objects: the kind the Workers Free plan allows)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[observability]
+enabled = true

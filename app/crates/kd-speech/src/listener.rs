@@ -4,7 +4,7 @@ use crate::rolling::{FinalInfo, LineInfo, RollingLine};
 use crate::{lock, models_for, plan, roll_model, MAX_LINE, MIXED_LANGS, PREROLL, RATE};
 use kd_common::Log;
 use sherpa_onnx::VoiceActivityDetector;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
@@ -12,6 +12,11 @@ use std::time::Duration;
 
 /// blocks queued by push() before the worker drops them (far behind)
 const QUEUE: usize = 200;
+/// push to talk: s of audio still taken after the key is let go (the last syllable), then the line ends
+pub const PTT_TAIL: f64 = 0.25;
+const PTT_OFF: u8 = 0;
+const PTT_UP: u8 = 1;
+const PTT_HELD: u8 = 2;
 
 pub type OnStart = Box<dyn Fn(u32) + Send + Sync>;
 pub type OnLive = Box<dyn Fn(u32, &str, &LineInfo) + Send + Sync>;
@@ -32,6 +37,7 @@ struct State {
     win: usize,
     ring: Vec<f32>,    // the last PREROLL s (before speech is detected)
     pending: Vec<f32>, // not yet a whole VAD window
+    tail: usize,       // (push to talk: samples taken since the key was let go)
     line: Option<RollingLine>,
     utt: u32,
     last_lang: String, // (auto: the language of the line before - a short line's fallback)
@@ -45,6 +51,7 @@ struct Inner {
     cands: Mutex<Vec<String>>, // ("auto": the languages it chooses between)
     live: AtomicBool, // (false: no live words, only the finished line - less CPU)
     talking: AtomicBool,
+    ptt: AtomicU8, // PTT_OFF (the speech detector decides), PTT_UP, PTT_HELD
     state: Mutex<State>,
     tx: SyncSender<Vec<f32>>,
     rx: Mutex<Option<Receiver<Vec<f32>>>>, // (the worker holds it while it runs)
@@ -72,11 +79,13 @@ impl Listener {
             cands: Mutex::new(MIXED_LANGS.iter().map(|l| l.to_string()).collect()),
             live: AtomicBool::new(live),
             talking: AtomicBool::new(false),
+            ptt: AtomicU8::new(PTT_OFF),
             state: Mutex::new(State {
                 vad,
                 win,
                 ring: Vec::new(),
                 pending: Vec::new(),
+                tail: 0,
                 line: None,
                 utt: 0,
                 last_lang: "en".into(),
@@ -116,6 +125,18 @@ impl Listener {
     /// Live words on or off (off: only the finished line - less CPU); the next line uses it.
     pub fn set_live(&self, on: bool) {
         self.0.live.store(on, Ordering::Relaxed);
+    }
+
+    /// Push to talk: Some(held) - a line starts only while the key is held (the speech detector still finds where
+    /// the speech begins, from the last PREROLL s: the key reaches us a little late), and ends PTT_TAIL s after it is
+    /// let go; None - always on: the speech detector alone decides.
+    pub fn set_push_to_talk(&self, held: Option<bool>) {
+        let v = match held {
+            None => PTT_OFF,
+            Some(false) => PTT_UP,
+            Some(true) => PTT_HELD,
+        };
+        self.0.ptt.store(v, Ordering::Relaxed);
     }
 
     /// Load the models a language needs now (the first line would wait for them otherwise). Blocking.
@@ -267,7 +288,7 @@ impl Inner {
         while st.pending.len() - at >= st.win {
             st.vad.accept_waveform(&st.pending[at..at + st.win]);
             at += st.win;
-            if st.line.is_none() && st.vad.detected() {
+            if st.line.is_none() && st.vad.detected() && self.ptt.load(Ordering::Relaxed) != PTT_UP {
                 st.utt += 1;
                 let lang = lock(&self.lang).clone();
                 let cands = lock(&self.cands).clone();
@@ -289,6 +310,20 @@ impl Inner {
         st.pending.drain(..at);
         if st.line.as_ref().is_some_and(|l| l.speech > MAX_LINE + 1.0) {
             self.end(st);
+        }
+        // push to talk, the key let go: the line ends a moment later, and the speech detector starts over (its
+        // segment going on is not the next line's)
+        if self.ptt.load(Ordering::Relaxed) == PTT_UP {
+            if st.line.is_some() {
+                st.tail += x.len();
+                if st.tail >= (RATE as f64 * PTT_TAIL) as usize {
+                    self.end(st);
+                    st.vad.reset();
+                    st.pending.clear();
+                }
+            }
+        } else {
+            st.tail = 0;
         }
     }
 

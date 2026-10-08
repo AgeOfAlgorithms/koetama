@@ -70,13 +70,30 @@ def io_dirs():
 
 
 # ---------------------------------------------------------------- the feed (game -> Kotodama)
+def voice_id(s):
+    """a player id as the feed writes it: 1 to 5 ASCII digits, 1..65535 (else None)"""
+    return int(s) if re.fullmatch(r'[0-9]{1,5}', s) and 1 <= int(s) <= 65535 else None
+
+
+# the regions a voice room can be asked to live in (the relay's location hints)
+REGIONS = ('wnam', 'enam', 'sam', 'weur', 'eeur', 'apac', 'apac-ne', 'apac-se', 'oc', 'afr', 'me')
+
+
+# the feed versions this reads, each announced by a <prefix>v<n> file next to <prefix>on (Rust: files.rs FEED_VERSIONS)
+FEED_VERSIONS = (5,)
+
+
 def parse_feed(text):
-    """'4|seq|volume|session|ack|ping|mic|lang|live|id,src,talk,gain,az,el,muffle;...' (versions 2 and 3 too) -> a
-    dict, or None"""
+    """'5|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|id,src,talk,gain,az,el,muffle;...' (versions 4, 3
+    and 2 too: no room) -> a dict, or None. A bad room, key or id: no room ('', '', 0); bad ids in `to` are skipped
+    (each kept once, at most 64)"""
     try:
         parts = text.split('|')
         live = '1'
-        if parts[0] == '4' and len(parts) == 10:
+        room = key = me = to = region = ''
+        if parts[0] == '5' and len(parts) == 15:
+            _, seq, vol, sid, ack, ping, mic, lang, live, room, key, me, to, region, rest = parts
+        elif parts[0] == '4' and len(parts) == 10:
             _, seq, vol, sid, ack, ping, mic, lang, live, rest = parts
         elif parts[0] == '3' and len(parts) == 9:
             _, seq, vol, sid, ack, ping, mic, lang, rest = parts
@@ -92,8 +109,20 @@ def parse_feed(text):
             spid, src, talk, gain, az, el, muffle = item.split(',')
             speakers[int(spid)] = dict(src=int(src), talk=talk == '1', gain=float(gain), az=float(az),
                                        el=float(el), muffle=float(muffle))
-        return dict(seq=int(seq), vol=float(vol), sid=int(sid), ack=int(ack), ping=int(ping), mic=mic == '1',
-                    lang=lang or 'en', live=live != '0', speakers=speakers)
+        # the voice room (version 5): the room, its key and my id all good, or no room
+        me = voice_id(me)
+        if not (re.fullmatch(r'[0-9a-f]{32}', room) and re.fullmatch(r'[0-9a-f]{64}', key) and me):
+            room, key, me = '', '', 0
+        if not room or region not in REGIONS:            # (a room's region: one of the relay's, else wherever)
+            region = ''
+        ids = []
+        for i in (voice_id(x) for x in to.split(',')) if to else ():
+            if i and i not in ids and len(ids) < 64:
+                ids.append(i)
+        # mic: 0 off, 1 listen (voice detection), 2 / 3 push to talk with the key up / held (ptt; None: no push to talk)
+        return dict(seq=int(seq), vol=float(vol), sid=int(sid), ack=int(ack), ping=int(ping), mic=mic in ('1', '2', '3'),
+                    ptt={'2': False, '3': True}.get(mic), lang=lang or 'en', live=live != '0', speakers=speakers,
+                    room=room, key=key, me=me, to=ids, region=region)
     except ValueError:
         return None
 
@@ -197,6 +226,8 @@ class Link:
         self.live = True
         self.lock = threading.Lock()
 
+    MARKS = ['on'] + ['v%d' % v for v in FEED_VERSIONS]
+
     def _path(self, d, name):
         return os.path.join(d, self.PREFIX + name)
 
@@ -207,16 +238,19 @@ class Link:
             pass
 
     def _sweep(self, d, keep_on=False):
+        marks = [self.PREFIX + n for n in self.MARKS]
         for path in glob.glob(self._path(d, '*')):
-            if not (keep_on and os.path.basename(path) == self.PREFIX + 'on'):
+            if not (keep_on and os.path.basename(path) in marks):
                 self._remove(path)
 
     def start(self):
+        """old files swept; <prefix>on (running) and <prefix>v<n> (each feed version this reads) written"""
         for d in self.dirs:
             if os.path.isdir(d):
                 self._sweep(d)
-                with open(self._path(d, 'on'), 'w') as f:
-                    f.write('1')
+                for name in self.MARKS:
+                    with open(self._path(d, name), 'w') as f:
+                        f.write('1')
 
     def stop(self):
         for d in self.dirs:

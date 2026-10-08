@@ -12,6 +12,7 @@ itself; each crate's tests compare against them. Do not change the Python side t
       crates/kd-speech        speech to text: models, VAD, language stitching, live words, mics  (engine/asr.py)
       crates/kd-games         the Game trait, game mod profiles, connectors (files, socket), Steam (engine/games/, steam.py)
       crates/kd-update        updates from GitHub Releases                                        (engine/updater.py)
+      crates/kd-voice         real voices between players: the relay, encryption, Opus, jitter   (new: no Python)
       crates/kotodama         the program: runtime, window (egui), command line, selftest         (runtime.py, kotodama.py, teardown_helper.py)
 
 Toolchain: Rust stable (MSVC on Windows). Engines: `sherpa-onnx` 1.13.8 (feature `shared`: sherpa-onnx-c-api.dll +
@@ -32,8 +33,10 @@ text::{WIDE, is_space, is_wide, units(&str) -> Vec<(usize, String)>, is_word_cha
        unit_times(text, &[String], &[f32], offset, Option<dur>) -> Vec<f64>}
 fetch::{base_url(), hf_cache_dir(repo, rev), repo_files(repo, rev, &[&str], models_dir, log, progress) -> PathBuf,
         download(url, dest, progress(done, total), tries), get_text(url, accept, timeout)}
-feed::{Feed {seq, vol, sid, ack, ping, mic, lang, live, speakers: BTreeMap<i64, Speaker>},
-       Speaker {src, talk, gain, az, el, muffle},
+feed::{Feed {seq, vol, sid, ack, ping, mic, ptt, lang, live, speakers: BTreeMap<i64, Speaker>,
+            room, key, me, to},                      // (version 5: the voice room; "" / 0 / [] without one)
+       Speaker {src, talk, gain, az, el, muffle},   // src 0: a real player, id = their player id
+       MAX_ID, MAX_TO, player_id(&str), voice_room(room, key, me) -> (room, key, me), voice_to(ids) -> Vec<i64>,
        trait FeedSink: Send + Sync { fn set_feed(&self, Feed); fn fresh(&self) -> bool }}
 ```
 The crates below depend only on kd-common (not on each other), so they can be written at the same time; the program
@@ -50,7 +53,8 @@ pub fn lowpass(x: &[f32], hist: &mut Vec<f32>, a: f64) -> Vec<f32>;     // hist:
 pub fn pan_gains(az: f64, el: f64) -> (f64, f64);
 pub fn behind(az: f64) -> f64;
 pub type Clip = Arc<Vec<f32>>;                                          // mono at RATE
-pub struct Mixer { pub clips: HashMap<i64, Clip>, pub volume: f64, .. }
+pub trait Streams: Send { fn pull(&mut self, id: i64, out: &mut [f32]) -> bool; }   // real players' voices (kd-voice)
+pub struct Mixer { pub clips: HashMap<i64, Clip>, pub streams: Option<Box<dyn Streams>>, pub volume: f64, .. }
 impl Mixer {
     pub fn new(clips: HashMap<i64, Clip>) -> Mixer;                      // the real clock
     pub fn with_clock(clips, clock: Box<dyn Fn() -> f64 + Send>) -> Mixer; // seconds (tests: a fake clock)
@@ -68,6 +72,7 @@ pub struct MixerSink(pub SharedMixer);  impl FeedSink for MixerSink { .. }   // 
 pub fn read_wav(path) -> io::Result<(Vec<f32>, u32)>;   // 16-bit PCM (and 32-bit float) wav -> mono f32, its rate
 pub fn write_wav16(path, x: &[f32], rate: u32) -> io::Result<()>;
 pub fn resample(x: &[f32], from: u32, to: u32) -> Vec<f32>;             // band-limited (rubato)
+pub struct Rechunk;  Rechunk::new(from, to, chunk, ch)?.push(x, &mut |y| ..);   // the same, streaming (the microphone)
 pub fn percentile(x: &[f32], q: f64) -> f64;                             // numpy's default (linear)
 pub fn load_wav(path) -> io::Result<Vec<f32>>;                           // a mixer clip, as Python's load_wav
 pub fn output_devices() -> Vec<String>;  pub fn input_devices() -> Vec<String>;   // names (cpal; WASAPI on Windows)
@@ -80,7 +85,8 @@ pub struct Input;  impl Input {
     pub fn device_name(&self) -> String;                                 // mono at `rate`, ~50 ms blocks, any device rate
 }
 ```
-Devices are chosen by NAME (the window stores names). The output callback must never block on the game: it locks
+A speaker with src 0 is a real player: the mixer pulls their voice from `streams` (talk ignored; gain 0 or not in the
+feed: not played, not even pulled), placed like a test voice. Devices are chosen by NAME (the window stores names). The output callback must never block on the game: it locks
 the mixer, renders, unlocks. The audio thread runs at raised priority (Windows: MMCSS "Pro Audio" or
 THREAD_PRIORITY_TIME_CRITICAL if cpal does not already): the speech work runs the process below normal priority.
 
@@ -194,6 +200,41 @@ pub const PAGE: &str;  pub fn api_url() -> String;
 `kotodama` (window), `kotodama --cli [teardown_helper.py's flags]`, `kotodama --selftest`. Runtime as runtime.py
 (start / tick / stop / status), the window as kotodama.py (egui), the command line as teardown_helper.py - the same
 flags, so `engine/test_e2e.py` with `KOTODAMA_EXE=<the Rust exe>` tests the port end to end.
+
+## kd-voice (real voices; PROTOCOL.md "Real voices: rooms and the relay (version 5)")
+
+No Python counterpart: the reference for the wire is the contract and the relay's own code (`relay/src/frames.js`).
+
+```rust
+pub const RELAY: &str;  pub fn relay_url() -> String;    // KOTODAMA_RELAY overrides
+pub const RATE: u32 = 48000;  FRAME = 960 (20 ms);  PER_PACKET = 3;  PACKET;  BITRATE = 24000
+pub mod frames { VOICE, MAX_TO, MAX_PAYLOAD, voice_frame(to, payload) -> Option<Vec<u8>>, parse_out(b) -> Option<(from, &[u8])>,
+                 route(b, from) -> Option<(to, out)> /* the relay's rule: the tests' stand-in relay */, parse_id }
+pub mod crypto { new_room() -> Result<"<32 hex>:<64 hex>">, key_from_hex, seal(key, from, plain), open(key, from, payload) -> Option }
+pub mod packet { Packet { seq: u32, last: bool, frames: Vec<Vec<u8>> }: encode(), decode(&[u8]) -> Option }
+pub mod codec  { Encoder::new()?.encode(&[f32; FRAME]) -> Vec<u8>; Decoder; trait FrameDecoder { decode(Option<&[u8]>, out) } }
+pub mod gate   { PTT_TAIL, PREROLL; enum Mode { Off, PushToTalk(held), Detector(talking) }; Gate::push(x, mode) -> Gated { audio, end } }
+pub mod jitter { START, MAX, END_AFTER; Jitter<D: FrameDecoder>::insert(Packet, now); pull(out, now) -> bool }
+pub mod relay  { Conn::open(relay, room, me)?; send(frame); ping(); poll(&mut Vec<frame>); close() }
+pub struct Sender;  Sender::new()?.push(x_48k, Mode) -> Vec<Packet>;   // gate + Opus + packets
+#[derive(Clone)] pub struct Voice;  impl Voice {                         // a handle; the "voice" thread inside
+    pub fn start(relay: String, log: Log) -> Voice;
+    pub fn set_feed(&self, &Feed);                  // the room, to, whom it hears (src 0, gain > 0), mic / ptt
+    pub fn push_mic(&self, x_48k: &[f32], talking: bool);   // the microphone's callback: queued, never waits
+    pub fn playback(&self) -> Playback;             // impl kd_audio::Streams: the mixer pulls each sender
+    pub fn status(&self) -> VoiceStatus { state: "off" | "connecting" | "connected", heard };
+    pub fn stop(&self);
+}
+```
+Threads: the voice thread connects while the feed names a room and the game is feeding (again after a drop: 1, 2, 4
+... 30 s), reads the relay (5 ms read timeouts), pings every 20 s, and turns the microphone's queued blocks into
+packets (sent only to the feed's `to`). Received packets go into a jitter buffer per sender under one short lock;
+the audio output's callback decodes as it pulls. The program: the runtime makes one Voice for a game that plays
+voices (Sink::set_feed hands it each feed; tick() sends the game kind 'r' once per session), the microphone runs at
+48 kHz for it (kd_audio::Rechunk makes the listener's 16 kHz). Tests: unit tests per module; `tests/relay.rs` runs
+four Voices through a stand-in relay (and, `--include-ignored`, the live one). Crates: opus-rs (pure Rust: no
+CMake, nothing linked; unsafe-libopus was tried and dropped - broken SILK concealment), chacha20poly1305, getrandom,
+tungstenite + rustls (ring) + webpki-roots.
 
 ## Building and testing a crate (parallel work)
 

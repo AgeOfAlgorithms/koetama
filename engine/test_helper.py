@@ -118,9 +118,9 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
     open(os.path.join(local, 'other.txt'), 'w').write('1')
     link = H.Link([local, shop], log=lambda s: None)
     link.start()
-    check(names(local) == ['other.txt', 'pcvx_on'] and names(shop) == ['pcvx_on'],
-          'start: "on" in every folder a copy of the mod may look in; old files of mine swept, nothing else touched')
-    check(link.send_text('too early') is False and names(local) == ['other.txt', 'pcvx_on'], 'no game yet: a text is not written')
+    check(names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5'] and names(shop) == ['pcvx_on', 'pcvx_v5'],
+          'start: "on" and "v5" (the feed version) in every folder a copy of the mod may look in; old files of mine swept, nothing else touched')
+    check(link.send_text('too early') is False and names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5'], 'no game yet: a text is not written')
 
     def fd(**kw):
         d = dict(seq=1, vol=1.0, sid=5, ack=0, ping=1, mic=False, speakers={})

@@ -15,6 +15,7 @@ kd-audio.workspace = true
 kd-speech.workspace = true
 kd-games.workspace = true
 kd-update.workspace = true
+kd-voice.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eframe.workspace = true

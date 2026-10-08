@@ -30,7 +30,7 @@ mod's own tag: `local-<folder>` for a local mod, `steam-<id>` for a Workshop one
 | session | new on every level start; the helper starts its message numbers over |
 | ack | the number of the last message the mod has read; the helper deletes that file |
 | ping | counts up every 2 s; the helper answers it (below) |
-| mic | 1: the helper should listen and transcribe (the microphone is open only then). Proximity Babble Chat sends 1 whenever the helper is connected: what a player says is always written, so everyone gets the same (no opting out while your voice is heard) |
+| mic | 0: don't listen (the microphone is closed). 1: always on: listen and transcribe, the speech detector finds each line. 2 / 3: push to talk, the key up / held: the microphone stays open, but a line starts only while the key is held (the speech detector still finds where it begins, from the last second of audio, so the first word isn't lost to the feed's delay) and ends 0.25 s after the key is let go. Proximity Babble Chat sends 2 / 3 by default (its talk key, B) and 1 with "Always on" |
 | lang | the language the player speaks (`en`, `ru`, `zh`, `yue`, `ja`, `ko`, `es`, ... or `auto`) |
 | live | 1: live words while the player talks; 0: only the finished line (less CPU) |
 | speaker | `id,src,talk,gain,azimuth,elevation,muffle`: a voice to play (src: a test voice 1..3, a real player later 0; talk 1 while talking; gain 0..1; azimuth degrees from where the camera looks, 0 ahead, 90 right; elevation degrees up; muffle 0..1 behind walls and in the buffer range) |
@@ -45,6 +45,8 @@ Workshop content folder when there is one.
 | file | meaning |
 |---|---|
 | `pcvx_on` | the helper is running (removed when it stops). The mod looks for it once a second. |
+| `pcvx_v<n>` | one per feed version this Kotodama reads (now `pcvx_v5`), written with `pcvx_on`. A mod whose version is missing knows this Kotodama is too old for its feed (it would never answer): the Teardown mod says "Your Kotodama is too outdated. Please update it from the app." |
+| `pcvx_vc` / `pcvx_vx` | the voice chat is in its room (`vc`) / can't reach the relay: the last tries failed, it keeps trying (`vx`); neither: no room, or connecting. The mod shows it and tells its player when voices can't arrive. |
 | `pcvx_p<n % 1000>` | the answer to ping n. If no answer comes for ~5 s, the helper counts as gone (a crashed helper leaves `pcvx_on` behind). |
 | `pcvx_t<n>.xml` | message n (1, 2, ... per session): a prefab `<body tags="pcvx k=<kind> u=<utterance> t=<hex of the UTF-8 text> [w=<times> a=<ago>]"/>`. The mod `Spawn`s it, reads the tags, `Delete`s what it made, and acks n in the feed. |
 
@@ -68,6 +70,75 @@ therefore fills chunk by chunk; the finished line replaces it.
   stretch missed: arriving mid-sentence "... the rest", walking away "the start ...". In the buffer zone the
   words are garbled like typed text, and walking closer reveals letters.
 - **Without the tags:** the whole text, as before.
+
+## Real voices: rooms and the relay (version 5)
+
+Players' voices travel between their Kotodamas through **the relay**, a Cloudflare Worker
+(`relay/` in this repo; `wss://kotodama-relay.ageofalgorithms.workers.dev`, or `KOTODAMA_RELAY`). The game never
+carries audio. It tells its player's Kotodama three things through the feed:
+
+- **the room:** the game session's voice room (a name and a key every player in the session gets);
+- **who should get my voice now:** the players within range of the speaker's current mode;
+- **how loud each other player is to me:** the speakers list, as for the test voices (`src` 0, `id` = their player id).
+
+### The feed, version 5
+
+    5|<seq>|<vol>|<session>|<ack>|<ping>|<mic>|<lang>|<live>|<room>|<key>|<me>|<to>|<region>|<speaker>;<speaker>;...
+
+The first nine fields are version 4's. New:
+
+| field | meaning |
+|---|---|
+| room | the voice room: 32 lower-case hex digits; empty = no room (no voice sent or received) |
+| key | the room's key: 64 lower-case hex digits (32 bytes); empty when room is |
+| me | this player's id in the game session, 1..65535 (Teardown: the player id) |
+| to | the players who should get this player's voice right now, comma-separated ids; empty = nobody. The SPEAKER's game decides: in Teardown, the players within the voice mode's whole range (its buffer too) plus 5 m; every dead player too (the dead hear everyone; their own gain decides how loud); everyone in a lobby; nobody in Global; a dead speaker: the dead of their channel at any distance |
+| region | where the room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; empty (or anything else) = Auto: wherever the relay creates it, near the first player to join. In Teardown the host picks it (Settings, "Voice server"); every player's feed carries the same one. Another region is another room on the relay, so a change moves everyone to a new room there |
+| speaker | as version 4. A real player: `src` 0 and `id` = their player id; `talk` is ignored for them (Kotodama plays what arrives). A player who is not in the list (or has gain 0) is not played even if their voice arrives |
+
+Version 4 is still read (no room: no real voices).
+
+The socket connector's feed object takes the same as `"room"`, `"key"`, `"me"` (numbers / strings as above),
+`"to": [ids]` and `"region"`. It is told the voice chat's state with a line
+`{"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}` at each change.
+
+### Who makes the room: Kotodama
+
+A game script has no good random numbers, so Kotodama makes the room. Once per game session (a new `session`
+in the feed) it sends the game a message of kind **`r`** whose text is `<room>:<key>` (32 + 64 hex digits), freshly
+random (OS randomness). The Teardown mod forwards it to the host (`server.pc_room`); the host keeps the FIRST one it
+gets for the session and publishes it to every player (`shared.pcVoiceRoom = {id, key}`); every player's game puts
+that one into its feed. So any player with Kotodama can make the session's room, the host doesn't need Kotodama,
+and the key reaches only the players in the session. A game that does not know `r` reads it as an empty finished
+line, which does nothing. (The socket connector: `{"type":"msg","kind":"r","text":"<room>:<key>"}`.)
+
+### Sending and receiving (Kotodama)
+
+- Kotodama connects to `<relay>/v1/room/<room>?me=<me>[&region=<region>]` (a WebSocket) while the feed names a room and the game is
+  connected, reconnecting after a drop (1, 2, 4 ... 30 s). It sends the text `ping` every 20 s (answered `pong`).
+- **When it sends:** while the microphone is open (mic 1, 2, 3) and the player talks: push to talk, while the key
+  is held (from 0.15 s before the press arrived: the feed's delay) and PTT_TAIL (0.25 s) after; always on, while the speech detector hears speech (from 0.3 s before it
+  noticed). Only to the feed's `to`; nothing when `to` is empty. Never in Global.
+- **Audio:** Opus, 48 kHz mono, 20 ms frames, 24 kbit/s (VOIP), 3 frames (60 ms) per packet.
+- **Frames to the relay** (binary): `[1][n][to_1 .. to_n as u16 big-endian][payload]`, n <= 64.
+  **From the relay:** `[1][from as u16 big-endian][payload]`. The relay forwards each packet to the named players
+  only, never back to the sender; it never looks inside the payload.
+- **Payload** = `nonce (12 random bytes) | ChaCha20-Poly1305(key, nonce, plaintext, aad = from as u16 big-endian)`
+  (the 16-byte tag at the end). A packet that does not decrypt is dropped. Plaintext:
+  `[1][seq: u32 big-endian][flags: u8, 1 = the last packet of a stretch of talking][k][k x (len: u16 big-endian, Opus bytes)]`.
+- **Playing:** per sender a jitter buffer (start at 60 ms buffered, at most 300 ms: older audio is dropped),
+  Opus loss concealment for a missing packet, ended after 0.5 s without packets or after the last packet. Mixed
+  like the test voices: the feed's gain, direction and muffle for that player id.
+
+### The relay (`relay/`)
+
+One Durable Object per room (by name), the WebSocket Hibernation API. Limits: 64 players in a room, 64
+recipients and 4000 bytes of payload in a packet, 60 packets a second from one connection (more are dropped); a
+second connection with the same `me` replaces the first (close code 4000). Paths: `/` and `/v1` say what it is;
+`/v1/room/<32 hex>?me=<1..65535>[&region=<region>]` is the room: with a region it is named `<room>@<region>` and
+created with that Durable Object location hint (best effort; only the first connection of a room places it). `npm test` (the frames), `node test/smoke.mjs <url>` (a live
+room: delivery, nobody out of range, the keep-alive, the time of one hop), `npm run deploy` (from `relay/`, the
+`relay` conda env: Node.js 22, Wrangler 4).
 
 ## Adding a game mod: profiles
 
@@ -201,7 +272,7 @@ sides send JSON objects, one per line (`\n` ends a line).
 
 When a mod connects, Kotodama sends:
 
-    {"type":"hello","app":"Kotodama","version":"0.2.0","protocol":1}
+    {"type":"hello","app":"Kotodama","version":"0.3.0","protocol":1}
 
 The mod sends, first (optional):
 
@@ -218,6 +289,7 @@ then its feed, whenever it changes and at least once a second:
 |---|---|---|
 | `vol` | 1 | 0..1, the player's voice volume |
 | `mic` | false | the player's speech should be heard and written (the microphone opens only then) |
+| `ptt` | none | push to talk: `true` while the talk key is held, `false` while it is up (a line starts only while it is held and ends 0.25 s after it is let go); left out or `null`: always on (the speech detector decides). Send a feed as soon as the key changes |
 | `lang` | `en` | the language the player speaks (`en`, `ru`, `zh`, ... or `auto`) |
 | `live` | true | live words while the player talks; false: only the finished line |
 | `speakers` | none | the voices to play: `id` (required, a whole number), `src` (0 = a real player, 1..: a test voice), `talk`, `gain` 0..1, `az` (degrees from where the camera looks, 90 = right), `el` (degrees up), `muffle` 0..1 |

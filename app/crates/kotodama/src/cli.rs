@@ -117,6 +117,13 @@ fn status_line(st: &Status, needs: &str) -> String {
             (sp.muffle * 100.0).round()
         ));
     }
+    if let Some(v) = &st.voice {
+        parts.push(match (v.state, v.heard) {
+            ("connected", 0) => "voice: in the room".into(),
+            ("connected", n) => format!("voice: in the room, hearing {n}"),
+            (s, _) => format!("voice {s}"),
+        });
+    }
     if !st.live.is_empty() {
         let n = st.live.chars().count();
         parts.push(format!(

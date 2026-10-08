@@ -30,7 +30,7 @@ mod models;
 mod rolling;
 mod stitch;
 
-pub use listener::{low_priority, Callbacks, Listener, OnFinal, OnLive, OnStart};
+pub use listener::{low_priority, Callbacks, Listener, OnFinal, OnLive, OnStart, PTT_TAIL};
 pub use mics::{Mic, PlaylistMicrophone, WavMicrophone};
 pub use models::{init_onnxruntime, lid_dir, ModelState, Models};
 pub use rolling::{FinalInfo, LineInfo, RollingLine};

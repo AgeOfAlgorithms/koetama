@@ -1,5 +1,5 @@
 //! --selftest: a build's native parts load - the window, sound, sherpa-onnx, ONNX Runtime with the shipped language
-//! detector, HTTPS for the model downloads. Exit code 0 when all do; the CI runs it on each build (and on the
+//! detector, HTTPS for the model downloads, the voice relay. Exit code 0 when all do; the CI runs it on each build (and on the
 //! installed copy).
 use kd_common::paths;
 use std::time::Duration;
@@ -68,6 +68,28 @@ pub fn run() -> i32 {
         let n = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         let _ = std::fs::remove_dir_all(&d);
         Ok(format!("{n} bytes"))
+    });
+    step("voice relay (WebSocket over TLS)", &|| {
+        // (two players in a fresh room: a packet from one reaches the other)
+        let rk = kd_voice::crypto::new_room()?;
+        let room = rk.split(':').next().unwrap_or_default();
+        let relay = kd_voice::relay_url();
+        let mut a = kd_voice::relay::Conn::open(&relay, room, 1)?;
+        let mut b = kd_voice::relay::Conn::open(&relay, room, 2)?;
+        let frame = kd_voice::frames::voice_frame(&[2], b"selftest").ok_or("no frame")?;
+        let t0 = std::time::Instant::now();
+        a.send(frame)?;
+        let mut got = Vec::new();
+        while got.is_empty() && t0.elapsed() < Duration::from_secs(10) {
+            b.poll(&mut got)?;
+        }
+        let ms = t0.elapsed().as_millis();
+        a.close();
+        b.close();
+        match got.first().and_then(|f| kd_voice::frames::parse_out(f)) {
+            Some((1, p)) if p == b"selftest" => Ok(format!("{relay}: a packet through it in {ms} ms")),
+            _ => Err(format!("{relay}: no packet came through in 10 s")),
+        }
     });
     step("updates (GitHub)", &|| {
         match kd_update::check(Duration::from_secs(15)) {

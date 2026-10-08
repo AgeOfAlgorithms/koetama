@@ -9,10 +9,10 @@ mod devices;
 mod mixer;
 mod wav;
 
-pub use devices::{input_devices, output_devices, BlockFn, Input, Output, IN_BLOCK_S, OUT_BLOCK};
+pub use devices::{input_devices, output_devices, BlockFn, Input, Output, Rechunk, IN_BLOCK_S, OUT_BLOCK};
 pub use mixer::{
-    behind, lock, lowpass, lowpass_ir, pan_gains, Clip, Mixer, MixerSink, SharedMixer, BEHIND_MUFFLE, BEHIND_QUIET,
-    CUT_CLEAR, CUT_MUFFLED, HEADROOM, LP_TAPS, PAN, RATE, SMOOTH, STALE,
+    behind, lock, lowpass, lowpass_ir, pan_gains, Clip, Mixer, MixerSink, SharedMixer, Streams, BEHIND_MUFFLE,
+    BEHIND_QUIET, CUT_CLEAR, CUT_MUFFLED, HEADROOM, LP_TAPS, PAN, RATE, SMOOTH, STALE,
 };
 pub use wav::{load_wav, percentile, read_wav, resample, write_wav16};
 /// cpal's sample types (Output::open_converted takes one)

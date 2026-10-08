@@ -29,6 +29,7 @@ import numpy as np
 
 RATE = 16000
 PREROLL = 1.0              # s before the detected speech fed too
+PTT_TAIL = 0.25            # push to talk: s of audio still taken after the key is let go, then the line ends
 MAX_LINE = 15.0            # s: a longer line is cut
 VAD_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx'
 import paths                                   # noqa: E402  (Kotodama's folders)
@@ -516,12 +517,19 @@ class Listener:
         self.pending = np.zeros(0, np.float32)       # not yet a whole VAD window
         self.line = None
         self.utt = 0
+        self.ptt = None                              # push to talk: None (always on), False (the key up), True (held)
+        self.tail = 0                                # (push to talk: samples taken since the key was let go)
         self.q = queue.Queue(maxsize=200)
         self.thread = None
         self.running = False
 
     def set_language(self, lang):
         self.lang = lang or 'en'
+
+    def set_push_to_talk(self, held):
+        """push to talk: held True / False - a line starts only while the key is held (the speech detector still finds
+        where the speech begins, from the last PREROLL s), and ends PTT_TAIL s after it is let go; None - always on"""
+        self.ptt = held
 
     def warm(self, lang=None):
         """load the models a language needs now (the first line would wait for them otherwise)"""
@@ -543,7 +551,7 @@ class Listener:
         while len(self.pending) >= self.win:
             w, self.pending = self.pending[:self.win], self.pending[self.win:]
             self.vad.accept_waveform(w)
-            if self.line is None and self.vad.is_speech_detected():
+            if self.line is None and self.vad.is_speech_detected() and self.ptt is not False:
                 self.utt += 1
                 self.line = RollingLine(self.models, self.utt, self.lang, self.ring.copy(), fallback=self.last_lang, live=self.live)
                 if self.on_start:
@@ -553,6 +561,16 @@ class Listener:
                 self.end()
         if self.line is not None and self.line.speech > MAX_LINE + 1:
             self.end()
+        # push to talk, the key let go: the line ends a moment later, and the speech detector starts over
+        if self.ptt is False:
+            if self.line is not None:
+                self.tail += len(x)
+                if self.tail >= int(RATE * PTT_TAIL):
+                    self.end()
+                    self.vad.reset()
+                    self.pending = np.zeros(0, np.float32)
+        else:
+            self.tail = 0
 
     def end(self):
         if self.line is None:

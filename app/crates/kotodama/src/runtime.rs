@@ -6,6 +6,10 @@
 //! the first time it is wanted (downloaded once). Which models: the languages the player speaks (chosen in the window;
 //! none chosen: the game's "Language I speak") - one language, its model; several, theirs and the language detector,
 //! choosing among exactly those. A change of languages loads what is new and lets go of what is no longer needed.
+//!
+//! Real voices (a game that plays voices; PROTOCOL.md version 5): the voice chat (kd_voice::Voice) follows each feed
+//! (the room, whom to send to, whom to hear), takes the microphone's audio and plays what arrives through the mixer;
+//! once per game session the runtime sends the game a fresh room (kind 'r').
 use crate::mic::Microphone;
 use kd_audio::{Mixer, MixerSink, Output, SharedMixer, STALE};
 use kd_common::Log;
@@ -92,6 +96,8 @@ pub struct Status {
     pub last: String,
     pub speakers: Vec<SpeakerStatus>,
     pub error: String,
+    /// the voice chat (None: the game plays no voices)
+    pub voice: Option<kd_voice::VoiceStatus>,
 }
 
 pub struct Runtime {
@@ -113,6 +119,37 @@ pub struct Runtime {
     seen_since: std::time::Instant,
     warming: Arc<AtomicBool>,
     said: Arc<Mutex<Said>>,
+    /// the voice chat (a game that plays voices)
+    voice: Option<kd_voice::Voice>,
+    /// the game session the last voice room was sent for
+    room_sid: Option<i64>,
+    /// the voice chat's state as last told to the game (and whether the game was connected then)
+    voice_told: Option<&'static str>,
+    voice_told_to: bool,
+}
+
+/// Where the game's feeds go: the mixer, the voice chat, and the push-to-talk key straight to the listener (as each
+/// feed is read, not at the next tick: the end of a line follows the key at once).
+struct Sink {
+    mixer: MixerSink,
+    listener: Arc<Mutex<Option<Listener>>>,
+    voice: Option<kd_voice::Voice>,
+}
+
+impl kd_common::feed::FeedSink for Sink {
+    fn set_feed(&self, feed: kd_common::feed::Feed) {
+        if let Some(l) = self.listener.lock().unwrap().as_ref() {
+            l.set_push_to_talk(if feed.mic { feed.ptt } else { None });
+        }
+        if let Some(v) = &self.voice {
+            v.set_feed(&feed);
+        }
+        self.mixer.set_feed(feed);
+    }
+
+    fn fresh(&self) -> bool {
+        self.mixer.fresh()
+    }
 }
 
 impl Runtime {
@@ -125,7 +162,14 @@ impl Runtime {
     ) -> Runtime {
         let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
-        let sink: Arc<dyn kd_common::feed::FeedSink> = Arc::new(MixerSink(mixer.clone()));
+        // (real voices: for a game that plays voices; the relay is KOTODAMA_RELAY or Kotodama's own)
+        let voice = kind.voices.then(|| kd_voice::Voice::start(kd_voice::relay_url(), log.clone()));
+        if let Some(v) = &voice {
+            mixer.lock().unwrap().streams = Some(Box::new(v.playback()));
+        }
+        let ptt_to: Arc<Mutex<Option<Listener>>> = Arc::new(Mutex::new(None));
+        let sink: Arc<dyn kd_common::feed::FeedSink> =
+            Arc::new(Sink { mixer: MixerSink(mixer.clone()), listener: ptt_to.clone(), voice: voice.clone() });
         let game = kind.make(sink, log.clone(), opts.io_dir.clone());
         // (no test voices: the game's test speakers are silent)
         let mut clips = HashMap::new();
@@ -156,6 +200,10 @@ impl Runtime {
             seen_since: std::time::Instant::now(),
             warming: Arc::new(AtomicBool::new(false)),
             said: Arc::new(Mutex::new(Said::default())),
+            voice,
+            room_sid: None,
+            voice_told: None,
+            voice_told_to: false,
         };
         if rt.kind.voices {
             rt.open_output();
@@ -164,6 +212,7 @@ impl Runtime {
         // (a voices-only game mod: no microphone, no speech models)
         if !rt.opts.no_mic && rt.kind.speech {
             rt.make_listener(mic_source);
+            *ptt_to.lock().unwrap() = rt.listener.clone();
         }
         rt
     }
@@ -220,11 +269,10 @@ impl Runtime {
             Ok(l) => {
                 self.mic = Some(match mic_source {
                     Some(make) => make(l.clone(), self.log.clone()),
-                    None => Box::new(Microphone::new(
-                        l.clone(),
-                        self.opts.mic_device.clone(),
-                        self.log.clone(),
-                    )),
+                    None => Box::new(
+                        Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone())
+                            .with_voice(self.voice.clone()),
+                    ),
                 });
                 self.listener = Some(l);
             }
@@ -246,6 +294,9 @@ impl Runtime {
             }
         }
         self.output = None;
+        if let Some(v) = &self.voice {
+            v.stop();
+        }
         self.game.lock().unwrap().stop();
     }
 
@@ -272,11 +323,9 @@ impl Runtime {
         if let Some(m) = self.mic.as_mut() {
             m.close();
         }
-        let mut m: Box<dyn Mic> = Box::new(Microphone::new(
-            l.clone(),
-            self.opts.mic_device.clone(),
-            self.log.clone(),
-        ));
+        let mut m: Box<dyn Mic> = Box::new(
+            Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone()).with_voice(self.voice.clone()),
+        );
         if was {
             m.open();
         }
@@ -329,13 +378,49 @@ impl Runtime {
         });
     }
 
+    /// Once per game session (a new session in the feed, the game connected): a fresh voice room for it, kind 'r'
+    /// "<room>:<key>". The game's host keeps the first one its session gets and hands it to every player.
+    fn send_room(&mut self) {
+        if self.voice.is_none() {
+            return;
+        }
+        let game = self.game.clone();
+        let g = game.lock().unwrap();
+        let Some(f) = g.feed() else { return };
+        if !g.connected() || self.room_sid == Some(f.sid) {
+            return;
+        }
+        match kd_voice::crypto::new_room() {
+            Ok(text) => {
+                if g.send('r', 0, &text, None, None) {
+                    self.room_sid = Some(f.sid);
+                }
+            }
+            Err(e) => {
+                (self.log)(&format!("voice: {e}"));
+                self.room_sid = Some(f.sid); // (said once per session)
+            }
+        }
+    }
+
     pub fn tick(&mut self) {
+        self.send_room();
+        if let Some(v) = &self.voice {
+            // (the voice chat's link, for the game to show: each change, and again when the game reconnects)
+            let state = v.status().state;
+            let connected = self.game.lock().unwrap().connected();
+            if Some(state) != self.voice_told || connected != self.voice_told_to {
+                self.game.lock().unwrap().set_voice_state(state);
+                self.voice_told = Some(state);
+                self.voice_told_to = connected;
+            }
+        }
         let Some(l) = self.listener.clone() else {
             return;
         };
-        let (want, live) = {
+        let (want, live, ptt) = {
             let g = self.game.lock().unwrap();
-            (g.wants_mic() && g.connected(), g.live_words())
+            (g.wants_mic() && g.connected(), g.live_words(), g.push_to_talk())
         };
         let (langs, _) = self.languages();
         let key = langs.join(",");
@@ -360,6 +445,7 @@ impl Runtime {
         }
         let lang = kd_speech::plan(&langs).0;
         l.set_live(live);
+        l.set_push_to_talk(ptt);
         let ready = *self.ready.lock().unwrap();
         let Some(mic) = self.mic.as_mut() else { return };
         if want && ready == Ready::Loaded && !mic.is_open() {
@@ -407,9 +493,10 @@ impl Runtime {
         };
         let mut speakers = Vec::new();
         if let (Some(f), "connected") = (&feed, state) {
-            for sp in f.speakers.values() {
+            for (id, sp) in &f.speakers {
                 speakers.push(SpeakerStatus {
-                    name: g.speaker_name(sp.src),
+                    // (a real player: src 0, their player id)
+                    name: if sp.src == 0 { format!("player {id}") } else { g.speaker_name(sp.src) },
                     talk: sp.talk,
                     gain: sp.gain,
                     az: sp.az,
@@ -451,6 +538,7 @@ impl Runtime {
             last: said.last_said.clone(),
             speakers,
             error: said.error.clone(),
+            voice: self.voice.as_ref().map(|v| v.status()),
         }
     }
 

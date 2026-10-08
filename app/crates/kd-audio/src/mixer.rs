@@ -108,6 +108,14 @@ pub fn behind(az: f64) -> f64 {
 /// A voice clip: mono at RATE.
 pub type Clip = Arc<Vec<f32>>;
 
+/// Real players' voices as they arrive (kd-voice's receiver): the mixer pulls each one's audio while it plays, for a
+/// speaker with src 0 (id = their player id) and gain above 0. Called from the audio callback: must not block long.
+pub trait Streams: Send {
+    /// The next out.len() samples (mono, RATE) of player `id`'s voice into out (silence where there is none);
+    /// false: nothing playing for them now.
+    fn pull(&mut self, id: i64, out: &mut [f32]) -> bool;
+}
+
 struct Voice {
     pos: usize,
     /// (a new turn starts the clip from its beginning: the game times the words to it)
@@ -150,6 +158,8 @@ impl Voice {
 /// render(frames) -> stereo frames.
 pub struct Mixer {
     pub clips: HashMap<i64, Clip>,
+    /// real players' voices (speakers with src 0); None: none play
+    pub streams: Option<Box<dyn Streams>>,
     /// the helper's own volume, on top of the game's
     pub volume: f64,
     clock: Box<dyn Fn() -> f64 + Send>,
@@ -174,6 +184,7 @@ impl Mixer {
     pub fn with_clock(clips: HashMap<i64, Clip>, clock: Box<dyn Fn() -> f64 + Send>) -> Mixer {
         Mixer {
             clips,
+            streams: None,
             volume: 1.0,
             clock,
             feed: None,
@@ -257,8 +268,17 @@ impl Mixer {
         for &sid in ids.iter() {
             let sp = feed.and_then(|f| f.speakers.get(&sid));
             let v = self.voices.entry(sid).or_insert_with(Voice::new);
-            let clip = sp.and_then(|s| self.clips.get(&s.src));
-            let talking = sp.is_some_and(|s| s.talk) && clip.is_some();
+            // (a real player: their voice streams in; talk is ignored - what arrives plays. Gain 0: not played)
+            let real = sp.is_some_and(|s| s.src == 0);
+            if real {
+                v.x.clear();
+                v.x.resize(frames, 0.0);
+            }
+            let streaming = real
+                && sp.is_some_and(|s| s.gain > 0.0)
+                && self.streams.as_mut().is_some_and(|st| st.pull(sid, &mut v.x));
+            let clip = if real { None } else { sp.and_then(|s| self.clips.get(&s.src)) };
+            let talking = streaming || (sp.is_some_and(|s| s.talk) && clip.is_some());
             if talking && !v.talking {
                 v.pos = 0;
             }
@@ -281,27 +301,29 @@ impl Mixer {
                 }
                 continue;
             }
-            if let Some(c) = clip {
-                // (fading out after it left the feed: its last clip)
-                if !v.src_clip.as_ref().is_some_and(|s| Arc::ptr_eq(s, c)) {
-                    v.src_clip = Some(c.clone());
+            if !real {
+                if let Some(c) = clip {
+                    // (fading out after it left the feed: its last clip)
+                    if !v.src_clip.as_ref().is_some_and(|s| Arc::ptr_eq(s, c)) {
+                        v.src_clip = Some(c.clone());
+                    }
                 }
+                let src = match v.src_clip.as_ref() {
+                    Some(s) if !s.is_empty() => s,
+                    _ => {
+                        // (an empty clip, or a real player gone from the feed: nothing to play)
+                        v.gl = 0.0;
+                        v.gr = 0.0;
+                        self.levels.insert(sid, 0.0);
+                        continue;
+                    }
+                };
+                let n = src.len();
+                v.pos %= n;
+                v.x.clear();
+                v.x.extend((0..frames).map(|i| src[(v.pos + i) % n]));
+                v.pos = (v.pos + frames) % n;
             }
-            let src = match v.src_clip.as_ref() {
-                Some(s) if !s.is_empty() => s,
-                _ => {
-                    // (an empty clip: nothing to play)
-                    v.gl = 0.0;
-                    v.gr = 0.0;
-                    self.levels.insert(sid, 0.0);
-                    continue;
-                }
-            };
-            let n = src.len();
-            v.pos %= n;
-            v.x.clear();
-            v.x.extend((0..frames).map(|i| src[(v.pos + i) % n]));
-            v.pos = (v.pos + frames) % n;
             v.muffle += (tm - v.muffle) * k;
             let fc = CUT_CLEAR * (CUT_MUFFLED / CUT_CLEAR).powf(v.muffle);
             let a = 1.0 - (-2.0 * std::f64::consts::PI * fc / RATE as f64).exp();

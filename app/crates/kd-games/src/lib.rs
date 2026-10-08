@@ -54,6 +54,10 @@ pub trait Game: Send + Sync {
         false
     }
 
+    /// the voice chat's link to the relay, for the game to show: "off" (no room), "connecting", "connected",
+    /// "unreachable" (the last tries failed: still trying). Called with each change.
+    fn set_voice_state(&self, _state: &str) {}
+
     /// {src: the wav file of that test voice}: the recorded voices the game's test speakers play (the program loads
     /// them with kd_audio::load_wav). Blocking: the first call makes them (PowerShell, a few seconds each)
     fn test_voices(&self) -> HashMap<i64, PathBuf> {
@@ -73,6 +77,11 @@ pub trait Game: Send + Sync {
     // ---- what the game wants (from its feed)
     fn wants_mic(&self) -> bool {
         self.feed().is_some_and(|f| f.mic)
+    }
+
+    /// push to talk: Some(the key is held); None - always on (the speech detector decides)
+    fn push_to_talk(&self) -> Option<bool> {
+        self.feed().filter(|f| f.mic).and_then(|f| f.ptt)
     }
 
     fn language(&self) -> String {

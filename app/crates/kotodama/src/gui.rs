@@ -37,6 +37,17 @@ fn model_state(row: &crate::runtime::ModelRow) -> (String, Color32) {
 }
 
 /// (file, bytes done, bytes total) -> "42 % of 640 MB" (or "120 MB" when the size is not known)
+/// The voice chat as the window says it: off, connecting, in the room (and how many voices it hears).
+pub fn voice_text(v: &kd_voice::VoiceStatus) -> (String, Color32) {
+    match (v.state, v.heard) {
+        ("connected", 0) => ("in the room".into(), theme::GOOD),
+        ("connected", 1) => ("in the room · hearing 1 voice".into(), theme::GOOD),
+        ("connected", n) => (format!("in the room · hearing {n} voices"), theme::GOOD),
+        ("connecting", _) => ("connecting...".into(), theme::WARN),
+        _ => ("off".into(), theme::MUTED),
+    }
+}
+
 pub fn download_text(d: &(String, u64, u64)) -> String {
     let (_, done, total) = d;
     if *total > 0 {
@@ -797,6 +808,13 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                                             .color(theme::MUTED),
                                     );
                                     ui.end_row();
+                                    // (real voices: the room on the relay)
+                                    if let Some(v) = self.status.as_ref().and_then(|s| s.voice.as_ref()) {
+                                        ui.label(RichText::new("Voice chat").color(theme::MUTED));
+                                        let (text, colour) = voice_text(v);
+                                        theme::pill(ui, &text, colour);
+                                        ui.end_row();
+                                    }
 }
                                 });
                         });

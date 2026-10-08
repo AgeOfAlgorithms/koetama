@@ -2,15 +2,18 @@
 //! computer only, never another interface); one client at a time (a new connection replaces the old one);
 //! newline-delimited JSON both ways (PROTOCOL.md "Adding a game mod: profiles"):
 //!   mod -> Kotodama    {"type":"hello","protocol":1,"game":..,"mod":..}   (optional)
-//!                      {"type":"feed","vol":..,"mic":..,"lang":..,"live":..,"speakers":[{"id","src","talk","gain","az","el","muffle"}]}
+//!                      {"type":"feed","vol":..,"mic":..,"ptt":..,"lang":..,"live":..,"speakers":[{"id","src","talk","gain","az","el","muffle"}],
+//!                       "room":..,"key":..,"me":..,"to":[ids],"region":..}   (the voice room: PROTOCOL.md version 5)
 //!                      (whenever it changes and at least every second: no feed for kd_audio::STALE s = not connected)
 //!   Kotodama -> mod    {"type":"hello","app":"Kotodama","version":..,"protocol":1}   (on connect)
 //!                      {"type":"msg","kind":"s"|"l"|"f","utt":n,"text":..,"times":[s..],"ago":s}   (what the player said)
+//!                      {"type":"msg","kind":"r","utt":0,"text":"<room>:<key>"}   (a new voice room, once per connection)
+//!                      {"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}   (the voice chat's link)
 //! No acks or pings: the connection is the liveness.
 use crate::files::{as_used, cut_line, json_secs};
 use crate::profile::{Connector, Profile};
 use crate::{intern, voices, Game};
-use kd_common::feed::{Feed, FeedSink, Speaker};
+use kd_common::feed::{self, Feed, FeedSink, Speaker};
 use kd_common::{paths, Log};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -72,7 +75,8 @@ fn hello_line() -> String {
     )
 }
 
-/// A feed line's object -> a Feed (seq: counted here; no session, acks or pings).
+/// A feed line's object -> a Feed (seq: counted here; the session is the connection's number, set by the caller; no
+/// acks or pings).
 pub fn parse_socket_feed(v: &Value, seq: i64) -> Result<Feed, String> {
     let num = |o: &Value, k: &str, def: f64| -> Result<f64, String> {
         match o.get(k) {
@@ -125,6 +129,28 @@ pub fn parse_socket_feed(v: &Value, seq: i64) -> Result<Feed, String> {
         }
         Some(_) => return Err("\"speakers\" must be a list of at most 256 speakers".into()),
     }
+    // the voice room (PROTOCOL.md version 5): strings and numbers as the files feed; a bad room / key / id is no room
+    let text = |k: &str| -> Result<String, String> {
+        match v.get(k) {
+            None | Some(Value::Null) => Ok(String::new()),
+            Some(Value::String(s)) => Ok(s.clone()),
+            Some(_) => Err(format!("\"{k}\" must be a string")),
+        }
+    };
+    let me = match v.get("me") {
+        None | Some(Value::Null) => None,
+        Some(x) => Some(x.as_i64().ok_or("\"me\" must be a whole number")?),
+    };
+    let (room, key, me) = feed::voice_room(&text("room")?, &text("key")?, me);
+    let region = feed::voice_region(&text("region")?, &room);
+    let to = match v.get("to") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) if a.len() <= 256 => {
+            let ids: Option<Vec<i64>> = a.iter().map(Value::as_i64).collect();
+            feed::voice_to(ids.ok_or("\"to\" must be a list of player ids")?.into_iter().map(Some))
+        }
+        Some(_) => return Err("\"to\" must be a list of at most 256 player ids".into()),
+    };
     Ok(Feed {
         seq,
         vol: num(v, "vol", 1.0)?.clamp(0.0, 1.0),
@@ -132,9 +158,18 @@ pub fn parse_socket_feed(v: &Value, seq: i64) -> Result<Feed, String> {
         ack: 0,
         ping: 0,
         mic: flag(v, "mic", false)?,
+        ptt: match v.get("ptt") {
+            None | Some(Value::Null) => None,
+            Some(_) => Some(flag(v, "ptt", false)?),
+        },
         lang,
         live: flag(v, "live", true)?,
         speakers,
+        room,
+        key,
+        me,
+        to,
+        region,
     })
 }
 
@@ -153,6 +188,8 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
     let mut last_err = String::new();
     let mut conn: Option<Conn> = None;
     let mut seq: i64 = 0;
+    // (each connection is a game session: its feeds' sid, so the voice room is made anew for it)
+    let mut session: i64 = 0;
     let drop_conn = |conn: &mut Option<Conn>, why: &str| {
         if let Some(c) = conn.take() {
             let _ = c.stream.shutdown(Shutdown::Both);
@@ -213,6 +250,7 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 *client = Some(writer);
                 write_line(&mut client, &hello_line());
                 conn = Some(Conn { stream, buf: Vec::new(), told_bad: false });
+                session += 1;
             }
         }
         let Some(c) = conn.as_mut() else {
@@ -239,7 +277,7 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 too_long = true;
                 break;
             }
-            if let Err(e) = on_line(&line, &profile, &sink, &sh, &mut seq, &log) {
+            if let Err(e) = on_line(&line, &profile, &sink, &sh, &mut seq, session, &log) {
                 if !c.told_bad {
                     c.told_bad = true;
                     log(&format!("{}: skipped a malformed line from the game ({e}); more are skipped quietly", profile.game));
@@ -255,7 +293,15 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
 }
 
 /// One line from the mod. Err: malformed (skipped).
-fn on_line(line: &[u8], profile: &Profile, sink: &Arc<dyn FeedSink>, sh: &Shared, seq: &mut i64, log: &Log) -> Result<(), String> {
+fn on_line(
+    line: &[u8],
+    profile: &Profile,
+    sink: &Arc<dyn FeedSink>,
+    sh: &Shared,
+    seq: &mut i64,
+    session: i64,
+    log: &Log,
+) -> Result<(), String> {
     let text = std::str::from_utf8(line).map_err(|_| "not UTF-8")?.trim();
     if text.is_empty() {
         return Ok(());
@@ -263,7 +309,8 @@ fn on_line(line: &[u8], profile: &Profile, sink: &Arc<dyn FeedSink>, sh: &Shared
     let v: Value = serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
     match v.get("type").and_then(Value::as_str) {
         Some("feed") => {
-            let feed = as_used(parse_socket_feed(&v, *seq + 1)?, profile);
+            let mut feed = as_used(parse_socket_feed(&v, *seq + 1)?, profile);
+            feed.sid = session;
             *seq += 1;
             *lock(&sh.feed) = Some(feed.clone());
             sink.set_feed(feed);
@@ -401,6 +448,10 @@ impl Game for SocketGame {
     fn send_text(&self, text: &str) -> bool {
         let text = crate::files::py_strip(text);
         !text.is_empty() && self.send('f', 0, text, None, None)
+    }
+
+    fn set_voice_state(&self, state: &str) {
+        self.send_line(&serde_json::json!({"type": "voice", "state": state}).to_string());
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

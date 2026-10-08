@@ -2,13 +2,15 @@
 //! read files next to itself. Parameterised by a profile (profile::FilesConfig):
 //!   game -> Kotodama   a file the game writes (Teardown: savegame.xml), polled: a regex finds each copy of the mod's
 //!                      feed string (parse_feed's format), a second one the tag of the copy that wrote it
-//!   Kotodama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>p<n> (the answer to
-//!                      ping n), <prefix>t<n>.<ext> (message n: what the player said; a Teardown prefab or JSON)
+//!   Kotodama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>v<n> (it reads feed
+//!                      version n: one for each, FEED_VERSIONS), <prefix>p<n> (the answer to ping n), <prefix>t<n>.<ext>
+//!                      (message n: what the player said; a Teardown prefab or JSON), <prefix>vc / <prefix>vx (the
+//!                      voice chat is in its room / can't reach the relay)
 //! SAFETY: it writes only into folders that exist (never creates one), and deletes only files whose names are exactly
 //! its own patterns (Link::owns) - the prefix must be 3+ letters, digits or _ ending in _ (profile::safe_prefix).
 use crate::profile::{self, FilesConfig, MessageFormat, Profile};
 use crate::{intern, voices, Game};
-use kd_common::feed::{Feed, FeedSink, Speaker};
+use kd_common::feed::{self, Feed, FeedSink, Speaker};
 use kd_common::{text, Log};
 use regex::bytes::Regex;
 use std::collections::{BTreeMap, HashMap};
@@ -20,6 +22,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const TEXT_MAX: usize = 400; // characters of one text file
+/// the feed versions Kotodama reads, each announced by a <prefix>v<n> file next to <prefix>on (a mod sees whether
+/// this Kotodama knows its feed: older versions are read too, but only the newest has the voice room)
+pub const FEED_VERSIONS: [u32; 1] = [5];
+
 /// Teardown's file prefix (the files connector's default)
 pub const PREFIX: &str = profile::DEFAULT_PREFIX;
 
@@ -75,15 +81,25 @@ fn py_float(s: &str) -> Option<f64> {
 }
 
 // ---------------------------------------------------------------- the feed (game -> Kotodama)
-/// '4|seq|volume|session|ack|ping|mic|lang|live|id,src,talk,gain,az,el,muffle;...' (versions 2 and 3 too) -> a Feed,
-/// or None
+/// '5|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|id,src,talk,gain,az,el,muffle;...' (versions 4, 3 and
+/// 2 too: no room) -> a Feed, or None. A bad room, key or id: no room; bad ids in `to`: skipped (feed::voice_room,
+/// voice_to)
 pub fn parse_feed(text: &str) -> Option<Feed> {
     let p: Vec<&str> = text.split('|').collect();
     let (seq, vol, sid, ack, ping, mic, lang, live, rest) = match (p[0], p.len()) {
+        ("5", 15) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[14]),
         ("4", 10) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]),
         ("3", 9) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], "1", p[8]),
         ("2", 8) => (p[1], p[2], p[3], p[4], p[5], p[6], "en", "1", p[7]),
         _ => return None,
+    };
+    let ((room, key, me), to, region) = if p[0] == "5" {
+        let to = if p[12].is_empty() { Vec::new() } else { feed::voice_to(p[12].split(',').map(feed::player_id)) };
+        let rkm = feed::voice_room(p[9], p[10], feed::player_id(p[11]));
+        let region = feed::voice_region(p[13], &rkm.0);
+        (rkm, to, region)
+    } else {
+        ((String::new(), String::new(), 0), Vec::new(), String::new())
     };
     let mut speakers = BTreeMap::new();
     for item in rest.split(';') {
@@ -112,10 +128,21 @@ pub fn parse_feed(text: &str) -> Option<Feed> {
         sid: py_int(sid)?,
         ack: py_int(ack)?,
         ping: py_int(ping)?,
-        mic: mic == "1",
+        // (0 off, 1 listen, 2 / 3 push to talk with the key up / held)
+        mic: matches!(mic, "1" | "2" | "3"),
+        ptt: match mic {
+            "2" => Some(false),
+            "3" => Some(true),
+            _ => None,
+        },
         lang: if lang.is_empty() { "en".into() } else { lang.into() },
         live: live != "0",
         speakers,
+        room,
+        key,
+        me,
+        to,
+        region,
     })
 }
 
@@ -473,6 +500,9 @@ impl Link {
             return false;
         };
         rest == "on"
+            || rest == "vc"
+            || rest == "vx"
+            || numbered(rest, "v", "")
             || numbered(rest, "p", "")
             || numbered(rest, "t", &format!(".{}", self.rules.message.ext()))
             || numbered(rest, "w", ".tmp")
@@ -521,14 +551,42 @@ impl Link {
         self.lock().live
     }
 
-    /// Old files of mine swept, <prefix>on written in every folder there is.
+    /// Old files of mine swept, <prefix>on and the feed versions (<prefix>v<n>) written in every folder there is.
     pub fn start(&self) {
         for d in &self.dirs {
             if d.is_dir() {
                 self.sweep(d);
-                let on = self.path(d, "on");
-                if let Err(e) = fs::write(&on, "1") {
-                    (self.log)(&format!("could not write {}: {e}", on.display()));
+                let names = std::iter::once("on".to_string()).chain(FEED_VERSIONS.iter().map(|v| format!("v{v}")));
+                for name in names {
+                    let f = self.path(d, &name);
+                    if let Err(e) = fs::write(&f, "1") {
+                        (self.log)(&format!("could not write {}: {e}", f.display()));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The voice chat's state for the game: <prefix>vc while in the room, <prefix>vx while the relay can't be
+    /// reached, neither otherwise - in every folder (the mod looks in one; which is known only from a feed).
+    pub fn set_voice(&self, state: &str) {
+        let want = match state {
+            "connected" => Some("vc"),
+            "unreachable" => Some("vx"),
+            _ => None,
+        };
+        for d in &self.dirs {
+            if !d.is_dir() {
+                continue;
+            }
+            for name in ["vc", "vx"] {
+                let f = self.path(d, name);
+                if Some(name) == want {
+                    if let Err(e) = fs::write(&f, "1") {
+                        (self.log)(&format!("could not write {}: {e}", f.display()));
+                    }
+                } else if f.exists() {
+                    remove(&f);
                 }
             }
         }
@@ -599,8 +657,9 @@ impl Link {
         !text.is_empty() && self.send_msg('f', 0, text, None, None)
     }
 
-    /// Hand a message to the game: kind 's' (the player started talking: no text yet), 'l' (the live words so far)
-    /// or 'f' (the finished line; "" = nothing made out: the live words go); times: each unit's start (s after t0,
+    /// Hand a message to the game: kind 's' (the player started talking: no text yet), 'l' (the live words so far),
+    /// 'f' (the finished line; "" = nothing made out: the live words go) or 'r' (a new voice room, "<room>:<key>";
+    /// PROTOCOL.md version 5); times: each unit's start (s after t0,
     /// when the line's audio began) - written with how long ago t0 is now. False if no game is listening.
     pub fn send_msg(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool {
         let (text, times) = cut_line(text, times);
@@ -747,6 +806,7 @@ impl FilesGame {
 pub(crate) fn as_used(mut feed: Feed, p: &Profile) -> Feed {
     if !p.speech {
         feed.mic = false;
+        feed.ptt = None;
     }
     if !p.voices {
         feed.speakers.clear();
@@ -782,6 +842,10 @@ impl Game for FilesGame {
             link.on_feed(&feed, tag);
         };
         self.reader = Some(FeedReader::start_with(self.save.clone(), FeedReader::POLL, self.rules.clone(), on_feed));
+    }
+
+    fn set_voice_state(&self, state: &str) {
+        self.link.set_voice(state);
     }
 
     fn stop(&mut self) {

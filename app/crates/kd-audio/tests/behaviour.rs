@@ -267,3 +267,56 @@ fn render_speed() {
     let us = t.elapsed().as_secs_f64() * 1e6 / 200.0;
     println!("8 muffled voices: {us:.0} us per 480-frame block");
 }
+
+/// A stand-in for kd-voice's receiver: each player id's voice is 0.1; who was asked is noted.
+struct Voices {
+    playing: Vec<i64>,
+    asked: Arc<Mutex<Vec<i64>>>,
+}
+
+impl Streams for Voices {
+    fn pull(&mut self, id: i64, out: &mut [f32]) -> bool {
+        self.asked.lock().unwrap().push(id);
+        let on = self.playing.contains(&id);
+        out.fill(if on { 0.1 } else { 0.0 });
+        on
+    }
+}
+
+/// Real players (src 0): their voices stream in (talk ignored), placed like the test voices; gain 0 or a player not
+/// in the feed: not played (never even asked for); the test voices go on as before.
+#[test]
+fn real_players_stream_in() {
+    let clock = Clock::default();
+    let asked: Arc<Mutex<Vec<i64>>> = Arc::default();
+    let mut m = Mixer::with_clock(ones(), clock.boxed());
+    m.streams = Some(Box::new(Voices { playing: vec![7, 8, 9], asked: asked.clone() }));
+    // player 7 to the right, talk 0 (ignored for a real player)
+    m.set_feed(feed_with(1.0, |s| {
+        s.src = 0;
+        s.talk = false;
+        s.az = 90.0
+    }));
+    let o = run(&mut m, &clock, 0.5, 480);
+    let tail = &o[o.len() / 2..];
+    assert!(rms(&chan(tail, 1)) > 0.05 && db(rms(&chan(tail, 1))) - db(rms(&chan(tail, 0))) > 15.0, "heard, to the right");
+    assert!(asked.lock().unwrap().iter().all(|&id| id == 7), "only the player in the feed is asked for");
+    // gain 0: not played, not asked
+    asked.lock().unwrap().clear();
+    m.set_feed(feed_with(1.0, |s| {
+        s.src = 0;
+        s.gain = 0.0
+    }));
+    let o = run(&mut m, &clock, 0.3, 480);
+    assert!(rms(&o[o.len() / 2..]) < 1e-4 && asked.lock().unwrap().is_empty());
+    // a real player with nothing arriving: silence; a test voice beside it plays its clip
+    let mut f = feed_with(1.0, |s| s.src = 0);
+    f.speakers.get_mut(&7).unwrap().src = 0;
+    f.speakers.insert(5, kd_common::feed::Speaker { src: 1, talk: true, gain: 1.0, ..Default::default() });
+    let mut quiet = Mixer::with_clock(ones(), clock.boxed());
+    quiet.streams = Some(Box::new(Voices { playing: vec![], asked: Arc::default() }));
+    quiet.set_feed(f);
+    let o = run(&mut quiet, &clock, 0.3, 480);
+    assert!(quiet.level(7) == 0.0 && quiet.level(5) > 0.5, "{} {}", quiet.level(7), quiet.level(5));
+    assert!(rms(&o[o.len() / 2..]) > 0.05, "the test voice plays");
+}

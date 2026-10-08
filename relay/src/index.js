@@ -1,0 +1,86 @@
+// Kotodama's voice relay (PROTOCOL.md, "The voice relay"): a Cloudflare Worker with one Durable Object per voice
+// ROOM (a game session: its room name comes from the game). Each player's Kotodama holds a WebSocket to its room and
+// sends its voice as binary frames naming the players who should get it (those in range: the speaker's game decides);
+// the room forwards each frame to just them. Audio is end-to-end encrypted by Kotodama with a key only the session's
+// players have, so the relay only moves opaque bytes.
+//
+//   GET /v1/room/<32 hex>?me=<player id 1..65535>[&region=<wnam|enam|weur|...>]   (WebSocket upgrade)
+// A region asks Cloudflare to create the room near there (a location hint: best effort, and only when the room is
+// first made). The region is part of the room's name, so a host who changes it moves everyone to a new room there.
+//
+// Cost (Workers pricing, 2026): incoming WebSocket messages count 20:1 as requests, outgoing ones are free, and with
+// the Hibernation API (ctx.acceptWebSocket) a room is not billed for duration between messages.
+import { DurableObject } from "cloudflare:workers";
+import { MAX_PAYLOAD, parseId, parseRegion, roomName, route } from "./frames.js";
+
+const ROOM_PATH = /^\/v1\/room\/([0-9a-f]{32})$/;
+const MAX_PEERS = 64;           // connections in one room
+const MAX_RATE = 60;            // frames a second from one connection (60 ms packets: ~17); more are dropped
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/" || url.pathname === "/v1") {
+      return new Response("Kotodama voice relay (github.com/AgeOfAlgorithms/kotodama)\n", { status: 200 });
+    }
+    const m = url.pathname.match(ROOM_PATH);
+    if (!m) return new Response("not found\n", { status: 404 });
+    if (request.headers.get("Upgrade") !== "websocket") return new Response("a WebSocket is expected\n", { status: 426 });
+    if (parseId(url.searchParams.get("me")) === null) return new Response("?me= must be a player id 1..65535\n", { status: 400 });
+    const region = parseRegion(url.searchParams.get("region"));
+    const id = env.ROOMS.idFromName(roomName(m[1], region));
+    const room = region ? env.ROOMS.get(id, { locationHint: region }) : env.ROOMS.get(id);
+    return room.fetch(request);
+  },
+};
+
+export class Room extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    // (keep-alives answered without waking the room: Kotodama sends "ping" every 20 s)
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    this.rate = new Map(); // ws -> {t: second, n: frames in it} (lost on hibernation: harmless)
+  }
+
+  async fetch(request) {
+    const me = parseId(new URL(request.url).searchParams.get("me"));
+    if (me === null) return new Response("bad player id\n", { status: 400 });
+    const tag = String(me);
+    // the same player again (a reconnect): the new connection replaces the old one
+    for (const old of this.ctx.getWebSockets(tag)) {
+      try { old.close(4000, "replaced"); } catch { /* already closing */ }
+    }
+    if (this.ctx.getWebSockets().length >= MAX_PEERS) return new Response("the room is full\n", { status: 503 });
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server, [tag]);
+    server.serializeAttachment({ me });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, message) {
+    if (typeof message === "string") return; // (no text messages but the auto-answered ping)
+    if (message.byteLength > MAX_PAYLOAD + 200) return;
+    const { me } = ws.deserializeAttachment() || {};
+    if (!me) return;
+    const now = Math.floor(Date.now() / 1000);
+    const r = this.rate.get(ws);
+    if (!r || r.t !== now) this.rate.set(ws, { t: now, n: 1 });
+    else if (++r.n > MAX_RATE) return;
+    const routed = route(message, me);
+    if (!routed) return;
+    for (const id of routed.to) {
+      for (const peer of this.ctx.getWebSockets(String(id))) {
+        try { peer.send(routed.out); } catch { /* closing */ }
+      }
+    }
+  }
+
+  async webSocketClose(ws, code, reason) {
+    this.rate.delete(ws);
+    try { ws.close(code === 1005 ? 1000 : code, reason); } catch { /* already closed */ }
+  }
+
+  async webSocketError(ws) {
+    this.rate.delete(ws);
+  }
+}

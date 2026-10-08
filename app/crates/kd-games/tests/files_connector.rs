@@ -25,7 +25,7 @@ fn names(d: &Path) -> Vec<String> {
 }
 
 fn feed(sid: i64, ack: i64, ping: i64) -> Feed {
-    Feed { seq: 1, vol: 1.0, sid, ack, ping, mic: true, lang: "en".into(), live: true, speakers: BTreeMap::new() }
+    Feed { seq: 1, vol: 1.0, sid, ack, ping, mic: true, lang: "en".into(), live: true, speakers: BTreeMap::new(), ptt: None, ..Default::default() }
 }
 
 fn rules(prefix: &str) -> LinkRules {
@@ -33,7 +33,7 @@ fn rules(prefix: &str) -> LinkRules {
 }
 
 /// files a sweep must never touch
-const DECOYS: [&str; 12] = [
+const DECOYS: [&str; 16] = [
     "other.txt",
     "talky_notes.txt",
     "talky_t1.xml",
@@ -46,6 +46,10 @@ const DECOYS: [&str; 12] = [
     "xtalky_on",
     "pcvx_on",
     "talky_t\u{0663}.json",
+    "talky_v",
+    "talky_vcx",
+    "talky_v5x",
+    "talky_vx.bak",
 ];
 
 #[test]
@@ -62,10 +66,19 @@ fn json_messages_and_a_safe_sweep() {
     let link = Link::with_rules(vec![Some(a.clone()), Some(b.clone()), Some(gone.clone()), None], rules("talky_"), kd_common::null_log()).unwrap();
     assert_eq!(link.dirs(), [a.clone(), b.clone(), gone.clone()]);
     link.start();
-    let mut want: Vec<String> = DECOYS.iter().map(|s| s.to_string()).chain(["talky_on".into(), "talky_p5".into()]).collect();
+    let mut want: Vec<String> =
+        DECOYS.iter().map(|s| s.to_string()).chain(["talky_on".into(), "talky_p5".into(), "talky_v5".into()]).collect();
     want.sort();
-    assert_eq!(names(&a), want, "old files of mine swept, the decoys kept");
-    assert_eq!(names(&b), ["talky_on"]);
+    assert_eq!(names(&a), want, "old files of mine swept, the decoys kept; on and the feed version (v5) written");
+    assert_eq!(names(&b), ["talky_on", "talky_v5"]);
+    // the voice chat's state: vc in the room, vx unreachable, neither otherwise - in every folder
+    link.set_voice("connected");
+    assert!(names(&a).contains(&"talky_vc".into()) && names(&b).contains(&"talky_vc".into()));
+    link.set_voice("unreachable");
+    assert!(!names(&a).contains(&"talky_vc".into()) && names(&a).contains(&"talky_vx".into()));
+    link.set_voice("connecting");
+    assert!(!names(&a).contains(&"talky_vx".into()) && !names(&b).contains(&"talky_vc".into()));
+    link.set_voice("connected"); // (stop() takes it)
     assert!(!gone.exists(), "a missing folder is never made");
     // the folders by tag: ws-* the second, anything else the first
     assert_eq!(link.dir_for("ws-123"), Some(b.clone()));
