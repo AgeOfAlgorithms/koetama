@@ -1,4 +1,4 @@
-//! The translator (PROTOCOL.md "Translation (version 6)"): the game's rules and the lines it wants translated, on a
+//! The translator (PROTOCOL.md "Translation"): the game's rules and the lines it wants translated, on a
 //! thread of its own.
 //!
 //! Up to MAX_TRANSLATIONS rules "from A into B". A new rule's models are got ready at once on a helper thread (Mozilla's

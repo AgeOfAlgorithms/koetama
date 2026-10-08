@@ -41,7 +41,7 @@ pub struct Feed {
     /// live words while they talk (false: only the finished line, less CPU)
     pub live: bool,
     pub speakers: BTreeMap<i64, Speaker>,
-    /// the session's voice room (version 5): 32 lower-case hex digits; "" = no room (no real voices sent or heard).
+    /// the session's voice room (PROTOCOL.md "Real voices"): 32 lower-case hex digits; "" = no room (no real voices sent or heard).
     /// Only kept with a good key and id (voice_room)
     #[serde(default)]
     pub room: String,
@@ -57,11 +57,11 @@ pub struct Feed {
     /// where the room should live (a relay region, REGIONS); "": wherever the relay puts it (near the first player)
     #[serde(default)]
     pub region: String,
-    /// the player's translations (version 6): (from, to) in Koetama's language codes, at most MAX_TRANSLATIONS; empty:
+    /// the player's translations (PROTOCOL.md "Translation"): (from, to) in Koetama's language codes, at most MAX_TRANSLATIONS; empty:
     /// translation off (translation_pairs)
     #[serde(default)]
     pub translations: Vec<(String, String)>,
-    /// the lines the game wants translated (version 6): (id, text), at most MAX_REQUESTS, each id once; a text that
+    /// the lines the game wants translated (to_translate): (id, text), at most MAX_REQUESTS, each id once; a text that
     /// was not good UTF-8 of at most MAX_REQUEST_BYTES is "" (its reply: "") (translate_requests)
     #[serde(default)]
     pub to_translate: Vec<(i64, String)>,
@@ -96,22 +96,6 @@ pub fn translation_pairs(rules: impl IntoIterator<Item = (String, String)>) -> V
     out
 }
 
-/// The feed's translations field (version 6): "ja>en,ko>en" -> [("ja", "en"), ("ko", "en")]; malformed items skipped.
-pub fn parse_translations(s: &str) -> Vec<(String, String)> {
-    if s.is_empty() {
-        return Vec::new();
-    }
-    translation_pairs(s.split(',').filter_map(|item| item.split_once('>').map(|(a, b)| (a.to_string(), b.to_string()))))
-}
-
-/// A request id as the feed writes it: 1 to 15 ASCII digits, at least 1.
-pub fn request_id(s: &str) -> Option<i64> {
-    if s.is_empty() || s.len() > 15 || !s.bytes().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    s.parse().ok().filter(|&n| n >= 1)
-}
-
 /// A line to translate as the feed keeps it: good UTF-8 of at most MAX_REQUEST_BYTES, else "" (answered "").
 pub fn request_text(bytes: &[u8]) -> String {
     if bytes.len() > MAX_REQUEST_BYTES {
@@ -137,25 +121,7 @@ pub fn translate_requests(items: impl IntoIterator<Item = (Option<i64>, String)>
     out
 }
 
-/// The feed's requests field (version 6): "<id>:<hex of the UTF-8 text>;..." -> [(id, text)]. An item without a
-/// good id is skipped; one with a bad hex (odd, not hex digits) or text keeps its id with "" (answered "").
-pub fn parse_requests(s: &str) -> Vec<(i64, String)> {
-    let items = s.split(';').filter(|i| !i.is_empty()).filter_map(|item| {
-        let (id, hex) = item.split_once(':')?;
-        Some((request_id(id), request_text(&unhex(hex).unwrap_or_default())))
-    });
-    translate_requests(items)
-}
-
-/// Hex digits (either case) -> bytes; None if odd or not hex.
-fn unhex(h: &str) -> Option<Vec<u8>> {
-    if !h.len().is_multiple_of(2) || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).ok()).collect()
-}
-
-/// A translation rule's state, for the game (PROTOCOL.md version 6, message kind 'd').
+/// A translation's state, for the game (PROTOCOL.md "Translation": translations_status).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuleState {
     pub from: String,
@@ -178,7 +144,7 @@ impl RuleState {
     }
 }
 
-/// The rules' states as message kind 'd' carries them: each wire(), comma-separated ("" for no rules).
+/// The states as one line ("ja>en=ready,ko>en=downloading 42"; "" for none): the status line, and what tells a change.
 pub fn translations_wire(rules: &[RuleState]) -> String {
     rules.iter().map(RuleState::wire).collect::<Vec<_>>().join(",")
 }
@@ -205,14 +171,6 @@ fn lower_hex(s: &str, n: usize) -> bool {
     s.len() == n && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
-/// A player id as the feed writes it: 1 to 5 ASCII digits, 1..=MAX_ID.
-pub fn player_id(s: &str) -> Option<i64> {
-    if s.is_empty() || s.len() > 5 || !s.bytes().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    s.parse().ok().filter(|&n| (1..=MAX_ID).contains(&n))
-}
-
 /// (room, key, me) as the feed keeps them: all three good (a 32-hex room, a 64-hex key, an id) or none of them
 /// ("", "", 0): a half-made room is no room.
 pub fn voice_room(room: &str, key: &str, me: Option<i64>) -> (String, String, i64) {
@@ -234,7 +192,7 @@ pub fn voice_to(ids: impl IntoIterator<Item = Option<i64>>) -> Vec<i64> {
 }
 
 impl Feed {
-    /// The feed names a voice room (version 5).
+    /// The feed names a voice room.
     pub fn has_room(&self) -> bool {
         !self.room.is_empty()
     }

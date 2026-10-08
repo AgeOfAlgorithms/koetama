@@ -46,7 +46,7 @@ def main():
                 n_lo, n_hi = (lo if lo is not None else -1), (hi if hi is not None else len(out))
                 out[k] = round(t_lo + (t_hi - t_lo) * (k - n_lo) / (n_hi - n_lo), 2)
         dur = len(audio) / asr.RATE
-        rows.append((script, H.times_hex(out), dur))
+        rows.append((script, ''.join('%04x' % max(0, min(0xFFFF, int(round(t * 100)))) for t in out), dur))
         print('-- %d: %d of %d words matched; heard: %s' % (i, len(known), len(b), heard), file=sys.stderr)
     print('PC.VDUMMY_LINES = {   -- (engine/make_dummy_lines.py in the koetama repo: the clips\' scripts,')
     print('                      --  each word\'s start from Parakeet on the clip, 4 hex digits in 1/100 s; dur: the clip)')

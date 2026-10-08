@@ -1,9 +1,8 @@
 //! Teardown, through the mod Proximity Babble Chat (its voice.lua) - engine/games/teardown.py. A BUILT-IN profile
 //! (profiles/teardown-proximity-babble-chat.json) on the files connector (files.rs; PROTOCOL.md has the formats):
-//!   game -> Koetama   savegame.xml: savegame.mod.pcvx.f, ~20 times a second - whom the player hears and how
-//!                      (volume, direction, muffle), and what the game wants (the microphone, the language, a ping)
+//!   game -> Koetama   savegame.xml: savegame.mod.pcvx.f (the feed object's hex), ~20 times a second
 //!   Koetama -> game   small files next to the mod's folder: pcvx_on (running), pcvx_p<n> (the answer to ping n),
-//!                      pcvx_t<n>.xml (message n: what the player said)
+//!                      pcvx_t<n>.xml (object n: a prefab holding its hex)
 //! Teardown runs on Windows; on Linux (Steam Deck) through Proton - its files are then inside its Proton prefix.
 use crate::files::{self, FilesGame};
 use crate::profile::{self, Connector, Profile, TestVoice};
@@ -15,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 pub use crate::files::{
-    find_feeds, parse_feed, read_shared, text_prefab, times_hex, FeedReader, FeedScan, Link, PREFIX, TEXT_MAX,
+    find_feeds, parse_feed, read_shared, FeedReader, FeedScan, Link, PREFIX, TEXT_MAX,
 };
 
 pub const APPID: u32 = 1167630;

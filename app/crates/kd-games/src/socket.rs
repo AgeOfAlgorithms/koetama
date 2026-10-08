@@ -1,28 +1,20 @@
 //! The SOCKET connector: for a game whose mod can open a TCP connection. Koetama listens on 127.0.0.1:<port> (this
 //! computer only, never another interface); one client at a time (a new connection replaces the old one);
 //! newline-delimited JSON both ways (PROTOCOL.md "Adding a game mod: profiles"):
-//!   mod -> Koetama    {"type":"hello","protocol":1,"game":..,"mod":..}   (optional)
-//!                      {"type":"feed","volume":..,"mic":..,"ptt":..,"lang":..,"live":..,
-//!                       "speakers":[{"id","src","talk","gain","azimuth","elevation","muffle"}],
-//!                       "room":..,"key":..,"me":..,"to":[ids],"region":..,   (the voice room: PROTOCOL.md version 5)
-//!                       "translations":[{"from":"ja","to":"en"},..],"to_translate":[{"id":7,"text":..},..]}   (version 6)
-//!                      (whenever it changes and at least every second: no feed for kd_audio::STALE s = not connected)
-//!   Koetama -> mod    (lines.rs builds them all)
-//!                      {"type":"hello","app":"Koetama","version":..,"protocol":1,"features":["speech","voices","rooms","translate"]}
-//!                      {"type":"msg","kind":"s"|"l"|"f","utt":n,"text":..,"times":[s..],"ago":s}   (what the player said)
-//!                      {"type":"room","room":..,"key":..}   (a new voice room, once per connection)
-//!                      {"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}   (the voice chat's link)
-//!                      {"type":"translation","id":7,"text":..}   (line 7's translation; "": nothing to show)
-//!                      {"type":"translations_status","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}
-//!                      (each translation's state, on each change; "progress" only while downloading)
+//!   mod -> Koetama    {"type":"hello","protocol":2,"game":..,"mod":..}   (optional)
+//!                      {"type":"feed",...}   (api::parse_feed; whenever it changes and at least every second: no feed for
+//!                      kd_audio::STALE s = not connected)
+//!   Koetama -> mod    api.rs's objects: hello (on connect), speech, room (once per connection), voice, translation,
+//!                      translations_status
 //! No acks or pings: the connection is the liveness.
 use crate::files::{as_used, cut_line, cut_translation};
+use crate::api;
 use crate::profile::{Connector, Profile};
 use crate::{intern, voices, Game};
-use kd_common::feed::{self, Feed, FeedSink, RuleState, Speaker};
-use kd_common::{paths, Log};
+use kd_common::feed::{Feed, FeedSink, RuleState};
+use kd_common::Log;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -31,8 +23,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-/// The socket protocol's version.
-pub const PROTOCOL: u64 = 1;
+/// The protocol's number (api::PROTOCOL).
+pub use crate::api::PROTOCOL;
 /// A line longer than this drops the connection (a feed is a few hundred bytes).
 pub const MAX_LINE: usize = 64 * 1024;
 /// How often a busy port is tried again.
@@ -73,155 +65,16 @@ fn write_line(client: &mut Option<TcpStream>, line: &str) -> bool {
     false
 }
 
-/// What this Koetama does for the game (the hello's "features"): what the profile uses; "rooms" (real voices through
-/// the relay, PROTOCOL.md version 5) with "voices".
-pub fn features(profile: &Profile) -> Vec<&'static str> {
-    let mut f = Vec::new();
-    if profile.speech {
-        f.push("speech");
-    }
-    if profile.voices {
-        f.extend(["voices", "rooms"]);
-    }
-    if profile.translate {
-        f.push("translate");
-    }
-    f
-}
-
 fn hello_line(profile: &Profile) -> String {
-    crate::lines::hello(paths::APP_NAME, paths::VERSION, PROTOCOL, &features(profile))
+    api::hello(&api::features(profile))
 }
 
-/// A feed line's object -> a Feed (seq: counted here; the session is the connection's number, set by the caller; no
-/// acks or pings).
+/// A feed line's object -> a Feed (api::parse_feed; seq: counted here; the session is the connection's number, set by
+/// the caller; no acks or pings).
 pub fn parse_socket_feed(v: &Value, seq: i64) -> Result<Feed, String> {
-    let num = |o: &Value, k: &str, def: f64| -> Result<f64, String> {
-        match o.get(k) {
-            None | Some(Value::Null) => Ok(def),
-            Some(x) => x.as_f64().filter(|f| f.is_finite()).ok_or(format!("\"{k}\" must be a number")),
-        }
-    };
-    let flag = |o: &Value, k: &str, def: bool| -> Result<bool, String> {
-        match o.get(k) {
-            None | Some(Value::Null) => Ok(def),
-            Some(x) => x.as_bool().ok_or(format!("\"{k}\" must be true or false")),
-        }
-    };
-    let lang = match v.get("lang") {
-        None | Some(Value::Null) => "en".to_string(),
-        Some(Value::String(s)) if s.len() <= 16 && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') => {
-            if s.is_empty() {
-                "en".into()
-            } else {
-                s.clone()
-            }
-        }
-        Some(_) => return Err("\"lang\" must be a language code (\"en\", \"ru\", ... or \"auto\")".into()),
-    };
-    let mut speakers = BTreeMap::new();
-    match v.get("speakers") {
-        None | Some(Value::Null) => {}
-        Some(Value::Array(a)) if a.len() <= 256 => {
-            for s in a {
-                if !s.is_object() {
-                    return Err("each speaker must be an object".into());
-                }
-                let id = s.get("id").and_then(Value::as_i64).ok_or("a speaker's \"id\" must be a whole number")?;
-                let src = match s.get("src") {
-                    None | Some(Value::Null) => 0,
-                    Some(x) => x.as_i64().ok_or("a speaker's \"src\" must be a whole number")?,
-                };
-                speakers.insert(
-                    id,
-                    Speaker {
-                        src,
-                        talk: flag(s, "talk", false)?,
-                        gain: num(s, "gain", 1.0)?.clamp(0.0, 1.0),
-                        az: num(s, "azimuth", 0.0)?,
-                        el: num(s, "elevation", 0.0)?,
-                        muffle: num(s, "muffle", 0.0)?.clamp(0.0, 1.0),
-                    },
-                );
-            }
-        }
-        Some(_) => return Err("\"speakers\" must be a list of at most 256 speakers".into()),
-    }
-    // the voice room (PROTOCOL.md version 5): strings and numbers as the files feed; a bad room / key / id is no room
-    let text = |k: &str| -> Result<String, String> {
-        match v.get(k) {
-            None | Some(Value::Null) => Ok(String::new()),
-            Some(Value::String(s)) => Ok(s.clone()),
-            Some(_) => Err(format!("\"{k}\" must be a string")),
-        }
-    };
-    let me = match v.get("me") {
-        None | Some(Value::Null) => None,
-        Some(x) => Some(x.as_i64().ok_or("\"me\" must be a whole number")?),
-    };
-    let (room, key, me) = feed::voice_room(&text("room")?, &text("key")?, me);
-    let region = feed::voice_region(&text("region")?, &room);
-    let to = match v.get("to") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 256 => {
-            let ids: Option<Vec<i64>> = a.iter().map(Value::as_i64).collect();
-            feed::voice_to(ids.ok_or("\"to\" must be a list of player ids")?.into_iter().map(Some))
-        }
-        Some(_) => return Err("\"to\" must be a list of at most 256 player ids".into()),
-    };
-    // translation (PROTOCOL.md version 6): pairs with bad codes and lines with bad ids are skipped
-    let translations = match v.get("translations") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 16 => {
-            let mut pairs = Vec::new();
-            for t in a {
-                match (t.get("from"), t.get("to")) {
-                    (Some(Value::String(from)), Some(Value::String(to))) => pairs.push((from.clone(), to.clone())),
-                    _ => return Err("each of \"translations\" must be {\"from\": a language code, \"to\": a language code}".into()),
-                }
-            }
-            feed::translation_pairs(pairs)
-        }
-        Some(_) => return Err("\"translations\" must be a list of at most 16 {\"from\", \"to\"} pairs".into()),
-    };
-    let to_translate = match v.get("to_translate") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 64 => {
-            let mut items = Vec::new();
-            for r in a {
-                let id = r.get("id").and_then(Value::as_i64);
-                let text = match r.get("text") {
-                    Some(Value::String(t)) => feed::request_text(t.as_bytes()),
-                    _ => return Err("each of \"to_translate\" must be {\"id\": a whole number, \"text\": a string}".into()),
-                };
-                items.push((id, text));
-            }
-            feed::translate_requests(items)
-        }
-        Some(_) => return Err("\"to_translate\" must be a list of at most 64 lines".into()),
-    };
-    Ok(Feed {
-        seq,
-        vol: num(v, "volume", 1.0)?.clamp(0.0, 1.0),
-        sid: 0,
-        ack: 0,
-        ping: 0,
-        mic: flag(v, "mic", false)?,
-        ptt: match v.get("ptt") {
-            None | Some(Value::Null) => None,
-            Some(_) => Some(flag(v, "ptt", false)?),
-        },
-        lang,
-        live: flag(v, "live", true)?,
-        speakers,
-        room,
-        key,
-        me,
-        to,
-        region,
-        translations,
-        to_translate,
-    })
+    let mut feed = api::parse_feed(v)?;
+    feed.seq = seq;
+    Ok(feed)
 }
 
 
@@ -487,7 +340,7 @@ impl Game for SocketGame {
             return false;
         }
         let ago = t0.map(|t| t.elapsed().as_secs_f64());
-        let line = crate::lines::message(kind, utt, &text, times.as_deref(), ago);
+        let line = api::speech(kind, utt, &text, times.as_deref(), ago);
         self.send_line(&line)
     }
 
@@ -497,15 +350,15 @@ impl Game for SocketGame {
     }
 
     fn set_voice_state(&self, state: &str) {
-        self.send_line(&crate::lines::voice(state));
+        self.send_line(&api::voice(state));
     }
 
     fn send_translation(&self, id: i64, text: &str) -> bool {
-        self.send_line(&crate::lines::translation(id, &cut_translation(text)))
+        self.send_line(&api::translation(id, &cut_translation(text)))
     }
 
     fn send_translations_state(&self, rules: &[RuleState]) -> bool {
-        self.send_line(&crate::lines::translations_status(rules))
+        self.send_line(&api::translations_status(rules))
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

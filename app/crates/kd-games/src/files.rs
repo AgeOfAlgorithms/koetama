@@ -1,16 +1,15 @@
-//! The FILES connector: Teardown's link (PROTOCOL.md), for any game whose mod can write a file the game saves and
-//! read files next to itself. Parameterised by a profile (profile::FilesConfig):
+//! The FILES connector (PROTOCOL.md "Transport: files"): for a game whose mod can write a file the game saves and
+//! read files next to itself (Teardown). Parameterised by a profile (profile::FilesConfig):
 //!   game -> Koetama   a file the game writes (Teardown: savegame.xml), polled: a regex finds each copy of the mod's
-//!                      feed string (parse_feed's format), a second one the tag of the copy that wrote it
-//!   Koetama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>v<n> (it reads feed
-//!                      version n: one for each, FEED_VERSIONS), <prefix>p<n> (the answer to ping n), <prefix>t<n>.<ext>
-//!                      (message n: what the player said, a translation, the translation rules' states; a Teardown
-//!                      prefab or JSON), <prefix>vc / <prefix>vx (the voice chat is in its room / can't reach the relay)
+//!                      feed string (the feed object, or its hex: api::feed_from_text), a second one the tag of the copy
+//!   Koetama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>p<n> (the answer to
+//!                      ping n), <prefix>t<n>.<ext> (object n of the session - 1 is the hello; json, or a Teardown prefab
+//!                      holding the object's hex: api::object_prefab)
 //! SAFETY: it writes only into folders that exist (never creates one), and deletes only files whose names are exactly
 //! its own patterns (Link::owns) - the prefix must be 3+ letters, digits or _ ending in _ (profile::safe_prefix).
 use crate::profile::{self, FilesConfig, MessageFormat, Profile};
 use crate::{intern, voices, Game};
-use kd_common::feed::{self, Feed, FeedSink, Speaker};
+use kd_common::feed::{self, Feed, FeedSink};
 use kd_common::{text, Log};
 use regex::bytes::Regex;
 use std::collections::{BTreeMap, HashMap};
@@ -24,9 +23,6 @@ use std::time::{Duration, Instant};
 pub const TEXT_MAX: usize = 400; // characters of one text file
 /// characters of one translation (kind 'x': a 400-byte line can come back longer)
 pub const TRANSLATION_MAX: usize = 1000;
-/// the feed versions Koetama reads, each announced by a <prefix>v<n> file next to <prefix>on (a mod sees whether
-/// this Koetama knows its feed: older versions are read too; version 5 has the voice room, 6 also translation)
-pub const FEED_VERSIONS: [u32; 2] = [5, 6];
 
 /// Teardown's file prefix (the files connector's default)
 pub const PREFIX: &str = profile::DEFAULT_PREFIX;
@@ -34,7 +30,7 @@ pub const PREFIX: &str = profile::DEFAULT_PREFIX;
 static FEED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(crate::teardown::FEED).unwrap());
 static MODTAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(crate::teardown::MODTAG).unwrap());
 
-// ---------------------------------------------------------------- Python's number and space rules
+// ---------------------------------------------------------------- Python's space rules
 /// Python's str.isspace (for strip() and int()/float()): Unicode white space and the ASCII separators 0x1c..0x1f.
 fn py_isspace(c: char) -> bool {
     c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)
@@ -44,114 +40,10 @@ pub(crate) fn py_strip(s: &str) -> &str {
     s.trim_matches(py_isspace)
 }
 
-/// The white space Python's int()/float() ignore around a number (unlike str.strip(): not 0x1c..0x1f).
-fn num_strip(s: &str) -> &str {
-    s.trim_matches(char::is_whitespace)
-}
-
-/// Underscores as Python's int()/float() take them: only between two digits (then dropped).
-fn py_underscores(s: &str) -> Option<String> {
-    if !s.contains('_') {
-        return Some(s.to_string());
-    }
-    let b = s.as_bytes();
-    for (i, &c) in b.iter().enumerate() {
-        if c == b'_' && !(i > 0 && b[i - 1].is_ascii_digit() && b.get(i + 1).is_some_and(u8::is_ascii_digit)) {
-            return None;
-        }
-    }
-    Some(s.replace('_', ""))
-}
-
-/// Python's int(s) for a base-10 string; None where Python raises ValueError (or the number is beyond i64).
-fn py_int(s: &str) -> Option<i64> {
-    let s = py_underscores(num_strip(s))?;
-    let digits = s.strip_prefix(['+', '-']).unwrap_or(&s);
-    if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    s.parse().ok()
-}
-
-/// Python's float(s); None where Python raises ValueError.
-fn py_float(s: &str) -> Option<f64> {
-    let s = py_underscores(num_strip(s))?;
-    if s.is_empty() || !s.is_ascii() {
-        return None;
-    }
-    s.parse().ok()
-}
-
 // ---------------------------------------------------------------- the feed (game -> Koetama)
-/// '6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|translations|requests|id,src,talk,gain,az,el,muffle;...'
-/// (version 5: no translations or requests; 4, 3 and 2: no room either) -> a Feed, or None. A bad room, key or id: no room;
-/// bad ids in `to`: skipped (feed::voice_room, voice_to); malformed translations and requests: skipped (feed::parse_translations,
-/// parse_requests)
+/// A feed string from the game's file (the feed object, or its hex) -> a Feed, or None (api::feed_from_text).
 pub fn parse_feed(text: &str) -> Option<Feed> {
-    let p: Vec<&str> = text.split('|').collect();
-    let (seq, vol, sid, ack, ping, mic, lang, live, rest) = match (p[0], p.len()) {
-        ("6", 17) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[16]),
-        ("5", 15) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[14]),
-        ("4", 10) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]),
-        ("3", 9) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], "1", p[8]),
-        ("2", 8) => (p[1], p[2], p[3], p[4], p[5], p[6], "en", "1", p[7]),
-        _ => return None,
-    };
-    let ((room, key, me), to, region) = if p[0] == "5" || p[0] == "6" {
-        let to = if p[12].is_empty() { Vec::new() } else { feed::voice_to(p[12].split(',').map(feed::player_id)) };
-        let rkm = feed::voice_room(p[9], p[10], feed::player_id(p[11]));
-        let region = feed::voice_region(p[13], &rkm.0);
-        (rkm, to, region)
-    } else {
-        ((String::new(), String::new(), 0), Vec::new(), String::new())
-    };
-    let (translations, to_translate) =
-        if p[0] == "6" { (feed::parse_translations(p[14]), feed::parse_requests(p[15])) } else { (Vec::new(), Vec::new()) };
-    let mut speakers = BTreeMap::new();
-    for item in rest.split(';') {
-        if item.is_empty() {
-            continue;
-        }
-        let f: Vec<&str> = item.split(',').collect();
-        let [spid, src, talk, gain, az, el, muffle] = f[..] else {
-            return None;
-        };
-        speakers.insert(
-            py_int(spid)?,
-            Speaker {
-                src: py_int(src)?,
-                talk: talk == "1",
-                gain: py_float(gain)?,
-                az: py_float(az)?,
-                el: py_float(el)?,
-                muffle: py_float(muffle)?,
-            },
-        );
-    }
-    Some(Feed {
-        seq: py_int(seq)?,
-        vol: py_float(vol)?,
-        sid: py_int(sid)?,
-        ack: py_int(ack)?,
-        ping: py_int(ping)?,
-        // (0 off, 1 listen, 2 / 3 push to talk with the key up / held)
-        mic: matches!(mic, "1" | "2" | "3"),
-        ptt: match mic {
-            "2" => Some(false),
-            "3" => Some(true),
-            _ => None,
-        },
-        lang: if lang.is_empty() { "en".into() } else { lang.into() },
-        live: live != "0",
-        speakers,
-        room,
-        key,
-        me,
-        to,
-        region,
-        translations,
-        to_translate,
-    })
+    crate::api::feed_from_text(text).ok()
 }
 
 /// Bytes as Python's .decode('ascii', 'replace'): each byte past ASCII is U+FFFD.
@@ -193,7 +85,7 @@ impl FeedRules {
                 .and_then(|re| re.captures_iter(&data[..start]).last())
                 .and_then(|t| t.get(1))
                 .map(|t| ascii_replace(t.as_bytes()));
-            out.push((tag.unwrap_or_default(), c.get(1).map(|m| ascii_replace(m.as_bytes())).unwrap_or_default()));
+            out.push((tag.unwrap_or_default(), c.get(1).map(|m| String::from_utf8_lossy(m.as_bytes()).into_owned()).unwrap_or_default()));
         }
         out
     }
@@ -335,54 +227,9 @@ impl Drop for FeedReader {
 }
 
 // ---------------------------------------------------------------- the messages (Koetama -> game)
-/// Python's int(round(x)): halves to even.
-fn round_even(x: f64) -> i64 {
-    x.round_ties_even() as i64 // (NaN: 0; Python would raise)
-}
-
-/// unit start times (s) as the tag w: 4 hex digits each, in 1/100 s (up to 655 s)
-pub fn times_hex(times: &[f64]) -> String {
-    times.iter().map(|t| format!("{:04x}", round_even(t * 100.0).clamp(0, 0xFFFF))).collect()
-}
-
-/// The file the game Spawns to read a message: a body whose tags are its kind ('s' started talking, 'l' the live
-/// words so far, 'f' the finished line), the utterance it belongs to, t = the hex of the UTF-8 text, and when there
-/// are word times: w = each unit's start (times_hex; s after the line's audio began) and a = how long ago that was,
-/// in 1/100 s, when the file was written (the game turns it into a moment on its own clock)
-pub fn text_prefab(text: &str, kind: char, utt: u32, times: Option<&[f64]>, ago: Option<f64>) -> String {
-    let extra = match (times, ago) {
-        (Some(times), Some(ago)) => format!(" w={} a={}", times_hex(times), round_even(ago * 100.0).max(0)),
-        _ => String::new(),
-    };
-    let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
-    format!("<prefab version=\"1.5.2\">\n\t<body tags=\"pcvx k={kind} u={utt} t={hex}{extra}\"/>\n</prefab>\n")
-}
-
-/// A message with an id and a text only (PROTOCOL.md version 6: 'x' the translation of request u, 'd' the rules'
-/// states; any id, not only a u32 utterance): Python's text_prefab(text, kind, id).
-pub fn id_prefab(text: &str, kind: char, id: i64) -> String {
-    let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
-    format!("<prefab version=\"1.5.2\">\n\t<body tags=\"pcvx k={kind} u={id} t={hex}\"/>\n</prefab>\n")
-}
-
 /// A translation as it is sent: stripped, at most TRANSLATION_MAX characters.
 pub(crate) fn cut_translation(text: &str) -> String {
     py_strip(text).chars().take(TRANSLATION_MAX).collect()
-}
-
-/// Seconds as JSON, to 1/100 s (never NaN or infinite: 0).
-pub fn json_secs(x: f64) -> String {
-    let r = (x * 100.0).round() / 100.0;
-    if r.is_finite() {
-        format!("{r}")
-    } else {
-        "0".into()
-    }
-}
-
-/// A message as the json format writes it: one line, the same object the socket connector sends (lines::message).
-pub fn json_message(text: &str, kind: char, utt: u32, times: Option<&[f64]>, ago: Option<f64>) -> String {
-    crate::lines::message(kind, utt, text, times, ago) + "\n"
 }
 
 /// A line as it is sent: stripped, at most TEXT_MAX characters, and its times cut with it (the first n units keep
@@ -426,6 +273,8 @@ struct LinkState {
     mic: bool,
     lang: String,
     live: bool,
+    /// the voice chat's state as last told (a new session hears it again after its hello)
+    voice: String,
 }
 
 /// Koetama's files for the game: <prefix>on, the answer to each ping, numbered message files. Shared by the feed's
@@ -438,6 +287,8 @@ pub struct Link {
     rules: LinkRules,
     log: Log,
     state: Mutex<LinkState>,
+    /// the hello's features (api::features of the profile; Teardown's: all of them)
+    features: Mutex<Vec<&'static str>>,
 }
 
 fn remove(path: &Path) {
@@ -490,8 +341,15 @@ impl Link {
                 mic: false,
                 lang: "en".into(),
                 live: true,
+                voice: "off".into(),
             }),
+            features: Mutex::new(vec!["speech", "voices", "rooms", "translate"]),
         }
+    }
+
+    /// The features the hello names (api::features).
+    pub fn set_features(&self, features: Vec<&'static str>) {
+        *self.features.lock().unwrap_or_else(|e| e.into_inner()) = features;
     }
 
     fn lock(&self) -> MutexGuard<'_, LinkState> {
@@ -502,8 +360,9 @@ impl Link {
         d.join(format!("{}{name}", self.rules.prefix))
     }
 
-    /// Is this file name one of mine - exactly <prefix>on, <prefix>p<n>, <prefix>t<n>.<ext>, <prefix>w<n>.tmp (Windows:
-    /// any case, as its file names). The only files a link ever deletes.
+    /// Is this file name one of mine - exactly <prefix>on, <prefix>p<n>, <prefix>t<n>.<ext>, <prefix>w<n>.tmp, and an
+    /// older Koetama's <prefix>v<n>, <prefix>vc, <prefix>vx (Windows: any case, as its file names). The only files a
+    /// link ever deletes.
     pub fn owns(&self, name: &str) -> bool {
         let fold = |s: &str| if cfg!(windows) { s.to_lowercase() } else { s.to_string() };
         let (name, prefix) = (fold(name), fold(&self.rules.prefix));
@@ -562,44 +421,29 @@ impl Link {
         self.lock().live
     }
 
-    /// Old files of mine swept, <prefix>on and the feed versions (<prefix>v<n>) written in every folder there is.
+    /// Old files of mine swept (an older Koetama's too), <prefix>on written in every folder there is.
     pub fn start(&self) {
         for d in &self.dirs {
             if d.is_dir() {
                 self.sweep(d);
-                let names = std::iter::once("on".to_string()).chain(FEED_VERSIONS.iter().map(|v| format!("v{v}")));
-                for name in names {
-                    let f = self.path(d, &name);
-                    if let Err(e) = fs::write(&f, "1") {
-                        (self.log)(&format!("could not write {}: {e}", f.display()));
-                    }
+                let f = self.path(d, "on");
+                if let Err(e) = fs::write(&f, "1") {
+                    (self.log)(&format!("could not write {}: {e}", f.display()));
                 }
             }
         }
     }
 
-    /// The voice chat's state for the game: <prefix>vc while in the room, <prefix>vx while the relay can't be
-    /// reached, neither otherwise - in every folder (the mod looks in one; which is known only from a feed).
+    /// The voice chat's state for the game (a voice object when it changes; a new session gets it after its hello).
     pub fn set_voice(&self, state: &str) {
-        let want = match state {
-            "connected" => Some("vc"),
-            "unreachable" => Some("vx"),
-            _ => None,
+        let changed = {
+            let mut s = self.lock();
+            let changed = s.voice != state;
+            s.voice = state.to_string();
+            changed
         };
-        for d in &self.dirs {
-            if !d.is_dir() {
-                continue;
-            }
-            for name in ["vc", "vx"] {
-                let f = self.path(d, name);
-                if Some(name) == want {
-                    if let Err(e) = fs::write(&f, "1") {
-                        (self.log)(&format!("could not write {}: {e}", f.display()));
-                    }
-                } else if f.exists() {
-                    remove(&f);
-                }
-            }
+        if changed {
+            self.write_obj(crate::api::voice(state));
         }
     }
 
@@ -625,7 +469,8 @@ impl Link {
             return;
         };
         let mut s = self.lock();
-        if Some(feed.sid) != s.sid || s.dir.as_ref() != Some(&d) {
+        let new_session = Some(feed.sid) != s.sid || s.dir.as_ref() != Some(&d);
+        if new_session {
             // (a new level, or another copy of the mod)
             for path in s.pending.values() {
                 remove(path);
@@ -660,6 +505,16 @@ impl Link {
         s.mic = feed.mic;
         s.lang = feed.lang.clone();
         s.live = feed.live;
+        let voice = s.voice.clone();
+        drop(s);
+        if new_session {
+            // (the session's first object: what this Koetama does; then the voice chat's state, when there is one)
+            let features = self.features.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            self.write_obj(crate::api::hello(&features));
+            if voice != "off" {
+                self.write_obj(crate::api::voice(&voice));
+            }
+        }
     }
 
     /// Hand a finished line to the game; false if no game is listening.
@@ -668,43 +523,32 @@ impl Link {
         !text.is_empty() && self.send_msg('f', 0, text, None, None)
     }
 
-    /// Hand a message to the game: kind 's' (the player started talking: no text yet), 'l' (the live words so far),
-    /// 'f' (the finished line; "" = nothing made out: the live words go) or 'r' (a new voice room, "<room>:<key>";
-    /// PROTOCOL.md version 5); times: each unit's start (s after t0,
-    /// when the line's audio began) - written with how long ago t0 is now. False if no game is listening.
+    /// Hand what the player said to the game (api::speech): kind 's' (they started talking), 'l' (the live words so
+    /// far), 'f' (the finished line; "" = nothing made out) or 'r' (a new voice room, "<room>:<key>"); times: each
+    /// unit's start (s after t0, when the line's audio began) - sent with how long ago t0 is now. False if no game is
+    /// listening.
     pub fn send_msg(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool {
         let (text, times) = cut_line(text, times);
         if kind == 'l' && text.is_empty() {
             return false;
         }
-        self.write_msg(kind, utt as i64, &text, times.as_deref(), t0, None)
+        let ago = t0.filter(|_| times.is_some()).map(|t| t.elapsed().as_secs_f64());
+        self.write_obj(crate::api::speech(kind, utt, &text, times.as_deref(), ago))
     }
 
-    /// The translation of request `id` (PROTOCOL.md version 6, kind 'x'; "" = nothing to show). False if no game is
-    /// listening.
+    /// The translation of line `id` ("" = nothing to show). False if no game is listening.
     pub fn send_translation(&self, id: i64, text: &str) -> bool {
-        let text = cut_translation(text);
-        self.write_msg('x', id, &text, None, None, Some(crate::lines::translation(id, &text)))
+        self.write_obj(crate::api::translation(id, &cut_translation(text)))
     }
 
-    /// The translations' states (kind 'd': feed::translations_wire; json: lines::translations_status). False if no game
-    /// is listening.
+    /// The translations' states. False if no game is listening.
     pub fn send_translations_state(&self, states: &[feed::RuleState]) -> bool {
-        let json = crate::lines::translations_status(states);
-        self.write_msg('d', 0, &feed::translations_wire(states), None, None, Some(json))
+        self.write_obj(crate::api::translations_status(states))
     }
 
-    /// One numbered message file (written whole: through <prefix>w<n>.tmp), kept until the game acks it. json: the
-    /// json format's object when it is not what the player said (that one is lines::message).
-    fn write_msg(
-        &self,
-        kind: char,
-        u: i64,
-        text: &str,
-        times: Option<&[f64]>,
-        t0: Option<Instant>,
-        json: Option<String>,
-    ) -> bool {
+    /// Object n of the session (written whole: through <prefix>w<n>.tmp), kept until the game acks it: json (one
+    /// line) or a Teardown prefab (api::object_prefab). False if no game is listening.
+    fn write_obj(&self, object: String) -> bool {
         let mut s = self.lock();
         let Some(dir) = s.dir.clone() else {
             return false;
@@ -712,18 +556,9 @@ impl Link {
         s.n += 1;
         let path = self.path(&dir, &format!("t{}.{}", s.n, self.rules.message.ext()));
         let tmp = self.path(&dir, &format!("w{}.tmp", s.n));
-        let ago = match (times, t0) {
-            (Some(_), Some(t0)) => Some(t0.elapsed().as_secs_f64()),
-            _ => None,
-        };
-        let times = if ago.is_some() { times } else { None };
-        // (a speech message's utterance is a u32; a translation's id is the game's: any positive number)
-        let written = match (self.rules.message, json, u32::try_from(u)) {
-            (MessageFormat::Json, Some(line), _) => fs::write(&tmp, line + "\n"),
-            (MessageFormat::Json, None, Ok(utt)) => fs::write(&tmp, json_message(text, kind, utt, times, ago)),
-            (MessageFormat::Json, None, Err(_)) => fs::write(&tmp, crate::lines::translation(u, text) + "\n"),
-            (MessageFormat::TeardownPrefab, _, Ok(utt)) => write_text(&tmp, &text_prefab(text, kind, utt, times, ago)),
-            (MessageFormat::TeardownPrefab, _, Err(_)) => write_text(&tmp, &id_prefab(text, kind, u)),
+        let written = match self.rules.message {
+            MessageFormat::Json => fs::write(&tmp, object + "\n"),
+            MessageFormat::TeardownPrefab => write_text(&tmp, &crate::api::object_prefab(&object)),
         };
         // (appears complete, never half-written)
         if let Err(e) = written.and_then(|_| fs::rename(&tmp, &path)) {
@@ -800,6 +635,7 @@ impl FilesGame {
                     log(&format!("{}: {e}", profile.id));
                     Link::build(Vec::new(), rules, log.clone())
                 });
+                link.set_features(crate::api::features(&profile));
                 (FeedRules::from_config(c), save, link)
             }
             profile::Connector::Socket(_) => {
@@ -949,28 +785,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numbers_as_python() {
-        assert_eq!(py_int(" 0_7 "), Some(7));
-        assert_eq!(py_int("+5"), Some(5));
-        assert_eq!(py_int("-0"), Some(0));
-        assert_eq!(py_int("1__0"), None);
-        assert_eq!(py_int("_1"), None);
-        assert_eq!(py_int("1.0"), None);
-        assert_eq!(py_int(""), None);
-        assert_eq!(py_int("\x1c3\t"), None);
-        assert_eq!(py_int("\u{3000}3\x0b"), Some(3));
+    fn strip_as_python() {
         assert_eq!(py_strip("\x1ca\u{2028}"), "a");
-        assert_eq!(py_float("  1_0.5 "), Some(10.5));
-        assert!(py_float("-nan").unwrap().is_nan());
-        assert!(py_float("NaN").unwrap().is_nan());
-        assert_eq!(py_float("INFINITY"), Some(f64::INFINITY));
-        assert_eq!(py_float("-inf"), Some(f64::NEG_INFINITY));
-        assert_eq!(py_float("1.e5"), Some(1e5));
-        assert_eq!(py_float(".5"), Some(0.5));
-        assert_eq!(py_float("1e"), None);
-        assert_eq!(py_float("."), None);
-        assert_eq!(py_float("0x10"), None);
-        assert_eq!(py_float("1,5"), None);
     }
 
     #[test]

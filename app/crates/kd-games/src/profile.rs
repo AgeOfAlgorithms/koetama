@@ -212,9 +212,9 @@ impl PathSpec {
 /// How the files connector writes a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageFormat {
-    /// <prefix>t<n>.xml: teardown::text_prefab exactly (a prefab whose tags hold the message)
+    /// <prefix>t<n>.xml: a prefab whose tag j holds the object's hex (api::object_prefab)
     TeardownPrefab,
-    /// <prefix>t<n>.json: one JSON object {"k","u","t","w","a"}
+    /// <prefix>t<n>.json: the object, one line
     Json,
 }
 
@@ -267,7 +267,7 @@ pub enum Connector {
 /// A test speaker's recorded voice (a Windows SAPI voice reading a text), as teardown::VOICES.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestVoice {
-    /// the feed's src that plays it
+    /// its id (a feed's speaker with "test_voice": <id> plays it)
     pub src: i64,
     /// the Windows voice: "Microsoft Zira Desktop"
     pub voice: String,
@@ -467,10 +467,10 @@ impl Profile {
                 for (i, x) in a.iter().enumerate() {
                     let at = format!("test_voices[{i}]");
                     let tf = Fields::new(x, &at)?;
-                    tf.only(&["src", "voice", "rate", "text"])?;
-                    let src = tf.int("src", 1, 999, "a whole number from 1 to 999")?.ok_or(format!("\"{at}.src\" is missing"))?;
+                    tf.only(&["id", "voice", "rate", "text"])?;
+                    let src = tf.int("id", 1, 999, "a whole number from 1 to 999")?.ok_or(format!("\"{at}.id\" is missing"))?;
                     if test_voices.iter().any(|t| t.src == src) {
-                        return Err(format!("\"{at}.src\": {src} is there twice"));
+                        return Err(format!("\"{at}.id\": {src} is there twice"));
                     }
                     let rate = tf.int("rate", -10, 10, "a whole number from -10 to 10")?.unwrap_or(0) as i32;
                     test_voices.push(TestVoice { src, voice: tf.text("voice", 100)?, rate, text: tf.text("text", 1000)? });
@@ -482,7 +482,7 @@ impl Profile {
         if let Some(n) = f.get("speaker_names") {
             let nf = Fields::new(n, "speaker_names")?;
             for k in nf.map.keys() {
-                let src: i64 = k.parse().map_err(|_| format!("\"speaker_names\": the key {k:?} must be a speaker's src number"))?;
+                let src: i64 = k.parse().map_err(|_| format!("\"speaker_names\": the key {k:?} must be a test voice's id"))?;
                 speaker_names.insert(src, nf.text(k, 40)?);
             }
         }

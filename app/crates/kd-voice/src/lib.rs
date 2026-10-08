@@ -1,4 +1,4 @@
-//! Real voices between players (PROTOCOL.md "Real voices: rooms and the relay (version 5)"). The game names a voice
+//! Real voices between players (PROTOCOL.md "Real voices"). The game names a voice
 //! ROOM (a name and a key every player in its session gets: Koetama makes it, kind 'r'), whom this player's voice
 //! should reach now (`to`) and how loud each other player is (the speakers, src 0). Each Koetama holds a WebSocket
 //! to the room on the relay (a Cloudflare Worker) and sends its player's voice there, encrypted with the room's key:

@@ -112,14 +112,14 @@ fn socket_end_to_end() {
     let hello = c.line();
     assert_eq!(hello["type"], "hello");
     assert_eq!(hello["app"], "Koetama");
-    assert_eq!(hello["protocol"], 1);
+    assert_eq!(hello["protocol"], 2);
     assert_eq!(hello["version"], kd_common::paths::VERSION);
     assert_eq!(hello["features"], json!(["speech", "voices", "rooms"]), "what the profile uses");
     wait_until("the client is taken", || g.has_client());
-    c.send(r#"{"type":"hello","protocol":1,"game":"Example Game","mod":"Example Voice"}"#);
+    c.send(r#"{"type":"hello","protocol":2,"game":"Example Game","mod":"Example Voice"}"#);
     c.send(
-        r#"{"type":"feed","volume":0.5,"mic":true,"lang":"ru","live":false,"speakers":[
-            {"id":7,"src":1,"talk":true,"gain":0.8,"azimuth":90,"elevation":-5.5,"muffle":0.25},{"id":8,"src":2}]}"#
+        r#"{"type":"feed","volume":0.5,"listen":"always","lang":"ru","live":false,"speakers":[
+            {"id":7,"test_voice":1,"talking":true,"gain":0.8,"azimuth":90,"elevation":-5.5,"muffle":0.25},{"id":8,"test_voice":2}]}"#
             .replace('\n', "")
             .as_str(),
     );
@@ -138,10 +138,10 @@ fn socket_end_to_end() {
     c.send("this is not json");
     c.send(r#"{"type":"feed","volume":"loud"}"#);
     c.send(r#"{"no":"type"}"#);
-    c.send(r#"{"type":"feed","speakers":[{"src":1}]}"#);
+    c.send(r#"{"type":"feed","speakers":[{"test_voice":1}]}"#);
     c.send(r#"{"type":"future-thing","x":1}"#);
     c.send("");
-    c.send(r#"{"type":"feed","mic":false}"#);
+    c.send(r#"{"type":"feed","listen":"off"}"#);
     wait_until("the good feed after the bad ones", || g.updates() == 2);
     let f = g.feed().unwrap();
     assert!(!f.mic && f.vol == 1.0 && f.lang == "en" && f.live && f.speakers.is_empty() && f.seq == 2, "{f:?}");
@@ -151,13 +151,13 @@ fn socket_end_to_end() {
     let a_second_ago = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
     assert!(g.send('l', 3, " hello there ", Some(&[0.1, 0.654]), Some(a_second_ago)));
     let m = c.line();
-    assert_eq!((m["type"].as_str(), m["kind"].as_str(), m["utt"].as_u64(), m["text"].as_str()), (Some("msg"), Some("l"), Some(3), Some("hello there")));
+    assert_eq!((m["type"].as_str(), m["kind"].as_str(), m["utt"].as_u64(), m["text"].as_str()), (Some("speech"), Some("live"), Some(3), Some("hello there")));
     assert_eq!(m["times"], json!([0.1, 0.65]));
     assert!((0.95..1.6).contains(&m["ago"].as_f64().unwrap()), "{m}");
     assert!(g.send_text("typed \"line\""));
-    assert_eq!(c.raw_line(), "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":0,\"text\":\"typed \\\"line\\\"\"}\n");
+    assert_eq!(c.raw_line(), "{\"type\":\"speech\",\"kind\":\"final\",\"utt\":0,\"text\":\"typed \\\"line\\\"\"}\n");
     assert!(g.send('s', 4, "", None, None));
-    assert_eq!(c.raw_line(), "{\"type\":\"msg\",\"kind\":\"s\",\"utt\":4,\"text\":\"\"}\n");
+    assert_eq!(c.raw_line(), "{\"type\":\"speech\",\"kind\":\"start\",\"utt\":4}\n");
     assert!(!g.send('l', 4, "  ", None, None), "empty live words are not sent");
     assert!(g.send('f', 4, "a b c", Some(&[0.1]), Some(Instant::now())));
     assert!(c.line().get("times").is_none(), "fewer times than units: none sent");
@@ -199,7 +199,7 @@ fn feeds_as_the_profile_uses_them() {
     g.start();
     let mut c = Client::connect(port);
     c.line();
-    c.send(r#"{"type":"feed","mic":true,"speakers":[{"id":1,"src":1,"talk":true}]}"#);
+    c.send(r#"{"type":"feed","listen":"always","speakers":[{"id":1,"test_voice":1,"talking":true}]}"#);
     wait_until("the feed", || g.feed().is_some());
     assert!(!g.wants_mic() && g.feed().unwrap().speakers.len() == 1, "voices only: the mic is never asked for");
     g.stop();
@@ -208,7 +208,7 @@ fn feeds_as_the_profile_uses_them() {
     g.start();
     let mut c = Client::connect(port);
     c.line();
-    c.send(r#"{"type":"feed","mic":true,"speakers":[{"id":1,"src":1,"talk":true}]}"#);
+    c.send(r#"{"type":"feed","listen":"always","speakers":[{"id":1,"test_voice":1,"talking":true}]}"#);
     wait_until("the feed", || g.feed().is_some());
     assert!(g.wants_mic() && g.feed().unwrap().speakers.is_empty(), "speech only: no voices");
     g.stop();
@@ -238,7 +238,7 @@ fn the_example_client() {
     let out = child.wait_with_output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     println!("{text}\n{:?}", lines.lock().unwrap());
-    assert!(text.contains("from Koetama: {'type': 'hello'") && text.contains("[f] utterance 1: 'hello from Koetama'"), "{text}");
+    assert!(text.contains("from Koetama: {'type': 'hello'") && text.contains("[final] utterance 1: 'hello from Koetama'"), "{text}");
     assert!(text.contains("Koetama closed the connection"));
 }
 
@@ -262,19 +262,21 @@ fn a_busy_port_is_retried() {
 }
 
 #[test]
-fn push_to_talk_field() {
-    // ptt: left out / null - always on; true / false - the key held / up; anything else is refused
+fn listen_field() {
+    // listen: off (or left out) / always / push_to_talk (+ talk_key); anything else is refused
     let p = |s: &str| kd_games::socket::parse_socket_feed(&serde_json::from_str(s).unwrap(), 1);
-    assert_eq!(p(r#"{"mic":true}"#).unwrap().ptt, None);
-    assert_eq!(p(r#"{"mic":true,"ptt":null}"#).unwrap().ptt, None);
-    assert_eq!(p(r#"{"mic":true,"ptt":true}"#).unwrap().ptt, Some(true));
-    assert_eq!(p(r#"{"mic":true,"ptt":false}"#).unwrap().ptt, Some(false));
-    assert!(p(r#"{"mic":true,"ptt":1}"#).is_err());
+    let f = p(r#"{}"#).unwrap();
+    assert!(!f.mic && f.ptt.is_none());
+    let f = p(r#"{"listen":"always","talk_key":true}"#).unwrap();
+    assert!(f.mic && f.ptt.is_none(), "always: the key does not matter");
+    assert_eq!(p(r#"{"listen":"push_to_talk"}"#).unwrap().ptt, Some(false));
+    assert_eq!(p(r#"{"listen":"push_to_talk","talk_key":true}"#).unwrap().ptt, Some(true));
+    assert!(p(r#"{"listen":"push_to_talk","talk_key":1}"#).is_err() && p(r#"{"listen":true}"#).is_err() && p(r#"{"listen":"loud"}"#).is_err());
 }
 
 #[test]
 fn voice_room_fields() {
-    // version 5's room, key, me and to (PROTOCOL.md): kept when all good, else no room; bad ids in "to" skipped
+    // the room, key, me and to (PROTOCOL.md "Real voices"): kept when all good, else no room; bad ids in "to" skipped
     let p = |s: &str| kd_games::socket::parse_socket_feed(&serde_json::from_str(s).unwrap(), 1);
     let (room, key) = ("0123456789abcdef".repeat(2), "fedcba9876543210".repeat(4));
     let f = p(&format!(r#"{{"room":"{room}","key":"{key}","me":7,"to":[2,3,2,0,70000,4]}}"#)).unwrap();
@@ -283,10 +285,11 @@ fn voice_room_fields() {
     assert!(!none.has_room() && none.key.is_empty() && none.me == 0);
     assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}"}}"#)).unwrap().has_room(), "no id: no room");
     assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":65536}}"#)).unwrap().has_room());
-    assert!(!p(r#"{"mic":true}"#).unwrap().has_room());
+    assert!(!p(r#"{"listen":"always"}"#).unwrap().has_room());
     let many: Vec<String> = (1..=70).map(|i| i.to_string()).collect();
     assert_eq!(p(&format!(r#"{{"to":[{}]}}"#, many.join(","))).unwrap().to.len(), 64, "at most 64");
-    assert!(p(r#"{"room":7}"#).is_err() && p(r#"{"me":"7"}"#).is_err() && p(r#"{"to":[1.5]}"#).is_err() && p(r#"{"to":3}"#).is_err());
+    assert!(p(r#"{"room":7}"#).is_err() && p(r#"{"to":[1.5]}"#).is_err() && p(r#"{"to":3}"#).is_err());
+    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":"7"}}"#)).unwrap().has_room(), "a bad me: no room");
 }
 
 #[test]

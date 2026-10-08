@@ -2,7 +2,7 @@
 //! feed pattern and folders; what a sweep may delete (only its exact name patterns - decoys stay); an unsafe prefix
 //! refused; a speech-only game's feed.
 use kd_common::feed::{Feed, FeedSink};
-use kd_games::files::{json_message, Link, LinkRules};
+use kd_games::files::{Link, LinkRules};
 use kd_games::profile::{MessageFormat, Profile};
 use kd_games::{Game, GameKind};
 use serde_json::{json, Value};
@@ -26,6 +26,11 @@ fn names(d: &Path) -> Vec<String> {
 
 fn feed(sid: i64, ack: i64, ping: i64) -> Feed {
     Feed { seq: 1, vol: 1.0, sid, ack, ping, mic: true, lang: "en".into(), live: true, speakers: BTreeMap::new(), ptt: None, ..Default::default() }
+}
+
+/// an object as the json format writes it (api::speech, one line)
+fn json_message(text: &str, kind: char, utt: u32, times: Option<&[f64]>, ago: Option<f64>) -> String {
+    kd_games::api::speech(kind, utt, text, times, ago) + "\n"
 }
 
 fn rules(prefix: &str) -> LinkRules {
@@ -65,20 +70,16 @@ fn json_messages_and_a_safe_sweep() {
     let gone = a.join("not-there");
     let link = Link::with_rules(vec![Some(a.clone()), Some(b.clone()), Some(gone.clone()), None], rules("talky_"), kd_common::null_log()).unwrap();
     assert_eq!(link.dirs(), [a.clone(), b.clone(), gone.clone()]);
+    std::fs::write(a.join("talky_v6"), "old").unwrap(); // (an older Koetama's)
+    std::fs::write(a.join("talky_vc"), "old").unwrap();
     link.start();
-    let mut want: Vec<String> =
-        DECOYS.iter().map(|s| s.to_string()).chain(["talky_on".into(), "talky_p5".into(), "talky_v5".into(), "talky_v6".into()]).collect();
+    let mut want: Vec<String> = DECOYS.iter().map(|s| s.to_string()).chain(["talky_on".into(), "talky_p5".into()]).collect();
     want.sort();
-    assert_eq!(names(&a), want, "old files of mine swept, the decoys kept; on and the feed versions (v5, v6) written");
-    assert_eq!(names(&b), ["talky_on", "talky_v5", "talky_v6"]);
-    // the voice chat's state: vc in the room, vx unreachable, neither otherwise - in every folder
+    assert_eq!(names(&a), want, "old files of mine (an older Koetama's v6, vc too) swept, the decoys kept; on written");
+    assert_eq!(names(&b), ["talky_on"]);
+    // the voice chat's state before any game: kept for the session's start (no file now)
     link.set_voice("connected");
-    assert!(names(&a).contains(&"talky_vc".into()) && names(&b).contains(&"talky_vc".into()));
-    link.set_voice("unreachable");
-    assert!(!names(&a).contains(&"talky_vc".into()) && names(&a).contains(&"talky_vx".into()));
-    link.set_voice("connecting");
-    assert!(!names(&a).contains(&"talky_vx".into()) && !names(&b).contains(&"talky_vc".into()));
-    link.set_voice("connected"); // (stop() takes it)
+    assert_eq!(names(&b), ["talky_on"]);
     assert!(!gone.exists(), "a missing folder is never made");
     // the folders by tag: ws-* the second, anything else the first
     assert_eq!(link.dir_for("ws-123"), Some(b.clone()));
@@ -86,30 +87,35 @@ fn json_messages_and_a_safe_sweep() {
     assert_eq!(link.dir_for(""), Some(a.clone()));
     link.on_feed(&feed(1, 0, 3), "");
     assert!(names(&a).contains(&"talky_p3".into()));
+    let obj = |d: &Path, n: u32| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(d.join(format!("talky_t{n}.json"))).unwrap()).unwrap()
+    };
+    assert_eq!(obj(&a, 1)["type"], "hello", "a session starts with the hello");
+    assert_eq!(obj(&a, 2), json!({"type": "voice", "state": "connected"}), "... then the voice state");
     let two_s_ago = Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
     assert!(link.send_msg('l', 7, "  héllo wörld 你好 ", Some(&[0.1, 0.554, 1.0, 1.2]), Some(two_s_ago)));
     assert!(link.send_text("typed"));
     assert!(link.send_msg('s', 8, "", None, None));
-    let t1: Value = serde_json::from_str(&std::fs::read_to_string(a.join("talky_t1.json")).unwrap()).unwrap();
-    assert_eq!((t1["kind"].as_str(), t1["utt"].as_u64(), t1["text"].as_str()), (Some("l"), Some(7), Some("héllo wörld 你好")));
+    let t1 = obj(&a, 3);
+    assert_eq!((t1["kind"].as_str(), t1["utt"].as_u64(), t1["text"].as_str()), (Some("live"), Some(7), Some("héllo wörld 你好")));
     let w: Vec<f64> = t1["times"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
     assert_eq!(w, [0.1, 0.55, 1.0, 1.2], "unit times in s, to 1/100 s (four units: 你 and 好 each one)");
     let age = t1["ago"].as_f64().unwrap();
     assert!((1.95..2.6).contains(&age), "{age}");
     assert_eq!(
-        std::fs::read_to_string(a.join("talky_t2.json")).unwrap(),
-        "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":0,\"text\":\"typed\"}\n",
+        std::fs::read_to_string(a.join("talky_t4.json")).unwrap(),
+        "{\"type\":\"speech\",\"kind\":\"final\",\"utt\":0,\"text\":\"typed\"}\n",
         "no times: no times or ago"
     );
-    assert_eq!(std::fs::read_to_string(a.join("talky_t3.json")).unwrap(), "{\"type\":\"msg\",\"kind\":\"s\",\"utt\":8,\"text\":\"\"}\n");
+    assert_eq!(std::fs::read_to_string(a.join("talky_t5.json")).unwrap(), "{\"type\":\"speech\",\"kind\":\"start\",\"utt\":8}\n");
     assert!(!names(&a).iter().any(|n| n.ends_with(".tmp") && n.starts_with("talky_w")), "written whole (a .tmp renamed)");
     // acks drop what the game has read
-    link.on_feed(&feed(1, 2, 3), "");
+    link.on_feed(&feed(1, 4, 3), "");
     let n = names(&a);
-    assert!(!n.contains(&"talky_t1.json".into()) && !n.contains(&"talky_t2.json".into()) && n.contains(&"talky_t3.json".into()));
-    // the Workshop copy
+    assert!(!n.contains(&"talky_t1.json".into()) && !n.contains(&"talky_t4.json".into()) && n.contains(&"talky_t5.json".into()));
+    // the Workshop copy: its own session (hello, voice), then the line
     link.on_feed(&feed(1, 0, 4), "ws-55");
-    assert!(link.send_text("to the second folder") && b.join("talky_t1.json").exists());
+    assert!(link.send_text("to the second folder") && obj(&b, 1)["type"] == "hello" && obj(&b, 3)["text"] == "to the second folder");
     link.stop();
     assert_eq!(names(&a), {
         let mut w: Vec<String> = DECOYS.iter().map(|s| s.to_string()).chain(["talky_p5".into()]).collect();
@@ -150,15 +156,15 @@ fn unsafe_prefixes_refused() {
 
 #[test]
 fn json_message_format() {
-    // (the same objects the socket connector sends: lines.rs)
-    assert_eq!(json_message("a \"q\"\n", 'f', 3, None, None), "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":3,\"text\":\"a \\\"q\\\"\\n\"}\n");
+    // (the same objects the socket connector sends: api.rs)
+    assert_eq!(json_message("a \"q\"\n", 'f', 3, None, None), "{\"type\":\"speech\",\"kind\":\"final\",\"utt\":3,\"text\":\"a \\\"q\\\"\\n\"}\n");
     assert_eq!(
         json_message("x", 'l', 1, Some(&[0.004, 2.5]), Some(-1.0)),
-        "{\"type\":\"msg\",\"kind\":\"l\",\"utt\":1,\"text\":\"x\",\"times\":[0,2.5],\"ago\":0}\n"
+        "{\"type\":\"speech\",\"kind\":\"live\",\"utt\":1,\"text\":\"x\",\"times\":[0,2.5],\"ago\":0}\n"
     );
     assert_eq!(
         json_message("x", 'l', 1, Some(&[f64::NAN]), Some(1.234)),
-        "{\"type\":\"msg\",\"kind\":\"l\",\"utt\":1,\"text\":\"x\",\"times\":[0],\"ago\":1.23}\n"
+        "{\"type\":\"speech\",\"kind\":\"live\",\"utt\":1,\"text\":\"x\",\"times\":[0],\"ago\":1.23}\n"
     );
     assert_eq!(
         json_message(&format!("{}:{}", "a".repeat(32), "b".repeat(64)), 'r', 0, None, None),
@@ -205,7 +211,8 @@ fn a_profile_game_end_to_end() {
     let kind = GameKind::from_profile(Profile::parse(&profile.to_string()).unwrap(), false, None);
     assert!(kind.speech && !kind.voices && !kind.builtin && kind.id == "talky-game");
     let save = game_dir.join("state.txt");
-    put(&save, "junk FEED=[4|1|1.00|5|0|1|0|en|1|] junk");
+    let hex = |s: String| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    put(&save, &format!("junk FEED=[{}] junk", hex(r#"{"seq":1,"session":5}"#.into())));
     let sink = Arc::new(Sink::default());
     let mut g = kind.make(sink.clone(), kd_common::null_log(), None);
     assert_eq!((g.id(), g.name(), g.needs()), ("talky-game", "Talky Game", "the Talky mod"));
@@ -217,7 +224,10 @@ fn a_profile_game_end_to_end() {
     let mut seq = 2;
     while g.feed().is_none() {
         assert!(t0.elapsed() < Duration::from_secs(10), "timed out: the feed arrives");
-        put(&save, &format!("FEED=[4|{seq}|0.50|5|0|7|1|ru|0|3,2,1,1,90,0,0.5]"));
+        let f = format!(
+            r#"{{"seq":{seq},"volume":0.5,"session":5,"ping":7,"listen":"always","lang":"ru","live":false,"speakers":[{{"id":3,"test_voice":2,"talking":true,"azimuth":90,"muffle":0.5}}]}}"#
+        );
+        put(&save, &format!("FEED=[{}]", hex(f)));
         seq += 1;
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -225,8 +235,13 @@ fn a_profile_game_end_to_end() {
     assert!(g.feed().unwrap().speakers.is_empty(), "speech only: no voices played");
     assert!(sink.0.lock().unwrap().iter().all(|f| f.speakers.is_empty()));
     assert!(out.join("talky_p7").exists(), "the ping answered");
+    let hello: Value = serde_json::from_str(&std::fs::read_to_string(out.join("talky_t1.json")).unwrap()).unwrap();
+    assert_eq!(hello["features"], json!(["speech"]), "the hello names what the profile uses");
     assert!(g.send('f', 1, "hello", None, None));
-    assert_eq!(std::fs::read_to_string(out.join("talky_t1.json")).unwrap(), "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":1,\"text\":\"hello\"}\n");
+    assert_eq!(
+        std::fs::read_to_string(out.join("talky_t2.json")).unwrap(),
+        "{\"type\":\"speech\",\"kind\":\"final\",\"utt\":1,\"text\":\"hello\"}\n"
+    );
     std::fs::write(out.join("talky_notes.txt"), "mine, not Koetama's").unwrap();
     g.stop();
     assert_eq!(names(&out), ["talky_notes.txt"], "stop: its files gone, nothing else");
@@ -247,7 +262,11 @@ fn voices_only_ignores_mic() {
     let p = Arc::new(Profile::parse(&profile.to_string()).unwrap());
     let sink = Arc::new(Sink::default());
     let save = d.join("y.txt");
-    let xml = |seq: i32| format!("<pcvx><f value=\"4|{seq}|1|5|0|1|1|en|1|1,1,1,1,0,0,0\"/></pcvx>");
+    let hex = |s: String| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let xml = |seq: i32| {
+        let f = format!(r#"{{"seq":{seq},"session":5,"listen":"always","speakers":[{{"id":1,"test_voice":1,"talking":true}}]}}"#);
+        format!("<pcvx><f value=\"{}\"/></pcvx>", hex(f))
+    };
     put(&save, &xml(1));
     let mut g = kd_games::files::FilesGame::with_paths(p, false, sink.clone(), kd_common::null_log(), Some(save.clone()), Some(vec![d.clone()]));
     g.start();

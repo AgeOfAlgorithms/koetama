@@ -71,29 +71,42 @@ rng = np.random.default_rng(1)
 NOISE = {1: (rng.standard_normal(H.RATE) * 0.1).astype(np.float32)}
 ONES = {1: np.full(H.RATE, 0.1, dtype=np.float32)}
 
-# ---- the feed
-f = H.parse_feed('2|42|0.50|7|3|12|1|2000,1,0,0.550,-39.8,0.0,0.00;2001,2,1,1.000,0.0,-3.5,0.25')
+# ---- the feed (PROTOCOL.md "Game -> Koetama: the feed"): the JSON object, or its hex
+import json as _json
+
+
+def hexfeed(**kw):
+    return _json.dumps(dict(type='feed', **kw)).encode().hex()
+
+
+f = H.parse_feed(hexfeed(seq=42, volume=0.5, session=7, ack=3, ping=12, listen='always', speakers=[
+    dict(id=2000, test_voice=1, talking=False, gain=0.55, azimuth=-39.8),
+    dict(id=2001, test_voice=2, talking=True, gain=1.0, elevation=-3.5, muffle=0.25)]))
 check(f and f['seq'] == 42 and f['vol'] == 0.5 and f['sid'] == 7 and f['ack'] == 3 and f['ping'] == 12 and f['mic'] is True
-      and len(f['speakers']) == 2 and f['speakers'][2001] == dict(src=2, talk=True, gain=1.0, az=0.0, el=-3.5, muffle=0.25)
+      and f['ptt'] is None and len(f['speakers']) == 2
+      and f['speakers'][2001] == dict(src=2, talk=True, gain=1.0, az=0.0, el=-3.5, muffle=0.25)
       and f['speakers'][2000]['talk'] is False,
-      'a feed string parses: sequence, volume, session, ack, ping, mic, each speaker')
-f = H.parse_feed('2|43|1.00|7|0|1|0|')
-check(f and f['speakers'] == {} and f['mic'] is False, 'no speakers, mic off parses')
-f4 = H.parse_feed('4|45|1.00|7|0|1|1|zh|0|')
-check(f4 and f4['lang'] == 'zh' and f4['live'] is False and H.parse_feed('4|45|1.00|7|0|1|1|zh|1|')['live'] is True,
-      'version 4 carries the live-words switch')
-f = H.parse_feed('3|44|1.00|7|0|1|1|ru|2000,1,1,1.000,0.0,0.0,0.00')
-check(f and f['lang'] == 'ru' and f['mic'] is True and len(f['speakers']) == 1 and H.parse_feed('2|43|1.00|7|0|1|0|')['lang'] == 'en',
-      'version 3 carries the language the player speaks (version 2: English)')
-check(H.parse_feed('1|1|1.00|') is None and H.parse_feed('garbage') is None and H.parse_feed('2|x|1|1|1|1|1|') is None,
-      'another version or a broken string is refused')
-# version 6: the translations and the lines to translate (PROTOCOL.md "Translation (version 6)")
-f6 = H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en,ko>en,zh>en|7:%s;8:zz;0:41;7:41|' % 'こんにちは'.encode().hex())
+      'a feed (hex of the JSON) parses: sequence, volume, session, ack, ping, listen, each speaker (test voices)')
+f = H.parse_feed('{"type":"feed"}')
+check(f and f['speakers'] == {} and f['mic'] is False and f['lang'] == 'en' and f['live'] is True and f['vol'] == 1.0,
+      'plain JSON too; every field missing: its default (listen off, en, live, volume 1)')
+f = H.parse_feed(hexfeed(listen='push_to_talk', talk_key=True, lang='zh', live=False, speakers=[dict(id=3, gain=0.5)]))
+check(f and f['mic'] is True and f['ptt'] is True and f['lang'] == 'zh' and f['live'] is False
+      and f['speakers'][3]['src'] == 0, 'push to talk with the key held; the language; no live words; a real player (no test voice)')
+check(H.parse_feed('garbage') is None and H.parse_feed(hexfeed(listen='sometimes')) is None
+      and H.parse_feed(hexfeed(volume='loud')) is None and H.parse_feed('[1,2]') is None and H.parse_feed('7b') is None,
+      'not hex or JSON, an unknown listen, a value of the wrong kind, not an object: refused')
+room, key = 'ab' * 16, 'cd' * 32
+f = H.parse_feed(hexfeed(room=room, key=key, me=7, to=[2, 2, 0, 70000, 3], region='weur'))
+check(f and f['room'] == room and f['me'] == 7 and f['to'] == [2, 3] and f['region'] == 'weur',
+      'the voice room; to: good ids, each once')
+f = H.parse_feed(hexfeed(room=room, key='zz', me=7, region='weur'))
+check(f and f['room'] == '' and f['me'] == 0 and f['region'] == '', 'a bad key: no room (and no region)')
+f6 = H.parse_feed(hexfeed(translations=[dict(to='en', **{'from': 'ja'}), dict(to='en', **{'from': 'ko'}), dict(to='en', **{'from': 'zh'})],
+                          to_translate=[dict(id=7, text='こんにちは'), dict(id=8, text='x' * 401), dict(id=0, text='a'), dict(id=7, text='b')]))
 check(f6 and f6['translations'] == [('ja', 'en'), ('ko', 'en')] and f6['to_translate'] == [(7, 'こんにちは'), (8, '')],
-      'version 6: the first two translations; each line by its id (a bad text keeps its id with "", a bad id is skipped)')
-check(H.parse_feed('5|9|1|5|0|1|1|en|1||||||')['translations'] == [] and H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en|') is None,
-      'version 5: no translations; a version 6 line without all its fields is refused')
-A, B = '2|5|1.00|7|0|1|0|2000,1,1,1.000,0.0,0.0,0.00', '2|9|1.00|3|0|1|0|'
+      'the first two translations; each line by its id (too long: kept with "", a bad id skipped, each id once)')
+A, B = hexfeed(seq=5, session=7, speakers=[dict(id=2000, test_voice=1, talking=True)]), hexfeed(seq=9, session=3)
 xml = ('<registry version="2.1.0">\n<savegame><mod>\n<local-proximity-chat>\n<pcmode value="s"/>\n<pcvx>\n\t<f value="%s"/>\n</pcvx>\n'
        '</local-proximity-chat>\n<steam-123>\n<pcvx>\n<f value="%s"/>\n</pcvx>\n</steam-123>\n</mod></savegame>\n</registry>\n' % (A, B)).encode()
 check(H.find_feeds(xml) == [('local-proximity-chat', A), ('steam-123', B)], 'both feeds in a savegame.xml are found, each with its copy of the mod (local, Workshop)')
@@ -106,10 +119,10 @@ with tempfile.TemporaryDirectory() as tmp:
     r = H.FeedReader(lambda f, tag: m.set_feed(f), path=path)
     r.once()
     check(m.feed is None and r.updates == 0, 'a feed already in the file when the helper starts is not played (an old session)')
-    open(path, 'wb').write(xml.replace(b'2|5|', b'2|6|'))
+    open(path, 'wb').write(xml.replace(A.encode(), hexfeed(seq=6, session=7).encode()))
     r.once()
     check(m.feed is not None and m.feed['seq'] == 6 and r.updates == 1, 'a feed that changes is the live one')
-    open(path, 'wb').write(b'<registry><pcvx><f value="2|7|1.00|7|0|1|0|"/></pcvx>')
+    open(path, 'wb').write(b'<registry><pcvx><f value="%s"/></pcvx>' % hexfeed(seq=7).encode())
     r.once()
     check(m.feed['seq'] == 6, 'a half-written file is skipped')
 
@@ -119,14 +132,22 @@ def names(d):
     return sorted(os.listdir(d))
 
 
+def obj(d, n):
+    """object n as the game reads it: the prefab's tag j, unhexed, parsed"""
+    t = open(os.path.join(d, 'pcvx_t%d.xml' % n), encoding='utf-8').read()
+    assert t.startswith('<prefab') and '<body tags="pcvx j=' in t, t
+    return _json.loads(bytes.fromhex(t.split(' j=')[1].split('"')[0]).decode())
+
+
 with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as shop:
-    open(os.path.join(local, 'pcvx_p77'), 'w').write('1')            # (left by a crash)
+    for old in ('pcvx_p77', 'pcvx_v5', 'pcvx_v6', 'pcvx_vc'):                 # (left by a crash, an older Koetama)
+        open(os.path.join(local, old), 'w').write('1')
     open(os.path.join(local, 'other.txt'), 'w').write('1')
     link = H.Link([local, shop], log=lambda s: None)
     link.start()
-    check(names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5', 'pcvx_v6'] and names(shop) == ['pcvx_on', 'pcvx_v5', 'pcvx_v6'],
-          'start: "on", "v5" and "v6" (the feed versions) in every folder a copy of the mod may look in; old files of mine swept, nothing else touched')
-    check(link.send_text('too early') is False and names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5', 'pcvx_v6'], 'no game yet: a text is not written')
+    check(names(local) == ['other.txt', 'pcvx_on'] and names(shop) == ['pcvx_on'],
+          'start: "on" in every folder a copy of the mod may look in; old files of mine (an older Koetama\'s too) swept, nothing else touched')
+    check(link.send_text('too early') is False and names(local) == ['other.txt', 'pcvx_on'], 'no game yet: nothing is written')
 
     def fd(**kw):
         d = dict(seq=1, vol=1.0, sid=5, ack=0, ping=1, mic=False, speakers={})
@@ -134,57 +155,52 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
         return d
     link.on_feed(fd(), 'local-proximity-chat')
     check('pcvx_p1' in names(local) and link.dir == local, 'the first feed: the ping is answered where that copy of the mod looks')
+    h = obj(local, 1)
+    check(h['type'] == 'hello' and h['protocol'] == 2 and h['features'] == ['speech', 'voices'] and list(h)[0] == 'type',
+          'object 1 of the session: the hello (what this Koetama does)')
     link.on_feed(fd(ping=2, mic=True), 'local-proximity-chat')
     check('pcvx_p2' in names(local) and 'pcvx_p1' not in names(local) and link.mic is True, 'the next ping: its answer, the last one removed; the game wants the microphone')
     link.on_feed(fd(ping=1002), 'local-proximity-chat')
     check('pcvx_p2' in names(local), 'ping 1002 is answered as p2 (numbers wrap at 1000)')
-    check(link.send_text('open sesame, "quoted" & <ok>') and link.send_text('Привет, 你好'), 'two texts are written')
-    t1 = open(os.path.join(local, 'pcvx_t1.xml'), encoding='utf-8').read()
-    t2 = open(os.path.join(local, 'pcvx_t2.xml'), encoding='utf-8').read()
-    hex1 = t1.split('t=')[1].split('"')[0]
-    check(t1.startswith('<prefab') and '<body tags="pcvx k=f u=0 t=' in t1 and bytes.fromhex(hex1).decode() == 'open sesame, "quoted" & <ok>'
-          and bytes.fromhex(t2.split('t=')[1].split('"')[0]).decode() == 'Привет, 你好' and not [n for n in names(local) if n.endswith('.tmp')],
-          'numbered t1, t2: a prefab whose tag is the hex of the text (anything survives)')
+    check(link.send_text('open sesame, "quoted" & <ok>') and link.send_text('Привет, 你好'), 'two lines are written')
+    check(obj(local, 2) == dict(type='speech', kind='final', utt=0, text='open sesame, "quoted" & <ok>')
+          and obj(local, 3)['text'] == 'Привет, 你好' and not [n for n in names(local) if n.endswith('.tmp')],
+          'numbered t2, t3: speech objects in a prefab\'s tag (anything survives the hex)')
     link.on_feed(fd(ping=1002, ack=1, lang='zh'), 'local-proximity-chat')
     check(link.lang == 'zh', 'the language from the feed')
     check(link.send_msg('l', 7, 'the words so') and link.send_msg('f', 7, '') and not link.send_msg('l', 7, '  '),
           'live words and an empty finished line are sent; empty live words are not')
-    t3 = open(os.path.join(local, 'pcvx_t3.xml'), encoding='utf-8').read()
-    t4 = open(os.path.join(local, 'pcvx_t4.xml'), encoding='utf-8').read()
-    check('tags="pcvx k=l u=7 t=' in t3 and bytes.fromhex(t3.split('t=')[1].split('"')[0]).decode() == 'the words so'
-          and 'tags="pcvx k=f u=7 t="' in t4, 'their kinds and utterance in the tags (k=l / k=f, u=7)')
-    check('pcvx_t1.xml' not in names(local) and 'pcvx_t2.xml' in names(local) and 'pcvx_t4.xml' in names(local), 'the game acks 1: that file is deleted, 2 waits')
-    # word times: w = each unit's start (4 hex digits, 1/100 s), a = how long ago the line's audio began
+    check(obj(local, 4) == dict(type='speech', kind='live', utt=7, text='the words so')
+          and obj(local, 5) == dict(type='speech', kind='final', utt=7, text=''), 'kind live / final, the utterance')
+    check('pcvx_t1.xml' not in names(local) and 'pcvx_t2.xml' in names(local), 'the game acks 1: that file is deleted, 2 waits')
     import time as _time
     check(link.send_msg('l', 8, 'one two three', [0.1, 0.5, 0.9], _time.perf_counter() - 2.0), 'live words with their times are sent')
-    t5 = open(os.path.join(local, 'pcvx_t5.xml'), encoding='utf-8').read()
-    a5 = int(t5.split(' a=')[1].split('"')[0])
-    check(' w=000a0032005a a=' in t5 and 195 <= a5 <= 260, 'the file carries w (000a 0032 005a: 0.1 / 0.5 / 0.9 s) and a (%d: ~2 s ago)' % a5)
+    o6 = obj(local, 6)
+    check(o6['times'] == [0.1, 0.5, 0.9] and 1.95 <= o6['ago'] <= 2.6, 'times (s) and ago (%s s)' % o6['ago'])
     long = ' '.join(['word'] * 150)
     link.send_msg('f', 8, long, [k * 0.1 for k in range(150)], _time.perf_counter())
-    t6 = open(os.path.join(local, 'pcvx_t6.xml'), encoding='utf-8').read()
-    n6 = len(bytes.fromhex(t6.split('t=')[1].split(' ')[0]).decode().split())
-    check(len(t6.split(' w=')[1].split(' ')[0]) == 4 * n6 and n6 < 150, 'a line cut at TEXT_MAX keeps one time per unit left (%d)' % n6)
-    check(link.send_msg('s', 9, ''), 'the player started talking: a message with no text (kind s)')
-    t7s = open(os.path.join(local, 'pcvx_t7.xml'), encoding='utf-8').read()
-    check('tags="pcvx k=s u=9 t="' in t7s, '... k=s, the utterance, an empty text')
+    o7 = obj(local, 7)
+    check(len(o7['times']) == len(o7['text'].split()) < 150, 'a line cut at TEXT_MAX keeps one time per unit left (%d)' % len(o7['times']))
+    check(link.send_msg('s', 9, '') and obj(local, 8) == dict(type='speech', kind='start', utt=9), 'the player started talking: kind start, no text')
     link.send_msg('l', 8, 'no times here')
-    t7 = open(os.path.join(local, 'pcvx_t8.xml'), encoding='utf-8').read()
-    check(' w=' not in t7 and ' a=' not in t7, 'without times: no w / a tags (the game shows the words as before)')
-    check(link.send_translation(123456789012345, ' Hello ') and link.send_translations_state('ja>en=ready'), 'a translation and the translations\' states are sent')
-    t9 = open(os.path.join(local, 'pcvx_t9.xml'), encoding='utf-8').read()
-    t10 = open(os.path.join(local, 'pcvx_t10.xml'), encoding='utf-8').read()
-    check('tags="pcvx k=x u=123456789012345 t=%s"' % b'Hello'.hex() in t9 and 'tags="pcvx k=d u=0 t=%s"' % b'ja>en=ready'.hex() in t10,
-          '... kind x with the request id (the text stripped), kind d')
+    check('times' not in obj(local, 9) and 'ago' not in obj(local, 9), 'without times: no times / ago')
+    check(link.send_msg('r', 0, room + ':' + key) and obj(local, 10) == dict(type='room', room=room, key=key), 'a voice room: its own object')
+    check(link.send_translation(123456789012345, ' Hello ') and link.send_translations_state([('ja', 'en', 'downloading', 0.4271)]),
+          'a translation and the translations\' states are sent')
+    check(obj(local, 11) == dict(type='translation', id=123456789012345, text='Hello')
+          and obj(local, 12) == dict(type='translations_status', translations=[{'from': 'ja', 'to': 'en', 'state': 'downloading', 'progress': 0.43}]),
+          '... the translation (stripped), the states (progress to 1/100)')
+    link.set_voice('connected')
+    check(obj(local, 13) == dict(type='voice', state='connected') and link.set_voice('connected') is None and 'pcvx_t14.xml' not in names(local),
+          'the voice chat\'s state: an object when it changes, nothing when it does not')
     link.on_feed(fd(ping=1, sid=6, ack=0), 'local-proximity-chat')
-    check('pcvx_t2.xml' not in names(local) and 'pcvx_p1' in names(local) and link.n == 0, 'a new session (a level start): unread texts dropped, numbers start over')
-    link.send_text('first of the new level')
-    check('pcvx_t1.xml' in names(local), '... the next text is t1 again')
+    check(not any('pcvx_t%d.xml' % n in names(local) for n in range(3, 14)) and 'pcvx_p1' in names(local) and obj(local, 1)['type'] == 'hello'
+          and obj(local, 2) == dict(type='voice', state='connected') and link.n == 2,
+          'a new session (a level start): unread objects dropped, numbers start over with the hello, then the voice state')
     link2 = H.Link([local, shop], log=lambda s: None)
-    link2.sid = None
     link2.on_feed(fd(sid=6, ack=4, ping=9), 'local-proximity-chat')
-    link2.send_text('helper restarted')
-    check('pcvx_t5.xml' in names(local), 'a helper started in the middle of a session continues after the game\'s ack (t5)')
+    check('pcvx_t5.xml' in names(local) and obj(local, 5)['type'] == 'hello',
+          'a helper started in the middle of a session continues after the game\'s ack (t5: its hello)')
     link.on_feed(fd(sid=6, ping=3), 'steam-3812301496')
     check(link.dir == shop and 'pcvx_p3' in names(shop), 'the Workshop copy of the mod is answered in the Workshop folder')
     link.stop()

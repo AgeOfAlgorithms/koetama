@@ -1,11 +1,10 @@
-//! Translation through the connectors (PROTOCOL.md "Translation (version 6)"): the profile's "translate", the
-//! translations and the lines to translate in a feed (files and socket), and Koetama's answers - message kinds 'x' (a
-//! translation) and 'd' (the translations' states) as prefab files, the same as json files, and the socket's
-//! "translation" / "translations_status" lines.
+//! Translation through the connectors (PROTOCOL.md "Translation"): the profile's "translate", the translations and
+//! the lines to translate in a feed (files and socket), and Koetama's answers - the "translation" and
+//! "translations_status" objects, in Teardown prefabs, json files and socket lines.
 use kd_common::feed::{Feed, FeedSink, RuleState};
-use kd_games::files::{id_prefab, FilesGame, Link, LinkRules, TRANSLATION_MAX};
+use kd_games::api;
+use kd_games::files::{FilesGame, Link, LinkRules, TRANSLATION_MAX};
 use kd_games::profile::{MessageFormat, Profile};
-use kd_games::lines;
 use kd_games::socket::{parse_socket_feed, SocketGame};
 use kd_games::{teardown, Game, GameKind};
 use serde_json::{json, Value};
@@ -43,6 +42,14 @@ fn read(p: &Path) -> String {
     std::fs::read_to_string(p).unwrap().replace("\r\n", "\n")
 }
 
+/// A prefab's object, as the game reads it (its tag j, unhexed).
+fn object(p: &Path) -> Value {
+    let t = read(p);
+    let h = t.split(" j=").nth(1).unwrap().split('"').next().unwrap();
+    let b: Vec<u8> = (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect();
+    serde_json::from_slice(&b).unwrap()
+}
+
 #[test]
 fn prefab_messages() {
     let d = tmp("prefab");
@@ -50,22 +57,27 @@ fn prefab_messages() {
     link.start();
     assert!(!link.send_translation(1, "too early") && !link.send_translations_state(&states()), "no game yet: nothing written");
     link.on_feed(&feed(3, 0, 1), "local-proximity-chat");
+    assert_eq!(object(&d.join("pcvx_t1.xml"))["type"], "hello");
     assert!(link.send_translation(7, "  Hello, how are you?  "));
-    assert_eq!(read(&d.join("pcvx_t1.xml")), id_prefab("Hello, how are you?", 'x', 7), "stripped");
-    assert!(read(&d.join("pcvx_t1.xml")).contains(&format!("k=x u=7 t={}\"", hex("Hello, how are you?"))));
+    assert_eq!(read(&d.join("pcvx_t2.xml")), api::object_prefab(&api::translation(7, "Hello, how are you?")), "stripped");
+    assert_eq!(object(&d.join("pcvx_t2.xml")), json!({"type": "translation", "id": 7, "text": "Hello, how are you?"}));
     assert!(link.send_translation(8, ""), "an empty reply is a reply");
-    assert!(read(&d.join("pcvx_t2.xml")).contains("k=x u=8 t=\""));
+    assert_eq!(object(&d.join("pcvx_t3.xml"))["text"], "");
     assert!(link.send_translations_state(&states()));
-    assert!(read(&d.join("pcvx_t3.xml")).contains(&format!("k=d u=0 t={}\"", hex("ja>en=ready,ko>en=downloading 42"))));
+    assert_eq!(
+        object(&d.join("pcvx_t4.xml")),
+        json!({"type": "translations_status", "translations": [{"from": "ja", "to": "en", "state": "ready"},
+                                                              {"from": "ko", "to": "en", "state": "downloading", "progress": 0.43}]})
+    );
     // (an id past a u32: written as it is)
     assert!(link.send_translation(123456789012345, "x"));
-    assert!(read(&d.join("pcvx_t4.xml")).contains("k=x u=123456789012345 t=78\""));
+    assert_eq!(object(&d.join("pcvx_t5.xml"))["id"], 123456789012345i64);
     // (a long translation: cut at TRANSLATION_MAX characters)
     assert!(link.send_translation(9, &"é".repeat(TRANSLATION_MAX + 50)));
-    assert!(read(&d.join("pcvx_t5.xml")).contains(&format!("t={}\"", hex(&"é".repeat(TRANSLATION_MAX)))));
-    // (acked: gone, like every message)
-    link.on_feed(&feed(3, 3, 1), "local-proximity-chat");
-    assert!(!d.join("pcvx_t1.xml").exists() && !d.join("pcvx_t3.xml").exists() && d.join("pcvx_t4.xml").exists());
+    assert_eq!(object(&d.join("pcvx_t6.xml"))["text"], "é".repeat(TRANSLATION_MAX));
+    // (acked: gone, like every object)
+    link.on_feed(&feed(3, 4, 1), "local-proximity-chat");
+    assert!(!d.join("pcvx_t2.xml").exists() && !d.join("pcvx_t4.xml").exists() && d.join("pcvx_t5.xml").exists());
     link.stop();
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -77,20 +89,21 @@ fn json_messages() {
     let link = Link::with_rules(vec![Some(d.clone())], rules, kd_common::null_log()).unwrap();
     link.start();
     link.on_feed(&feed(1, 0, 1), "");
+    assert!(std::fs::read_to_string(d.join("talky_t1.json")).unwrap().starts_with("{\"type\":\"hello\""));
     assert!(link.send_translation(7, "Hi \"there\""));
     assert_eq!(
-        std::fs::read_to_string(d.join("talky_t1.json")).unwrap(),
+        std::fs::read_to_string(d.join("talky_t2.json")).unwrap(),
         "{\"type\":\"translation\",\"id\":7,\"text\":\"Hi \\\"there\\\"\"}\n"
     );
     assert!(link.send_translations_state(&states()));
     assert_eq!(
-        std::fs::read_to_string(d.join("talky_t2.json")).unwrap(),
+        std::fs::read_to_string(d.join("talky_t3.json")).unwrap(),
         "{\"type\":\"translations_status\",\"translations\":[{\"from\":\"ja\",\"to\":\"en\",\"state\":\"ready\"},\
          {\"from\":\"ko\",\"to\":\"en\",\"state\":\"downloading\",\"progress\":0.43}]}\n"
     );
     assert!(link.send_translation(5_000_000_000, "x"));
     assert_eq!(
-        std::fs::read_to_string(d.join("talky_t3.json")).unwrap(),
+        std::fs::read_to_string(d.join("talky_t4.json")).unwrap(),
         "{\"type\":\"translation\",\"id\":5000000000,\"text\":\"x\"}\n"
     );
     link.stop();
@@ -129,15 +142,15 @@ fn put(path: &Path, text: &str) {
     std::fs::rename(&t, path).unwrap();
 }
 
-/// A files game reading a version 6 feed: the rules and requests reach it only when its profile uses translate.
+/// A files game reading a feed with translations: they reach it only when its profile uses translate.
 fn run_files(uses: Value) -> (Feed, Vec<String>) {
     let d = tmp(&format!("files-{}", uses.as_array().unwrap().len()));
     let save = d.join("y.txt");
     let line = |seq: i32| {
-        format!(
-            "<pcvx><f value=\"6|{seq}|1|5|0|1|1|en|1||||||ja>en,ko>en|7:{}|1,1,1,1,0,0,0\"/></pcvx>",
-            hex("こんにちは")
-        )
+        let f = json!({"seq": seq, "session": 5, "listen": "always", "speakers": [{"id": 1, "test_voice": 1, "talking": true}],
+                       "translations": [{"from": "ja", "to": "en"}, {"from": "ko", "to": "en"}],
+                       "to_translate": [{"id": 7, "text": "こんにちは"}]});
+        format!("<pcvx><f value=\"{}\"/></pcvx>", hex(&f.to_string()))
     };
     put(&save, &line(1));
     let sink = Arc::new(Sink::default());
@@ -167,7 +180,7 @@ fn files_feed_as_the_profile_uses_it() {
     assert_eq!(f.translations, [("ja".to_string(), "en".to_string()), ("ko".to_string(), "en".to_string())]);
     assert_eq!(f.to_translate, [(7, "こんにちは".to_string())]);
     assert!(f.speakers.is_empty(), "no voices");
-    assert!(names.contains(&"chat_v5".to_string()) && names.contains(&"chat_v6".to_string()), "{names:?}");
+    assert!(names.contains(&"chat_t1.xml".to_string()) && !names.iter().any(|n| n.starts_with("chat_v")), "{names:?}");
     let (f, _) = run_files(json!(["voices", "speech"]));
     assert!(f.translations.is_empty() && f.to_translate.is_empty(), "translate not listed: none");
     assert_eq!(f.speakers.len(), 1);
@@ -208,7 +221,7 @@ fn socket_feed_fields() {
     assert_eq!(f.to_translate, [(3, String::new())], "too long: kept with \"\" (its reply: \"\")");
     let many: Vec<String> = (1..=20).map(|i| format!(r#"{{"id":{i},"text":"t"}}"#)).collect();
     assert_eq!(p(&format!(r#"{{"to_translate":[{}]}}"#, many.join(","))).unwrap().to_translate.len(), 16);
-    assert!(p(r#"{"mic":true}"#).unwrap().translations.is_empty());
+    assert!(p(r#"{"listen":"always"}"#).unwrap().translations.is_empty());
     for bad in [
         r#"{"translations":"ja>en"}"#,
         r#"{"translations":[["ja","en"]]}"#,
@@ -224,14 +237,14 @@ fn socket_feed_fields() {
 
 #[test]
 fn socket_messages() {
-    assert_eq!(lines::translation(7, "Hello"), r#"{"type":"translation","id":7,"text":"Hello"}"#, "\"type\" first");
+    assert_eq!(api::translation(7, "Hello"), r#"{"type":"translation","id":7,"text":"Hello"}"#, "\"type\" first");
     assert_eq!(
-        serde_json::from_str::<Value>(&lines::translations_status(&states())).unwrap(),
+        serde_json::from_str::<Value>(&api::translations_status(&states())).unwrap(),
         json!({"type": "translations_status", "translations": [{"from": "ja", "to": "en", "state": "ready"},
                                                      {"from": "ko", "to": "en", "state": "downloading", "progress": 0.43}]})
     );
     assert_eq!(
-        serde_json::from_str::<Value>(&lines::translations_status(&[])).unwrap(),
+        serde_json::from_str::<Value>(&api::translations_status(&[])).unwrap(),
         json!({"type": "translations_status", "translations": []})
     );
     // (through a connection)

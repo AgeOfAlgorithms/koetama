@@ -154,64 +154,68 @@ def audio_cases():
     dump('audio.json', dict(consts=consts, lowpass_ir=ir, lowpass=blocks, pan=pan, mixer=mixer, percentile=pct))
 
 
-# ---------------------------------------------------------------- the feed and the message files
+# ---------------------------------------------------------------- the feed and the object files
 def feed_cases():
-    feeds = ['4|12|0.80|5|3|7|1|ru|0|1,2,1,0.5,-30.0,5.0,0.25;9,3,0,1,180,-10,1',
-             '4|1|1.00|5|0|1|0|auto|1|', '3|99|1|11|4|2|1|en|', '2|1|0.5|3|0|1|1|7,1,1,1,0,0,0',
-             '4|1|1|5|0|1|0||1|', '4|x|1|5|0|1|0|en|1|', '5|1|1|1|1|1|1|en|1|', '4|1|1|5|0|1|0|en|1|1,2,3', '',
-             '3|1|1|1|1|1|1|en|1,1,1,nan,0,0,0', '4|1|1|5|0|1|0|en|1|;;3,1,1,1,0,0,0;',
-             '4|2|1|5|0|1|2|en|1|', '4|3|1|5|0|1|3|ja|0|']
-    # version 5: the voice room, its key, my id, whom my voice goes to (a bad room / key / id: no room; bad ids skipped)
+    """parse_feed (PROTOCOL.md "Game -> Koetama: the feed": the object or its hex), find_feeds, and the objects
+    Koetama sends (and their Teardown prefab) byte for byte"""
     room, key = '0123456789abcdef' * 2, 'fedcba9876543210' * 4
-    feeds += ['5|7|1|5|0|1|3|en|1|%s|%s|7|2,3|2,0,0,0.8,30,0,0.1;3,0,1,0,0,0,0' % (room, key),
-              '5|8|1|5|0|1|1|en|1|%s|%s|7|2,x,70000,3,2,,0, 4|' % (room, key),
-              '5|9|1|5|0|1|1|en|1|%s|%s|7||' % (room.upper(), key), '5|9|1|5|0|1|1|en|1|%s|%s|7||' % (room, key[:-1]),
-              '5|9|1|5|0|1|1|en|1|%s|%s|0|1|' % (room, key), '5|9|1|5|0|1|1|en|1|%s|%s|65536|1|' % (room, key),
-              '5|9|1|5|0|1|1|en|1|%s|%s|+7|1|' % (room, key), '5|1|1|5|0|1|0|en|1|||||',
-              '5|2|1|5|0|1|2|en|1|%s|%s|65535|%s|' % (room, key, ','.join(str(i) for i in range(1, 71))),
-              '5|1|1|5|0|1|0|en|1|%s|%s|7|2' % (room, key)]
-    # (the region before the speakers: a well-formed version 5 line has 15 fields; one without stays malformed)
-    feeds = [f.rsplit('|', 1)[0] + '||' + f.rsplit('|', 1)[1] if f.startswith('5|') and f.count('|') == 13 else f
-             for f in feeds]
-    feeds += ['5|3|1|5|0|1|1|en|1|%s|%s|7|2|weur|' % (room, key), '5|3|1|5|0|1|1|en|1|%s|%s|7|2|auto|' % (room, key),
-              '5|3|1|5|0|1|1|en|1|%s|%s|7|2|WEUR|' % (room, key), '5|3|1|5|0|1|1|en|1||||weur|']
-    # version 6: the translations and the lines to translate (bad ones skipped; a bad text keeps its id with '')
-    def hx(t):
-        return t.encode('utf-8').hex()
-    feeds += ['6|4|1|5|0|1|1|en|1|%s|%s|7|2|weur|ja>en,ko>en|7:%s;8:%s|2,0,0,0.8,30,0,0.1' % (
-                  room, key, hx('こんにちは、元気？ How are you'), hx('안녕하세요')),
-              '6|4|1|5|0|1|1|en|1||||||||', '6|5|1|5|0|1|0|ja|0||||||ja>en||',
-              '6|6|1|5|0|1|1|en|1||||||ja>en,ja>en,ko>en,zh>en|1:%s|' % hx('x'),
-              '6|7|1|5|0|1|1|en|1||||||ja>,>en,ja,ja>e n,ja>ja,x_y>zh-Hans,es>en|1:41|',
-              '6|8|1|5|0|1|1|en|1||||||es>en|0:41;-1:41;x:41;:41;1;2:4;3:zz;4:%s;5:%s;5:42;1234567890123456:41;'
-              '123456789012345:%s;6:ff;7:%s;8:%s;9:;;10:E38182|' % (hx('hola'), hx('¿qué?'), hx('abc'), hx('é' * 200),
-                                                                   hx('x' * 401)),
-              '6|9|1|5|0|1|1|en|1||||||en>ja|' + ';'.join('%d:%s' % (i, hx('line %d' % i)) for i in range(1, 20)) + '|',
-              '6|9|1|5|0|1|1|en|1||||||ja>en|1:41', '6|9|1|5|0|1|1|en|1||||||ja>en|1:41||',
-              '6|9|1|5|0|1|1|en|1|%s|%s|7|2|' % (room, key), '6|x|1|5|0|1|1|en|1||||||ja>en|1:41|']
+
+    def hx(o):
+        return json.dumps(o, ensure_ascii=False).encode('utf-8').hex()
+    objs = [
+        dict(type='feed', seq=12, volume=0.8, session=5, ack=3, ping=7, listen='always', lang='ru', live=False,
+             speakers=[dict(id=1, test_voice=2, talking=True, gain=0.5, azimuth=-30, elevation=5, muffle=0.25),
+                       dict(id=9, test_voice=3, gain=1, azimuth=180, elevation=-10, muffle=1)]),
+        dict(type='feed'), dict(listen='push_to_talk'), dict(listen='push_to_talk', talk_key=True, lang='ja'),
+        dict(listen='off', lang='auto'), dict(listen='sometimes'), dict(volume='loud'), dict(volume=7, speakers=[dict(id=1, gain=-2, muffle=3)]),
+        dict(speakers=[dict(gain=1)]), dict(speakers=[dict(id=1, test_voice=0)]), dict(speakers='x'), dict(lang='e n'),
+        dict(seq=1.5), dict(live='yes'),
+        # the voice room: a bad room / key / me is no room; bad ids in to skipped
+        dict(room=room, key=key, me=7, to=[2, 3], region='weur', speakers=[dict(id=2, gain=0.8, azimuth=30, muffle=0.1)]),
+        dict(room=room, key=key, me=7, to=[2, 70000, 3, 2, 0, -4]), dict(room=room.upper(), key=key, me=7),
+        dict(room=room, key=key[:-1], me=7), dict(room=room, key=key, me=0), dict(room=room, key=key, me=65536),
+        dict(room=room, key=key, me=65535, to=list(range(1, 71))), dict(room=room, key=key, me=7, region='WEUR'),
+        dict(room=room, key=key, me=7, region='auto'), dict(region='weur'), dict(to=['x']), dict(me='7'),
+        # translations and the lines to translate
+        dict(translations=[{'from': 'ja', 'to': 'en'}, {'from': 'ko', 'to': 'en'}, {'from': 'zh', 'to': 'en'}],
+             to_translate=[dict(id=7, text='こんにちは、元気？ How are you'), dict(id=8, text='안녕하세요')]),
+        dict(translations=[{'from': 'ja', 'to': 'en'}, {'from': 'ja', 'to': 'en'}, {'from': 'j a', 'to': 'en'}, {'from': 'ja', 'to': 'x_y'}]),
+        dict(to_translate=[dict(id=0, text='a'), dict(id=-1, text='a'), dict(id=1234567890123456, text='a'), dict(id=5, text='x' * 401),
+                           dict(id=6, text='é' * 200), dict(id=6, text='again'), dict(id=123456789012345, text='big')]),
+        dict(to_translate=[dict(id=i, text='line %d' % i) for i in range(1, 20)]),
+        dict(translations=[['ja', 'en']]), dict(translations=[{'from': 'ja'}]), dict(to_translate=[dict(id=1)]),
+        dict(to_translate=[dict(id=1, text=5)]),
+    ]
+    feeds = [hx(o) for o in objs]
+    feeds += [json.dumps(objs[0]), ' ' + hx(objs[2]).upper() + ' ', '', 'garbage', '7b', hx([1, 2]), 'zz' + hx(objs[1])]
     parse = []
     for f in feeds:
         p = td.parse_feed(f)
         if p is not None:
             p['speakers'] = {str(k): v for k, v in p['speakers'].items()}
         parse.append(dict(text=f, feed=p))
-    xml = ('<registry version="2.1.0">\n<savegame><mod><local-proximity-chat>\n<pcvx>\n<f value="4|1|1|5|0|1|1|en|1|"/>\n'
-           '</pcvx>\n</local-proximity-chat><steam-3812301496><other value="1"/><pcvx> <f   value="4|2|0.5|6|1|2|0|ru|0|1,1,1,1,0,0,0"/>\n'
-           '</pcvx></steam-3812301496></mod></savegame>\n</registry>\n')
+    a, b = hx(dict(seq=1, session=5, listen='always')), hx(dict(seq=2, volume=0.5, session=6, ack=1, ping=2, lang='ru'))
+    xml = ('<registry version="2.1.0">\n<savegame><mod><local-proximity-chat>\n<pcvx>\n<f value="%s"/>\n'
+           '</pcvx>\n</local-proximity-chat><steam-3812301496><other value="1"/><pcvx> <f   value="%s"/>\n'
+           '</pcvx></steam-3812301496></mod></savegame>\n</registry>\n') % (a, b)
+    plain = '<registry><pcvx><f value="%s"/></pcvx></registry>' % hx(dict(lang='zh'))
     finds = [dict(xml=xml, feeds=[list(x) for x in td.find_feeds(xml.encode())]),
-             dict(xml='<registry><pcvx><f value="3|1|1|1|1|1|1|en|"/></pcvx></registry>',
-                  feeds=[list(x) for x in td.find_feeds(b'<registry><pcvx><f value="3|1|1|1|1|1|1|en|"/></pcvx></registry>')])]
-    prefabs = [dict(text=t, kind=k, utt=u, times=tm, ago=ago, out=td.text_prefab(t, k, u, tm, ago))
-               for t, k, u, tm, ago in [('Hello there', 'f', 3, None, None), ('', 's', 4, None, None),
-                                        ('Привет 我们', 'l', 5, [0.0, 0.5, 0.75, 1.0], 1.234),
-                                        ('x', 'f', 0, [700.0], 0.004), ('a b', 'l', 1, [-1.0, 0.126], -2.0)]]
-    hexes = [dict(times=t, out=td.times_hex(t)) for t in ([], [0.0, 0.01, 1.5, 655.35, 700.0, -3.0], [0.005, 0.015, 0.025])]
-    # (version 6's messages: a translation of line u, the translations' states; ids past a u32 too)
-    ids = [dict(text=t, kind=k, id=i, out=td.text_prefab(t, k, i))
-           for t, k, i in [('Hello, how are you?', 'x', 7), ('', 'x', 8), ('こんにちは', 'x', 123456789012345),
-                           ('ja>en=ready,ko>en=downloading 42', 'd', 0), ('', 'd', 0)]]
-    dump('feed.json', dict(parse=parse, find=finds, prefab=prefabs, times_hex=hexes, TEXT_MAX=td.TEXT_MAX,
-                           id_prefab=ids, TRANSLATION_MAX=td.TRANSLATION_MAX, FEED_VERSIONS=list(td.FEED_VERSIONS)))
+             dict(xml=plain, feeds=[list(x) for x in td.find_feeds(plain.encode())])]
+    # the objects Koetama sends, and the prefab that carries one
+    objects = [dict(fn='speech', args=[k, u, t, tm, ago], out=td.speech(k, u, t, tm, ago))
+               for k, u, t, tm, ago in [('f', 3, 'Hello there', None, None), ('s', 4, '', None, None),
+                                        ('l', 5, 'Привет 我们 "q" \\ \n\x01', [0.0, 0.5, 0.75, 1.0], 1.234),
+                                        ('f', 0, 'x', [700.0], 0.004), ('l', 1, 'a b', [-1.0, 0.126], -2.0),
+                                        ('f', 2, 'nan', [float('nan'), 0.125, 0.135, 2.675], 0.005),
+                                        ('r', 0, room + ':' + key, None, None)]]
+    objects += [dict(fn='translation', args=[i, t], out=td.translation(i, t))
+                for i, t in [(7, 'Hello, how are you?'), (8, ''), (123456789012345, 'こんにちは "x"')]]
+    objects += [dict(fn='translations_status', args=[st], out=td.translations_status(st))
+                for st in [[], [('ja', 'en', 'ready', 1.0), ('ko', 'en', 'downloading', 0.4271)], [('mt', 'en', 'downloading', 1.7)]]]
+    objects += [dict(fn='voice', args=[s], out=td.voice(s)) for s in ('connected', 'unreachable')]
+    prefabs = [dict(object=o, out=td.object_prefab(o)) for o in (td.voice('off'), td.translation(1, 'Ünïcode ✓ 你好'))]
+    dump('feed.json', dict(parse=parse, find=finds, objects=objects, prefab=prefabs, TEXT_MAX=td.TEXT_MAX,
+                           TRANSLATION_MAX=td.TRANSLATION_MAX, PROTOCOL=td.PROTOCOL))
 
 
 def link_cases():
@@ -219,7 +223,7 @@ def link_cases():
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         open(os.path.join(a, 'pcvx_t9.xml'), 'w').write('old')
         open(os.path.join(a, 'other.txt'), 'w').write('keep')
-        link = td.Link([a, b], log=lambda m: None)
+        link = td.Link([a, b], log=lambda m: None, features=('speech', 'voices', 'rooms', 'translate'))
 
         def files():
             out = {}

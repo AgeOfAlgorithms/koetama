@@ -1,4 +1,4 @@
-//! Which language each stretch of a chat line is in (PROTOCOL.md "Translation (version 6)": mixed-language lines).
+//! Which language each stretch of a chat line is in (PROTOCOL.md "Translation": mixed-language lines).
 //!
 //! A line is first cut by SCRIPT: Han, kana, Hangul, Latin, Cyrillic, Greek, other letters; punctuation, digits,
 //! spaces and symbols belong to the stretch next to them. Some scripts name the language: Han in a line with kana is

@@ -1,16 +1,18 @@
-//! The feed and the message files against the Python answers (app/fixtures/feed.json, make_fixtures.py feed_cases):
-//! parse_feed (versions 6/5/4/3/2, the voice room, the translations and the lines to translate, what is refused), find_feeds
-//! (each feed with its copy of the mod), text_prefab and id_prefab byte for byte, times_hex. Plus test_helper.py's
-//! feed checks.
-use kd_games::files::{id_prefab, FEED_VERSIONS, TRANSLATION_MAX};
-use kd_games::teardown::{find_feeds, parse_feed, text_prefab, times_hex, TEXT_MAX};
+//! The feed and the objects against the Python answers (app/fixtures/feed.json, make_fixtures.py feed_cases):
+//! parse_feed (the object or its hex; defaults, the voice room, the translations and the lines to translate, what is
+//! refused), find_feeds (each feed with its copy of the mod), every object Koetama sends and the prefab that carries
+//! one, byte for byte.
+use kd_games::api;
+use kd_games::files::TRANSLATION_MAX;
+use kd_games::teardown::{find_feeds, parse_feed, TEXT_MAX};
+use kd_common::feed::RuleState;
 use serde_json::Value;
 
 fn fixture() -> Value {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/feed.json");
     let text = std::fs::read_to_string(path).unwrap();
     // (Python's json writes NaN, serde_json reads no such thing: null stands for it here)
-    serde_json::from_str(&text.replace(":NaN", ":null")).unwrap()
+    serde_json::from_str(&text.replace("NaN", "null")).unwrap()
 }
 
 fn same_f64(want: &Value, got: f64) -> bool {
@@ -24,7 +26,7 @@ fn same_f64(want: &Value, got: f64) -> bool {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 38);
+    assert_eq!(cases.len(), 41);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -93,76 +95,80 @@ fn find_as_python() {
 }
 
 #[test]
-fn prefabs_byte_identical() {
+fn objects_byte_identical() {
     let fx = fixture();
+    let f64s = |v: &Value| -> Option<Vec<f64>> { v.as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect()) };
+    let cases = fx["objects"].as_array().unwrap();
+    assert!(cases.len() >= 12);
+    for c in cases {
+        let a = &c["args"];
+        let got = match c["fn"].as_str().unwrap() {
+            "speech" => api::speech(
+                a[0].as_str().unwrap().chars().next().unwrap(),
+                a[1].as_u64().unwrap() as u32,
+                a[2].as_str().unwrap(),
+                f64s(&a[3]).as_deref(),
+                a[4].as_f64(),
+            ),
+            "translation" => api::translation(a[0].as_i64().unwrap(), a[1].as_str().unwrap()),
+            "translations_status" => api::translations_status(
+                &a[0]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| RuleState {
+                        from: s[0].as_str().unwrap().into(),
+                        to: s[1].as_str().unwrap().into(),
+                        state: s[2].as_str().unwrap().into(),
+                        progress: s[3].as_f64().unwrap(),
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            "voice" => api::voice(a[0].as_str().unwrap()),
+            f => panic!("unknown {f}"),
+        };
+        assert_eq!(got, c["out"].as_str().unwrap(), "{c}");
+        assert!(got.starts_with("{\"type\":"), "\"type\" first");
+    }
     for c in fx["prefab"].as_array().unwrap() {
-        let times: Option<Vec<f64>> = c["times"].as_array().map(|a| a.iter().map(|v| v.as_f64().unwrap()).collect());
-        let got = text_prefab(
-            c["text"].as_str().unwrap(),
-            c["kind"].as_str().unwrap().chars().next().unwrap(),
-            c["utt"].as_u64().unwrap() as u32,
-            times.as_deref(),
-            c["ago"].as_f64(),
-        );
-        assert_eq!(got, c["out"].as_str().unwrap());
+        assert_eq!(api::object_prefab(c["object"].as_str().unwrap()), c["out"].as_str().unwrap());
     }
     assert_eq!(fx["TEXT_MAX"].as_u64().unwrap() as usize, TEXT_MAX);
-}
-
-#[test]
-fn id_prefabs_byte_identical() {
-    let fx = fixture();
-    let cases = fx["id_prefab"].as_array().unwrap();
-    assert!(!cases.is_empty());
-    for c in cases {
-        let got = id_prefab(c["text"].as_str().unwrap(), c["kind"].as_str().unwrap().chars().next().unwrap(), c["id"].as_i64().unwrap());
-        assert_eq!(got, c["out"].as_str().unwrap());
-        // (an id that fits a u32: the same as the speech messages' prefab)
-        if let Ok(u) = u32::try_from(c["id"].as_i64().unwrap()) {
-            assert_eq!(text_prefab(c["text"].as_str().unwrap(), c["kind"].as_str().unwrap().chars().next().unwrap(), u, None, None), got);
-        }
-    }
     assert_eq!(fx["TRANSLATION_MAX"].as_u64().unwrap() as usize, TRANSLATION_MAX);
-    let versions: Vec<u32> = fx["FEED_VERSIONS"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
-    assert_eq!(versions, FEED_VERSIONS, "the same feed versions announced");
-}
-
-#[test]
-fn times_hex_as_python() {
-    let fx = fixture();
-    for c in fx["times_hex"].as_array().unwrap() {
-        let t: Vec<f64> = c["times"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
-        assert_eq!(times_hex(&t), c["out"].as_str().unwrap(), "{t:?}");
-    }
+    assert_eq!(fx["PROTOCOL"].as_u64().unwrap(), api::PROTOCOL);
 }
 
 /// test_helper.py's feed checks
 #[test]
 fn helper_feed_checks() {
-    let f = parse_feed("2|42|0.50|7|3|12|1|2000,1,0,0.550,-39.8,0.0,0.00;2001,2,1,1.000,0.0,-3.5,0.25").unwrap();
-    assert!(f.seq == 42 && f.vol == 0.5 && f.sid == 7 && f.ack == 3 && f.ping == 12 && f.mic && f.speakers.len() == 2);
+    let hex = |s: &str| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let f = parse_feed(&hex(r#"{"type":"feed","seq":42,"volume":0.5,"session":7,"ack":3,"ping":12,"listen":"always","speakers":[
+        {"id":2000,"test_voice":1,"talking":false,"gain":0.55,"azimuth":-39.8},
+        {"id":2001,"test_voice":2,"talking":true,"gain":1.0,"elevation":-3.5,"muffle":0.25}]}"#))
+    .unwrap();
+    assert!(f.seq == 42 && f.vol == 0.5 && f.sid == 7 && f.ack == 3 && f.ping == 12 && f.mic && f.ptt.is_none());
     let s = &f.speakers[&2001];
     assert!(s.src == 2 && s.talk && s.gain == 1.0 && s.az == 0.0 && s.el == -3.5 && s.muffle == 0.25);
     assert!(!f.speakers[&2000].talk);
-    let f = parse_feed("2|43|1.00|7|0|1|0|").unwrap();
-    assert!(f.speakers.is_empty() && !f.mic && f.lang == "en");
-    let f4 = parse_feed("4|45|1.00|7|0|1|1|zh|0|").unwrap();
-    assert!(f4.lang == "zh" && !f4.live && parse_feed("4|45|1.00|7|0|1|1|zh|1|").unwrap().live);
-    let f = parse_feed("3|44|1.00|7|0|1|1|ru|2000,1,1,1.000,0.0,0.0,0.00").unwrap();
-    assert!(f.lang == "ru" && f.mic && f.speakers.len() == 1);
-    assert!(parse_feed("1|1|1.00|").is_none() && parse_feed("garbage").is_none() && parse_feed("2|x|1|1|1|1|1|").is_none());
-    let (a, b) = ("2|5|1.00|7|0|1|0|2000,1,1,1.000,0.0,0.0,0.00", "2|9|1.00|3|0|1|0|");
+    let f = parse_feed(r#"{"type":"feed"}"#).unwrap();
+    assert!(f.speakers.is_empty() && !f.mic && f.lang == "en" && f.live && f.vol == 1.0, "plain JSON; the defaults");
+    let f = parse_feed(&hex(r#"{"listen":"push_to_talk","talk_key":true,"lang":"zh","live":false,"speakers":[{"id":3,"gain":0.5}]}"#)).unwrap();
+    assert!(f.mic && f.ptt == Some(true) && f.lang == "zh" && !f.live && f.speakers[&3].src == 0);
+    for bad in ["garbage", "7b", "[1,2]", r#"{"listen":"sometimes"}"#, r#"{"volume":"loud"}"#] {
+        assert!(parse_feed(bad).is_none(), "{bad}");
+    }
+    let (a, b) = (hex(r#"{"seq":5,"session":7}"#), hex(r#"{"seq":9,"session":3}"#));
     let xml = format!(
         "<registry version=\"2.1.0\">\n<savegame><mod>\n<local-proximity-chat>\n<pcmode value=\"s\"/>\n<pcvx>\n\t<f value=\"{a}\"/>\n</pcvx>\n\
          </local-proximity-chat>\n<steam-123>\n<pcvx>\n<f value=\"{b}\"/>\n</pcvx>\n</steam-123>\n</mod></savegame>\n</registry>\n"
     );
     assert_eq!(
         find_feeds(xml.as_bytes()),
-        vec![("local-proximity-chat".to_string(), a.to_string()), ("steam-123".to_string(), b.to_string())]
+        vec![("local-proximity-chat".to_string(), a.clone()), ("steam-123".to_string(), b.clone())]
     );
-    // (bytes past ASCII read as U+FFFD, as Python's decode('ascii', 'replace'); never a panic)
-    let odd = b"<steam-\xff1><pcvx><f value=\"2|1|1|1|0|1|0|\xe4\"/></pcvx>";
+    // (a tag's bytes past ASCII read as U+FFFD; a feed's as UTF-8 (lossy); never a panic)
+    let odd = b"<steam-\xff1><pcvx><f value=\"{}\xe4\"/></pcvx>";
     let got = find_feeds(odd);
-    assert_eq!(got, vec![("steam-\u{FFFD}1".to_string(), "2|1|1|1|0|1|0|\u{FFFD}".to_string())]);
+    assert_eq!(got, vec![("steam-\u{FFFD}1".to_string(), "{}\u{FFFD}".to_string())]);
     assert!(parse_feed(&got[0].1).is_none());
 }

@@ -7,11 +7,11 @@
 //! none chosen: the game's "Language I speak") - one language, its model; several, theirs and the language detector,
 //! choosing among exactly those. A change of languages loads what is new and lets go of what is no longer needed.
 //!
-//! Real voices (a game that plays voices; PROTOCOL.md version 5): the voice chat (kd_voice::Voice) follows each feed
+//! Real voices (a game that plays voices; PROTOCOL.md "Real voices"): the voice chat (kd_voice::Voice) follows each feed
 //! (the room, whom to send to, whom to hear), takes the microphone's audio and plays what arrives through the mixer;
 //! once per game session the runtime sends the game a fresh room (kind 'r').
 //!
-//! Translation (a game that uses it; PROTOCOL.md version 6): the translator (kd_translate::Translator) gets each
+//! Translation (a game that uses it; PROTOCOL.md "Translation"): the translator (kd_translate::Translator) gets each
 //! feed's rules and new lines as the feed is read; its replies go to the game at once (kind 'x'), and the rules' states
 //! on each change (kind 'd') - again when the game starts a new session or reconnects.
 use crate::mic::Microphone;

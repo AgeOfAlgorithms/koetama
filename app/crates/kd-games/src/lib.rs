@@ -6,8 +6,8 @@
 //!
 //! The engine (speech to text, the voice mixer) knows no game; a connector is only the game's LINK. The game's state,
 //! as the connector reads it, is a FEED (kd_common::feed::Feed), handed to the mixer (a FeedSink) and kept by the game.
+pub mod api;
 pub mod files;
-pub mod lines;
 pub mod profile;
 pub mod socket;
 pub mod steam;
@@ -43,9 +43,10 @@ pub trait Game: Send + Sync {
     /// stop; tell the game Koetama is gone
     fn stop(&mut self) {}
 
-    /// hand the game what the player said: kind 's' (they started talking), 'l' (the words so far, only ever
-    /// growing), 'f' (the finished line; "" = nothing made out). times: each unit's start in s after t0 (when the
-    /// line's audio began). False if no game is listening
+    /// hand the game what the player said (api::speech): kind 's' (they started talking), 'l' (the words so far,
+    /// only ever growing), 'f' (the finished line; "" = nothing made out), or 'r' the session's voice room
+    /// ("<room>:<key>"). times: each unit's start in s after t0 (when the line's audio began). False if no game is
+    /// listening
     fn send(&self, _kind: char, _utt: u32, _text: &str, _times: Option<&[f64]>, _t0: Option<Instant>) -> bool {
         false
     }
@@ -55,13 +56,13 @@ pub trait Game: Send + Sync {
         false
     }
 
-    /// the translation of the feed's request `id` (PROTOCOL.md version 6: kind 'x'; "" = nothing to show - exactly one
-    /// per id). False if no game is listening
+    /// the translation of the feed's line `id` (PROTOCOL.md "Translation"; "" = nothing to show - exactly one per
+    /// id). False if no game is listening
     fn send_translation(&self, _id: i64, _text: &str) -> bool {
         false
     }
 
-    /// the translation rules' states, sent when they change (kind 'd'). False if no game is listening
+    /// the translations' states, sent when they change. False if no game is listening
     fn send_translations_state(&self, _rules: &[RuleState]) -> bool {
         false
     }
@@ -70,7 +71,7 @@ pub trait Game: Send + Sync {
     /// "unreachable" (the last tries failed: still trying). Called with each change.
     fn set_voice_state(&self, _state: &str) {}
 
-    /// {src: the wav file of that test voice}: the recorded voices the game's test speakers play (the program loads
+    /// {test voice id: its wav file}: the recorded voices the game's test speakers play (the program loads
     /// them with kd_audio::load_wav). Blocking: the first call makes them (PowerShell, a few seconds each)
     fn test_voices(&self) -> HashMap<i64, PathBuf> {
         HashMap::new()
@@ -152,7 +153,7 @@ pub struct GameKind {
     pub voices: bool,
     /// Koetama listens to the microphone and sends what the player said (speech to text is needed)
     pub speech: bool,
-    /// Koetama translates the chat lines the game sends (PROTOCOL.md version 6: the translation models are needed)
+    /// Koetama translates the chat lines the game sends (PROTOCOL.md "Translation": the translation models are needed)
     pub translate: bool,
     /// the profile itself
     pub profile: Arc<Profile>,

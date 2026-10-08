@@ -22,7 +22,7 @@ native program); `engine/` is the Python version it was ported from, kept as the
 | `app/crates/kd-speech` | speech to text through sherpa-onnx (shared libraries) and the language detector through ort (the same onnxruntime.dll): VAD, rolling passes, LocalAgreement, "auto" stitching, the recording microphones |
 | `app/crates/kd-games` | the Game trait, Steam, the Teardown link (feed reader, message files, test voices) |
 | `app/crates/kd-update` | updates from GitHub Releases (a 404 = no release yet) |
-| `app/crates/kd-voice` | real voices between players (PROTOCOL.md version 5): the relay client (WebSocket), ChaCha20-Poly1305, Opus (opus-rs), the jitter buffer, the send gate |
+| `app/crates/kd-voice` | real voices between players (PROTOCOL.md "Real voices"): the relay client (WebSocket), ChaCha20-Poly1305, Opus (opus-rs), the jitter buffer, the send gate |
 | `relay/` | the voice relay (a Cloudflare Worker, deployed at koetama-relay.ageofalgorithms.workers.dev) |
 | `app/fixtures/` | the Python reference's answers (make_fixtures.py, make_speech_fixtures.py) the Rust tests compare against |
 | `app/.cargo/config.toml` | the C runtime built into the exe (no VC++ redistributable needed) |
@@ -105,8 +105,8 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
   --include-ignored` also runs four Koetamas through the live relay.
 - **Chat translation (2026-10-08; NOT tried in-game yet; the service tested with real downloads,
   `examples/translate_live.rs`; the Marian engine in plain Rust matches Mozilla's quality at ~2.5x its WASM speed:
-  app/DESIGN.md "The engine"):** feed version 6 (rules, requests; Python reference and
-  fixtures too), messages `x` / `d`, the socket's `translation` / `translations_status`, profiles' `"translate"` (the
+  app/DESIGN.md "The engine"):** the feed's `translations` and `to_translate` (Python reference and fixtures too),
+  the `translation` / `translations_status` objects, profiles' `"translate"` (the
   built-in Teardown profile has it), `kd-translate` catalog / detect / service, the runtime, a Translation card in the
   window. Open: try it in-game with the mod; Maltese -> English has only a pre-release Mozilla model (used: no release
   exists; nothing into Maltese); the model
@@ -436,7 +436,7 @@ Koetama writes `pcvx_v5` (each feed version it reads) next to `pcvx_on`: a mod t
 its player to update Koetama. And `pcvx_vc` / `pcvx_vx` (in the room / the relay can't be reached: two failed
 tries in a row), shown on the mod's Voice page; the socket connector gets a `voice` line instead.
 
-**2026-10-08: chat translation (PROTOCOL.md "Translation (version 6)").** The game sends the chat lines it shows
+**2026-10-08: chat translation (PROTOCOL.md "Translation").** The game sends the chat lines it shows
 (feed v6: up to two rules `ja>en,ko>en`, up to 16 lines as `<id>:<hex>`); Koetama translates every stretch of a line
 in a rule's source language and answers each id once (`x`; "" when nothing needed it or the models are not ready),
 and tells the rules' states (`d`: ready / downloading N / loading / unavailable / error). Models: Mozilla's Firefox
@@ -446,3 +446,17 @@ uses zh-Hant as a source only). Mixed-language lines are split by script, then b
 Cyrillic text (whatlang, MIT, plus letter and little-word rules and a Maltese check; whatlang has no Maltese): 98.5 %
 of the 2900 NTREX sentences come out as one stretch in the right language (app/DESIGN.md, kd-translate). Translations
 are cut at 1000 characters (TRANSLATION_MAX; speech lines stay at 400).
+
+**2026-10-08: protocol 2 - one JSON API, two transports (PROTOCOL.md).** The user asked for the simplest API. Before,
+a files game wrote a 17-field pipe string (versions 2-6 all still read), Koetama answered with prefab tags of one-letter
+kinds and hex text, and announced itself with marker files (`pcvx_v5`, `pcvx_v6`, `pcvx_vc` / `pcvx_vx`), while a
+socket game spoke JSON with other names. Now both connectors carry the same objects (`app/crates/kd-games/src/api.rs`,
+`engine/games/teardown.py`): the game's `feed` (`volume`, `listen` off / always / push_to_talk + `talk_key`, `lang`,
+`live`, `speakers` with `azimuth` / `elevation` and `test_voice` + `talking` for test voices, the room, `translations`,
+`to_translate`) and Koetama's `hello` (with `features`), `speech` (start / live / final), `room`, `voice`,
+`translation`, `translations_status`. Over files the feed is the object or its hex (Teardown: hex - whether Teardown
+escapes quotes in savegame.xml is unknown; our probes always used hex), plus `seq` / `session` / `ack` / `ping`;
+Koetama's files are `on`, `p<n>` and object n of each session (`t<n>`: json, or a prefab whose tag `j` is the object's
+hex; object 1 is the hello). No feed versions: an older Koetama is recognised by its `v5` / `v6` files (Koetama 0.4.0
+sweeps them). Profiles' test voices are `{"id": ...}` (was `src`). The Teardown mod was ported by an agent (JSON in
+Lua, hex both ways).

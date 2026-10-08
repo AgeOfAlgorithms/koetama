@@ -1,4 +1,4 @@
-//! Chat translation on the player's own PC (PROTOCOL.md "Translation (version 6)").
+//! Chat translation on the player's own PC (PROTOCOL.md "Translation").
 //!
 //!   engine     Mozilla's Firefox Translations models (Marian students: an 8-bit transformer encoder, an SSRU decoder)
 //!              run in plain Rust - the model file, the 8-bit matrix maths, the SentencePiece vocabulary, the lexical

@@ -8,11 +8,11 @@
   "locate": {"steam_app": 1167630},
   "uses": ["voices", "speech", "translate"],
   "test_voices": [
-    {"src": 1, "voice": "Microsoft Zira Desktop", "rate": -1,
+    {"id": 1, "voice": "Microsoft Zira Desktop", "rate": -1,
      "text": "I am the whisperer. Stay close, or you will not hear me at all. One, two, three, four, five, six, seven, eight, nine, ten."},
-    {"src": 2, "voice": "Microsoft David Desktop", "rate": 0,
+    {"id": 2, "voice": "Microsoft David Desktop", "rate": 0,
      "text": "I am the speaker. This is my normal voice, and it carries a fair distance. Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday."},
-    {"src": 3, "voice": "Microsoft Zira Desktop", "rate": 2,
+    {"id": 3, "voice": "Microsoft Zira Desktop", "rate": 2,
      "text": "I am the yeller! You can hear me from far away! Red, orange, yellow, green, blue, purple, black and white!"}
   ],
   "speaker_names": {"1": "whisperer", "2": "speaker", "3": "yeller"},

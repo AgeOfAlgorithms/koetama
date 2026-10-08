@@ -63,7 +63,8 @@ def main():
 
         def write():
             state['seq'] += 1
-            feed = '3|%d|1.00|11|%d|%d|1|en|' % (state['seq'], state['ack'], state['ping'])
+            feed = json.dumps(dict(type='feed', seq=state['seq'], session=11, ack=state['ack'], ping=state['ping'],
+                                   listen='always', lang='en')).encode().hex()
             for _ in range(50):
                 try:
                     with open(save, 'w') as f:
@@ -89,8 +90,9 @@ def main():
             if os.path.exists(f):
                 try:
                     body = open(f, encoding='utf-8').read()
-                    m = re.search(r'k=(\w) u=(\d+) t=([0-9a-f]*)[" ]', body)
-                    msgs.append((time.time() - t0, m.group(1), int(m.group(2)), bytes.fromhex(m.group(3)).decode()))
+                    o = json.loads(bytes.fromhex(re.search(r' j=([0-9a-f]+)"', body).group(1)).decode())
+                    if o['type'] == 'speech':                # (the session starts with a hello)
+                        msgs.append((time.time() - t0, o['kind'][0], o['utt'], o.get('text', '')))
                     state['ack'] += 1
                     if first is None:
                         first = time.time() - t0

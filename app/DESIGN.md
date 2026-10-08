@@ -35,14 +35,14 @@ text::{WIDE, is_space, is_wide, units(&str) -> Vec<(usize, String)>, is_word_cha
 fetch::{base_url(), hf_cache_dir(repo, rev), repo_files(repo, rev, &[&str], models_dir, log, progress) -> PathBuf,
         download(url, dest, progress(done, total), tries), get_text(url, accept, timeout)}
 feed::{Feed {seq, vol, sid, ack, ping, mic, ptt, lang, live, speakers: BTreeMap<i64, Speaker>,
-            room, key, me, to},                      // (version 5: the voice room; "" / 0 / [] without one)
-       Speaker {src, talk, gain, az, el, muffle},   // src 0: a real player, id = their player id
-       MAX_ID, MAX_TO, player_id(&str), voice_room(room, key, me) -> (room, key, me), voice_to(ids) -> Vec<i64>,
-       // version 6 (translation): Feed { rules: Vec<(from, to)>, translate: Vec<(id, text)> } ([] without)
-       MAX_RULES, MAX_REQUESTS, MAX_REQUEST_BYTES, MAX_REQUEST_ID, lang_code, parse_rules("ja>en,ko>en"),
-       parse_requests("<id>:<hex>;..."), translate_rules(pairs), translate_requests(items), request_id, request_text,
+            room, key, me, to, region,               // (the voice room; "" / 0 / [] without one)
+            translations: Vec<(from, to)>, to_translate: Vec<(id, text)>},   // ([] without)
+       Speaker {src, talk, gain, az, el, muffle},   // src: a test voice (0: a real player, id = their player id)
+       MAX_ID, MAX_TO, voice_room(room, key, me) -> (room, key, me), voice_to(ids) -> Vec<i64>, voice_region,
+       MAX_TRANSLATIONS, MAX_REQUESTS, MAX_REQUEST_BYTES, MAX_REQUEST_ID, lang_code, translation_pairs(pairs),
+       translate_requests(items), request_text,
        RuleState { from, to, state: "ready" | "downloading" | "loading" | "unavailable" | "error", progress },
-       rules_wire(&[RuleState]) -> "ja>en=ready,ko>en=downloading 42",
+       translations_wire(&[RuleState]) -> "ja>en=ready,ko>en=downloading 42",   // (the status line)
        trait FeedSink: Send + Sync { fn set_feed(&self, Feed); fn fresh(&self) -> bool }}
 ```
 The crates below depend only on kd-common (not on each other), so they can be written at the same time; the program
@@ -163,9 +163,11 @@ pub trait Game: Send {
     fn locate(&self) -> (bool, String);
     fn start(&mut self);  fn stop(&mut self);
     fn send(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool;
+                                                                         // api::speech: 's' 'l' 'f', 'r' the room
     fn send_text(&self, text: &str) -> bool;                             // a typed line (--type, --auto)
-    fn send_translation(&self, id: i64, text: &str) -> bool;             // version 6: kind 'x' (one per request id)
-    fn send_translations_state(&self, states: &[RuleState]) -> bool;     // version 6: kind 'd' (on each change)
+    fn send_translation(&self, id: i64, text: &str) -> bool;             // api::translation (one per line id)
+    fn send_translations_state(&self, states: &[RuleState]) -> bool;     // api::translations_status (on each change)
+    fn set_voice_state(&self, state: &str);                              // api::voice (on each change)
     fn test_voices(&self) -> HashMap<i64, PathBuf>;                      // wav files (the program loads them)
     fn speaker_name(&self, src: i64) -> String;
     fn feed(&self) -> Option<Feed>;                                      // the latest
@@ -178,15 +180,16 @@ pub struct GameKind;  pub fn games();  pub fn by_id();  ...                // se
 pub mod steam { steam_root, libraries, app_library, install_dir, workshop_dir, proton_user, documents_dir }
 pub mod profile { Profile, Connector, FilesConfig, SocketConfig, MessageFormat, TestVoice, PathTemplate, PathSpec,
                   Place, safe_prefix, this_pc }                          // the profile format, validation, summary
-pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, parse_feed, find_feeds, text_prefab,
-                json_message, json_secs, times_hex, id_prefab, FEED_VERSIONS = [5, 6], TRANSLATION_MAX }
-                                                                        // the files connector
-pub mod socket { SocketGame, parse_socket_feed, features, PROTOCOL, MAX_LINE }   // the socket connector
-pub mod lines { hello, message, voice, translation, translations_status }
-                                                                        // the JSON objects Koetama sends: the socket's
-                                                                        // lines and the files connector's json messages
+pub mod api { PROTOCOL = 2, parse_feed(&Value) -> Feed, feed_from_text(object or its hex), features(profile),
+              hello, speech, room, voice, translation, translations_status, object_prefab, json_secs }
+                                                                        // the game API (PROTOCOL.md "The objects"): one
+                                                                        // parser and the objects, for both connectors
+pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, parse_feed, find_feeds, TRANSLATION_MAX }
+                                                                        // the files connector (object n of a session
+                                                                        // in <prefix>t<n>: json or a prefab; 1 = hello)
+pub mod socket { SocketGame, parse_socket_feed, PROTOCOL, MAX_LINE }    // the socket connector
 pub mod voices { make_in, for_profile }                                 // test voices (Windows SAPI)
-pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedReader, times_hex, text_prefab, Link,
+pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedReader, Link,
                    make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown (= FilesGame), profile() }
 ```
 Env overrides as Python: SAVEPROBE_DIR (the feed file's folder; the file keeps the profile's name), HFP_MODS (the
@@ -213,7 +216,7 @@ pub const PAGE: &str;  pub fn api_url() -> String;
 (start / tick / stop / status), the window as koetama.py (egui), the command line as teardown_helper.py - the same
 flags, so `engine/test_e2e.py` with `KOETAMA_EXE=<the Rust exe>` tests the port end to end.
 
-## kd-voice (real voices; PROTOCOL.md "Real voices: rooms and the relay (version 5)")
+## kd-voice (real voices; PROTOCOL.md "Real voices")
 
 No Python counterpart: the reference for the wire is the contract and the relay's own code (`relay/src/frames.js`).
 
@@ -303,7 +306,7 @@ lists "voices", "speech" and/or "translate" (default: voices and speech): a spee
 a voices-only game's feed never asks for the microphone, a game without "translate" has no translations or lines to translate (the
 connectors enforce all three). A translate-only game needs no microphone, no sound output and no relay.
 
-## kd-translate (PROTOCOL.md "Translation (version 6)"; engine/mt.py is the engine's reference)
+## kd-translate (PROTOCOL.md "Translation"; engine/mt.py is the engine's reference)
 
 Chat translation on the player's PC with Mozilla's Firefox Translations models (MPL-2.0, ~20-55 MB a direction,
 downloaded the first time a rule needs them). Four modules:
@@ -380,7 +383,7 @@ before taking the game's lock (its thread may be waiting on that lock to send a 
 "Translation" card (each rule: "Japanese → English" and its state); the command line's status line "translate: ja →
 en ready, ko → en 42 %". Tests: tests/catalog.rs (a canned list, a fake CDN), tests/detect.rs (NTREX, chat lines,
 mixed lines), tests/service.rs (a fake engine and model source), kd-games tests/translation.rs and tests/feed.rs
-(version 6 against the Python fixtures).
+(against the Python fixtures).
 
 ### The engine (`engine.rs`, `engine/gemm.rs`, `engine/marian.rs`, `engine/spm.rs`)
 
