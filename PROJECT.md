@@ -1,6 +1,6 @@
-# Kotodama (repo github.com/AgeOfAlgorithms/kotodama; until 2026-10-07 proximity-voice-chat-STT-engine)
+# Koetama (repo github.com/AgeOfAlgorithms/koetama; until 2026-10-07 proximity-voice-chat-STT-engine)
 
-**Kotodama** (the user's pick, 2026-10-06; Japanese "word spirit") is the app behind proximity voice chat in games:
+**Koetama** (声魂, Japanese "voice spirit"; the user's pick, 2026-10-08 - it was **Kotodama**, "word spirit", until a search showed Kotodama AI, a voice-cloning and transcription app, and a Kotodama teleprompter) is the app behind proximity voice chat in games:
 it plays the other players' voices (mixed by the game's distances, directions and walls) and turns what the
 player says into text - live words while they talk, the finished line after - on the player's own PC (CPU only,
 nothing sent anywhere). Games are modules (`app/crates/kd-games`), picked in the app's window; the first is Teardown,
@@ -16,24 +16,24 @@ native program); `engine/` is the Python version it was ported from, kept as the
 | path | what |
 |---|---|
 | `app/DESIGN.md` | the crates, their interfaces, which Python each replaces |
-| `app/crates/kotodama` | the program: the window (egui), `--cli` (teardown_helper.py's flags), `--selftest`, the runtime, the microphone, settings |
+| `app/crates/koetama` | the program: the window (egui), `--cli` (teardown_helper.py's flags), `--selftest`, the runtime, the microphone, settings |
 | `app/crates/kd-common` | names and folders, word units and times (as the game's voice.lua), model downloads, the Feed |
 | `app/crates/kd-audio` | the voice mixer, the muffle low-pass, wav, resampling (rubato), sound devices (cpal; the audio thread at MMCSS priority) |
 | `app/crates/kd-speech` | speech to text through sherpa-onnx (shared libraries) and the language detector through ort (the same onnxruntime.dll): VAD, rolling passes, LocalAgreement, "auto" stitching, the recording microphones |
 | `app/crates/kd-games` | the Game trait, Steam, the Teardown link (feed reader, message files, test voices) |
 | `app/crates/kd-update` | updates from GitHub Releases (a 404 = no release yet) |
 | `app/crates/kd-voice` | real voices between players (PROTOCOL.md version 5): the relay client (WebSocket), ChaCha20-Poly1305, Opus (opus-rs), the jitter buffer, the send gate |
-| `relay/` | the voice relay (a Cloudflare Worker, deployed at kotodama-relay.ageofalgorithms.workers.dev) |
+| `relay/` | the voice relay (a Cloudflare Worker, deployed at koetama-relay.ageofalgorithms.workers.dev) |
 | `app/fixtures/` | the Python reference's answers (make_fixtures.py, make_speech_fixtures.py) the Rust tests compare against |
 | `app/.cargo/config.toml` | the C runtime built into the exe (no VC++ redistributable needed) |
-| `engine/kotodama.py` | the app's window (tkinter): game picker, connection state, microphone / speakers / volume, what it hears, updates, licenses; `--cli` = the command line |
+| `engine/koetama.py` | the app's window (tkinter): game picker, connection state, microphone / speakers / volume, what it hears, updates, licenses; `--cli` = the command line |
 | `engine/runtime.py` | the running app, game-independent: the game module, the mixer and its output, the speech to text, the microphone (open only while the game wants it) |
 | `engine/games/` | one module per game (`base.Game`: locate, start/stop, on_feed, send, test clips); `teardown.py`: the savegame feed + files link (Windows, and Linux through Proton) |
 | `engine/audio.py` | the voice mixer (numpy only: the muffle is an FIR of two one-pole low-passes; scipy dropped from the app), resampling (sherpa-onnx's), wav files, devices |
 | `engine/steam.py` | Steam libraries, an app's install / Workshop folder, its Proton prefix (Linux), the real Documents folder |
 | `engine/asr.py` | speech to text: Silero VAD, the rolling passes (Parakeet v3 / GigaAM v3 / SenseVoice by language), word times, "auto" language (SpeechBrain detector + stitching) |
-| `engine/paths.py` | the name, version, repo; the user's data folder (%LOCALAPPDATA%\Kotodama: settings, models, test voices) |
-| `engine/fetch.py` | model downloads over plain HTTPS (no Hugging Face library in the app): the pinned files of each model, resumable, into %LOCALAPPDATA%/Kotodama/models; a developer's Hugging Face cache is used where it has them; KOTODAMA_MODELS_URL = a mirror |
+| `engine/paths.py` | the name, version, repo; the user's data folder (%LOCALAPPDATA%\Koetama: settings, models, test voices) |
+| `engine/fetch.py` | model downloads over plain HTTPS (no Hugging Face library in the app): the pinned files of each model, resumable, into %LOCALAPPDATA%/Koetama/models; a developer's Hugging Face cache is used where it has them; KOETAMA_MODELS_URL = a mirror |
 | `engine/updater.py` | updates from GitHub Releases: check, download, SHA256SUMS + same-publisher signature, run the installer silently |
 | `engine/teardown_helper.py` | the command line for Teardown with the test modes (--auto-speech, --mic-wav, --transcribe, --auto, --type, --demo) |
 | `engine/speech.py` | the first speech detector + faster-whisper path (kept: test_helper and bench/lid.py use it; not in the app) |
@@ -41,7 +41,7 @@ native program); `engine/` is the Python version it was ported from, kept as the
 | `engine/make_notices.py`, `engine/licenses/` | writes THIRD_PARTY_NOTICES.txt: the models, sherpa-onnx + ONNX Runtime, every Rust crate in the program (cargo metadata, Windows + Linux), full license texts |
 | `engine/make_dummy_lines.py` | the mod's voice dummies' lines with word times (PC.VDUMMY_LINES) |
 | `engine/test_*.py` | test_app (updater, Steam, games, runtime, filter), test_helper (link, mixer, VAD, word times), test_asr (the models on the benchmark clips), test_e2e (a fake game), test_auto_speech (22 recorded lines in real time) |
-| `build.py`, `installer/kotodama.iss` | the build: cargo (release), the exe + sherpa-onnx-c-api + onnxruntime libraries, the detector + notices; Inno Setup installer (per user); SHA256SUMS.txt |
+| `build.py`, `installer/koetama.iss` | the build: cargo (release), the exe + sherpa-onnx-c-api + onnxruntime libraries, the detector + notices; Inno Setup installer (per user); SHA256SUMS.txt |
 | `.github/workflows/build.yml` | CI: cargo tests, then Windows (installer, selftest, install/uninstall check) and Linux (tar.gz, selftest under xvfb) on every push to main that changes the app; a v<version> tag: a DRAFT release |
 | `bench/` | the benchmarks behind every model choice (reports in `export/asrbench/*.md`) |
 | `probes/` | the in-game feasibility probes (each a tiny Teardown mod + a Python side) |
@@ -63,19 +63,19 @@ native program); `engine/` is the Python version it was ported from, kept as the
 ## Commands (from the repo root)
 
     export PATH="$HOME/.cargo/bin:$PATH"
-    (cd app && cargo run -p kotodama)     # the app (Rust); -- --cli ... for the command line
+    (cd app && cargo run -p koetama)     # the app (Rust); -- --cli ... for the command line
     (cd app && cargo test --workspace)    # the Rust tests (-- --include-ignored: + the real models and devices)
-    python build.py                       # dist/Kotodama/ + dist/Kotodama-Setup-<v>.exe
+    python build.py                       # dist/Koetama/ + dist/Koetama-Setup-<v>.exe
     $P app/fixtures/make_fixtures.py --real   # the Python reference's answers again (after a Python change)
 
 The Python reference:
 
     P=<conda>/envs/pcvoice/python.exe
-    $P engine/kotodama.py                 # the app
+    $P engine/koetama.py                 # the app
     $P engine/test_app.py ; $P engine/test_helper.py ; $P engine/test_asr.py ; $P engine/test_e2e.py ; $P engine/test_auto_speech.py
     $P engine/teardown_helper.py          # the command line (Teardown running, a level with the mod)
-    dist/Kotodama/Kotodama.exe --selftest # the build's window, sound, ONNX, detector, HTTPS, updates (CI runs it)
-    KOTODAMA_EXE=dist/Kotodama/Kotodama.exe $P engine/test_e2e.py   # the built exe end to end
+    dist/Koetama/Koetama.exe --selftest # the build's window, sound, ONNX, detector, HTTPS, updates (CI runs it)
+    KOETAMA_EXE=dist/Koetama/Koetama.exe $P engine/test_e2e.py   # the built exe end to end
     <conda>/envs/pclid/python.exe engine/export_lid.py   # rebuild export/lid/voxlingua107-ecapa.onnx
     $P engine/make_notices.py             # after any model or package change
 
@@ -102,20 +102,20 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
   Sound card and the command line show the voice chat's state. The microphone runs at 48 kHz when the game plays
   voices (16 kHz for the speech made from it). Opus is opus-rs (pure Rust, no CMake): unsafe-libopus was tried
   first and REJECTED - its SILK loss concealment gives full-scale noise. `cargo test -p kd-voice --test relay --
-  --include-ignored` also runs four Kotodamas through the live relay.
+  --include-ignored` also runs four Koetamas through the live relay.
 - The models mirror (our own GitHub release) - after the repo is public.
 - Linux build: made by CI, not tried on a real Linux / Steam Deck; no auto-update there (the app opens the page).
 - The voice dummies' test voices are made with the Windows computer voices: none on Linux (silent dummies).
-- Verified on this PC (2026-10-06, no game running): the built exe end to end (test_e2e with KOTODAMA_EXE), also with
+- Verified on this PC (2026-10-06, no game running): the built exe end to end (test_e2e with KOETAMA_EXE), also with
   an empty model cache (it downloaded Parakeet itself, 644 MB); --selftest; the installer: silent install, the installed
-  selftest, an update with /RELAUNCH=1 while Kotodama runs (old closed, new started), uninstall (user data kept).
+  selftest, an update with /RELAUNCH=1 while Koetama runs (old closed, new started), uninstall (user data kept).
   Not yet: the window with Teardown running, a real update from a published release (needs a v0.1.1 release).
 - The Rust port (2026-10-06): every crate matches the Python on the fixtures (text, mixer to 5e-7, feed/link files
   byte-identical, stitching, LocalAgreement, the real models' transcripts / times / detector / mixed lines, the
   Listener end to end); the Python test_e2e.py passes against the Rust exe; selftest + installer cycle pass. Not yet:
   in-game with Teardown, Linux (CI builds it), a real update from one release to the next. Python 0.1 was never
   released: the first release is the Rust 0.2.
-- Languages (the user, 2026-10-06): the player ticks every language they speak in Kotodama's window (three tiers as
+- Languages (the user, 2026-10-06): the player ticks every language they speak in Koetama's window (three tiers as
   the mod's Voice page: full / soft (beta) / weak (experimental)); only their models load (the window lists each
   model, loaded or not, ~memory), several = "auto" among exactly them (fewer candidates, fewer wrong stretches). None
   ticked: the game's "Language I speak". A change waits 1.5 s to settle, then loads the new and unloads the rest.
@@ -127,7 +127,7 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
 - (Python packaging, before the port) a conda Python keeps its modules' DLLs in Library/bin, which Nuitka misses (build.py CONDA_DLLS;
   tcl86t needs zlib1.dll - without it the window silently failed to open while --cli worked). huggingface_hub broke in
   the compiled build (lazy imports): models come through engine/fetch.py. PowerShell's Start-Process -Wait also waits
-  for the children (a relaunched Kotodama): use WaitForExit() when testing the relaunch.
+  for the children (a relaunched Koetama): use WaitForExit() when testing the relaunch.
 - Private notes before the repo goes public: this file (Moonlight/the user's setup, local paths), CLAUDE.md, and the
   git history (local conda paths in old commits; nothing secret found).
 
@@ -419,10 +419,10 @@ Not measured: a joiner's machine (client scripts of a Workshop mod), `MOD/../` f
 `LoadSound` again on a name whose file changed, several speakers at once (clips loaded per second), a long
 session (memory after many loads / unloads), a real microphone voice with room noise, deeper `../`.
 
-**2026-10-07: the voice server's region, Kotodama's version, the voice server's state.** The host picks where a
+**2026-10-07: the voice server's region, Koetama's version, the voice server's state.** The host picks where a
 session's voice room lives (the mod's Settings, "Voice server": Auto or a Cloudflare region; feed v5's `region` field,
 the relay's `&region=` location hint; the region is part of the room's name, so a change moves everyone to a new
 room). Measured from Toronto, one hop: Auto 61 ms, North America East 62, West 108, Europe West 138, Asia-Pacific 185.
-Kotodama writes `pcvx_v5` (each feed version it reads) next to `pcvx_on`: a mod that doesn't find its version tells
-its player to update Kotodama. And `pcvx_vc` / `pcvx_vx` (in the room / the relay can't be reached: two failed
+Koetama writes `pcvx_v5` (each feed version it reads) next to `pcvx_on`: a mod that doesn't find its version tells
+its player to update Koetama. And `pcvx_vc` / `pcvx_vx` (in the room / the relay can't be reached: two failed
 tries in a row), shown on the mod's Voice page; the socket connector gets a `voice` line instead.

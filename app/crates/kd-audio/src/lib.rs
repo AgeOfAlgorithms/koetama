@@ -1,4 +1,4 @@
-//! Audio for Kotodama, game-independent (engine/audio.py): the voice mixer (each voice placed by the game's gain,
+//! Audio for Koetama, game-independent (engine/audio.py): the voice mixer (each voice placed by the game's gain,
 //! direction and muffle), the low-pass that muffles, resampling, wav files, and the sound devices (cpal: the output
 //! the mixer plays to, the microphone).
 //!

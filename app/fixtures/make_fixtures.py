@@ -6,7 +6,7 @@ side; the Rust tests read the JSON files next to this script.
     <conda>/envs/pcvoice/python.exe app/fixtures/make_fixtures.py --real   # + the real models on benchmark clips
 
 Files: text.json (units, unit_key, tidy, unit_times, LocalAgreement), audio.json (the low-pass, panning, the mixer),
-feed.json (the feed, the savegame, the message files), link.json (the files Kotodama writes for the game, step by
+feed.json (the feed, the savegame, the message files), link.json (the files Koetama writes for the game, step by
 step), segments.json (the language stitching with a made-up detector), real.json (models: transcripts, unit times,
 detector outputs, stitched mixed-language lines).
 """

@@ -1,4 +1,4 @@
-"""What Kotodama costs a player's PC: the built app (dist/Kotodama) run against a fake game (as engine/test_e2e.py: a
+"""What Koetama costs a player's PC: the built app (dist/Koetama) run against a fake game (as engine/test_e2e.py: a
 savegame feed that wants the microphone) with a recording as the microphone, its CPU and memory sampled 4 times a
 second. Phases: idle (connected, models not loaded yet), loading, talking (the recording: lines with pauses), after.
 
@@ -21,7 +21,7 @@ import psutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-EXE = os.environ.get('KOTODAMA_EXE') or os.path.join(ROOT, 'dist', 'Kotodama', 'Kotodama.exe')
+EXE = os.environ.get('KOETAMA_EXE') or os.path.join(ROOT, 'dist', 'Koetama', 'Koetama.exe')
 BENCH = os.path.join(ROOT, 'export', 'asrbench')
 XML = ('<registry version="2.1.0">\n<savegame><mod><local-proximity-chat>\n<pcvx>\n<f value="%s"/>\n</pcvx>\n'
        '</local-proximity-chat></mod></savegame>\n</registry>\n')

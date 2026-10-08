@@ -1,5 +1,5 @@
 """What every game module gives the app (runtime.Runtime). The engine (speech to text, the voice mixer) knows no game;
-a game module is only its LINK: how the game says whom the player hears and what it wants, and how Kotodama hands the
+a game module is only its LINK: how the game says whom the player hears and what it wants, and how Koetama hands the
 game what the player said.
 
 The game's state, as the module reads it, is a FEED (a dict) given to the mixer and kept here:
@@ -27,10 +27,10 @@ class Game:
         return False, ''
 
     def start(self):
-        """start listening to the game (a thread of its own); tell it Kotodama runs"""
+        """start listening to the game (a thread of its own); tell it Koetama runs"""
 
     def stop(self):
-        """stop; tell the game Kotodama is gone"""
+        """stop; tell the game Koetama is gone"""
 
     def send(self, kind, utt, text, times=None, t0=None):
         """hand the game what the player said: kind "s" (they started talking), "l" (the words so far, only ever

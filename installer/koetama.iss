@@ -1,26 +1,26 @@
-; Kotodama's Windows installer (Inno Setup 6). build.py runs it:
-;   ISCC /DAppVersion=0.1.0 /DAppName=Kotodama /DSourceDir=<dist\Kotodama> /DOutDir=<dist> installer\kotodama.iss
-; Per user (no admin rights): installs to %LOCALAPPDATA%\Programs\Kotodama, so the in-app updater can run it silently
-; (/VERYSILENT /RELAUNCH=1): it closes a running Kotodama, replaces the files and starts the new version. A silent install
+; Koetama's Windows installer (Inno Setup 6). build.py runs it:
+;   ISCC /DAppVersion=0.1.0 /DAppName=Koetama /DSourceDir=<dist\Koetama> /DOutDir=<dist> installer\koetama.iss
+; Per user (no admin rights): installs to %LOCALAPPDATA%\Programs\Koetama, so the in-app updater can run it silently
+; (/VERYSILENT /RELAUNCH=1): it closes a running Koetama, replaces the files and starts the new version. A silent install
 ; without /RELAUNCH=1 (a package manager, the CI) starts nothing.
-; The speech models are not in it: Kotodama downloads them per language into %LOCALAPPDATA%\Kotodama\models.
+; The speech models are not in it: Koetama downloads them per language into %LOCALAPPDATA%\Koetama\models.
 
 #ifndef AppName
-  #define AppName "Kotodama"
+  #define AppName "Koetama"
 #endif
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 
 [Setup]
-AppId={{6F4C2D7E-3B1A-4E8F-9C2D-5A7B8E1F0D3C}
+AppId={{DE2BF700-F731-4A9C-93BB-6ED60D3D04BB}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=AgeOfAlgorithms
-AppPublisherURL=https://github.com/AgeOfAlgorithms/kotodama
-AppSupportURL=https://github.com/AgeOfAlgorithms/kotodama/issues
-AppUpdatesURL=https://github.com/AgeOfAlgorithms/kotodama/releases
+AppPublisherURL=https://github.com/AgeOfAlgorithms/koetama
+AppSupportURL=https://github.com/AgeOfAlgorithms/koetama/issues
+AppUpdatesURL=https://github.com/AgeOfAlgorithms/koetama/releases
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -61,7 +61,7 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppName}.exe"; Tasks: desktopicon
 
 [Run]
-; an install by hand: a "Launch Kotodama" box at the end; an update (silent, /RELAUNCH=1): start the new version at once
+; an install by hand: a "Launch Koetama" box at the end; an update (silent, /RELAUNCH=1): start the new version at once
 Filename: "{app}\{#AppName}.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\{#AppName}.exe"; Flags: nowait; Check: Relaunch
 
@@ -71,7 +71,7 @@ begin
   Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
 end;
 
-{ ---- Uninstalling: the downloaded speech models and the settings (%LOCALAPPDATA%\Kotodama, not the install folder)
+{ ---- Uninstalling: the downloaded speech models and the settings (%LOCALAPPDATA%\Koetama, not the install folder)
   go too unless the player says No - someone who uninstalls has no use for gigabytes of models (the user, 2026-10-08).
   The question defaults to Yes; a silent uninstall (/SUPPRESSMSGBOXES) takes Yes. Updates install over the old copy
   and never run this. }
@@ -121,7 +121,7 @@ begin
   begin
     RemoveData := False;
     if DirExists(DataDir) then
-      RemoveData := SuppressibleMsgBox('Also remove the downloaded speech models and your Kotodama settings (' +
+      RemoveData := SuppressibleMsgBox('Also remove the downloaded speech models and your Koetama settings (' +
         SizeText(FolderBytes(DataDir)) + ')?' + #13#10#13#10 +
         'Choose No to keep them for a later reinstall.',
         mbConfirmation, MB_YESNO or MB_DEFBUTTON1, IDYES) = IDYES;
@@ -132,6 +132,6 @@ end;
 
 [Messages]
 WelcomeLabel1=Welcome to [name]
-WelcomeLabel2=Kotodama plays the other players' voices where they stand in the game, and writes what you say as you say it.%n%nIt installs for you only (no administrator rights). The speech model for your language downloads the first time you speak.
+WelcomeLabel2=Koetama plays the other players' voices where they stand in the game, and writes what you say as you say it.%n%nIt installs for you only (no administrator rights). The speech model for your language downloads the first time you speak.
 FinishedHeadingLabel=[name] is ready
-FinishedLabel=Start a game with a mod that works with Kotodama (for example Teardown with Proximity Babble Chat): Kotodama connects by itself.
+FinishedLabel=Start a game with a mod that works with Koetama (for example Teardown with Proximity Babble Chat): Koetama connects by itself.

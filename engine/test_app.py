@@ -35,13 +35,13 @@ def check(cond, msg):
 check(updater.version_tuple('v1.2.10') == (1, 2, 10) and updater.newer('v0.2.0', '0.1.9') and not updater.newer('v0.1.0', '0.1.0')
       and updater.newer('v0.10.0', '0.9.9'), 'versions compare as numbers (0.10 after 0.9), a tag\'s v ignored')
 REL = {'tag_name': 'v9.9.9', 'body': 'notes', 'html_url': 'https://example/rel', 'assets': [
-    {'name': 'Kotodama-Setup-9.9.9.exe', 'browser_download_url': 'URL_EXE'},
-    {'name': 'Kotodama-9.9.9-linux.tar.gz', 'browser_download_url': 'URL_TGZ'},
+    {'name': 'Koetama-Setup-9.9.9.exe', 'browser_download_url': 'URL_EXE'},
+    {'name': 'Koetama-9.9.9-linux.tar.gz', 'browser_download_url': 'URL_TGZ'},
     {'name': 'SHA256SUMS.txt', 'browser_download_url': 'URL_SUMS'}]}
 real_get = updater._get
 updater._get = lambda url, timeout=10: json.dumps(REL).encode()
 info = updater.check()
-check(info and info['version'] == '9.9.9' and info['installer'] == 'Kotodama-Setup-9.9.9.exe' and info['installer_url'] == 'URL_EXE'
+check(info and info['version'] == '9.9.9' and info['installer'] == 'Koetama-Setup-9.9.9.exe' and info['installer_url'] == 'URL_EXE'
       and info['sums_url'] == 'URL_SUMS', 'a newer release: its installer and checksums found')
 REL['tag_name'] = 'v' + paths.VERSION
 check(updater.check() is None, 'the same version: no update')
@@ -49,18 +49,18 @@ REL['tag_name'], REL['draft'] = 'v9.9.9', True
 check(updater.check() is None, 'a draft release: no update')
 REL['draft'] = False
 with tempfile.TemporaryDirectory() as td:
-    exe = os.path.join(td, 'Kotodama-Setup-9.9.9.exe')
+    exe = os.path.join(td, 'Koetama-Setup-9.9.9.exe')
     open(exe, 'wb').write(b'installer bytes')
     good = updater.sha256(exe)
     sums = os.path.join(td, 'SHA256SUMS.txt')
-    open(sums, 'w').write('%s  Kotodama-Setup-9.9.9.exe\n%s  other.tar.gz\n' % (good, '0' * 64))
-    check(updater.expected_sha(open(sums).read(), 'Kotodama-Setup-9.9.9.exe') == good, 'SHA256SUMS.txt read')
+    open(sums, 'w').write('%s  Koetama-Setup-9.9.9.exe\n%s  other.tar.gz\n' % (good, '0' * 64))
+    check(updater.expected_sha(open(sums).read(), 'Koetama-Setup-9.9.9.exe') == good, 'SHA256SUMS.txt read')
     url = lambda p: 'file:///' + p.replace('\\', '/')                     # noqa: E731
     updater._get = real_get
-    info = dict(installer='Kotodama-Setup-9.9.9.exe', installer_url=url(exe), sums_url=url(sums))
+    info = dict(installer='Koetama-Setup-9.9.9.exe', installer_url=url(exe), sums_url=url(sums))
     path = updater.download(info)
     check(open(path, 'rb').read() == b'installer bytes', 'the installer downloads and matches its checksum')
-    open(sums, 'w').write('%s  Kotodama-Setup-9.9.9.exe\n' % ('f' * 64))
+    open(sums, 'w').write('%s  Koetama-Setup-9.9.9.exe\n' % ('f' * 64))
     try:
         updater.download(info)
         bad = False
@@ -154,7 +154,7 @@ for fc in (400.0, 4000.0):
 # ---- model downloads (fetch.py) from a local web server laid out like Hugging Face: <repo>/resolve/<rev>/<file>
 import functools, http.server, tempfile, threading
 import fetch
-import kotodama
+import koetama
 web, home = tempfile.mkdtemp(), tempfile.mkdtemp()
 os.makedirs(os.path.join(web, 'own', 'model', 'resolve', 'abc'))
 blob = os.urandom(3 << 20)
@@ -178,7 +178,7 @@ try:
     check(False, 'a missing file is an error')
 except OSError:
     check(not os.path.exists(os.path.join(home, 'none.onnx')), 'a missing file is an error, and leaves nothing behind')
-check(kotodama.download_text(('m', 336e6, 640e6)) == '52 % of 640 MB' and kotodama.download_text(('m', 5e6, 0)) == '5 MB',
+check(koetama.download_text(('m', 336e6, 640e6)) == '52 % of 640 MB' and koetama.download_text(('m', 5e6, 0)) == '5 MB',
       'the window shows the download')
 srv.shutdown()
 fetch.BASE, paths.MODELS = old[0], old[1]

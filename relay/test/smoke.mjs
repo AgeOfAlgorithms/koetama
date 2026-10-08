@@ -1,4 +1,4 @@
-// node test/smoke.mjs <base url> [region]   e.g. http://127.0.0.1:8787 (wrangler dev) or https://kotodama-relay.<you>.workers.dev
+// node test/smoke.mjs <base url> [region]   e.g. http://127.0.0.1:8787 (wrangler dev) or https://koetama-relay.<you>.workers.dev
 // Three players in a fresh room: 1 speaks to 2 only (3 must get nothing), the keep-alive is answered, and the
 // round trip 1 -> relay -> 2 is timed (median of 50, on this PC: both legs to the same Cloudflare location).
 import { parseOut, voiceFrame } from "../src/frames.js";

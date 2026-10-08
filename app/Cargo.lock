@@ -2143,7 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "kd-audio"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cpal",
  "hound",
@@ -2156,7 +2156,7 @@ dependencies = [
 
 [[package]]
 name = "kd-common"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2165,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "kd-games"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "kd-common",
  "regex",
@@ -2175,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "kd-speech"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hound",
  "kd-common",
@@ -2189,7 +2189,7 @@ dependencies = [
 
 [[package]]
 name = "kd-update"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "kd-common",
  "regex",
@@ -2199,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "kd-voice"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.3.4",
@@ -2229,8 +2229,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
-name = "kotodama"
-version = "0.3.0"
+name = "koetama"
+version = "0.3.1"
 dependencies = [
  "clap",
  "eframe",

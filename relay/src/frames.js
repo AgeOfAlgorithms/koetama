@@ -3,7 +3,7 @@
 // client -> relay   [1][n][to_1 .. to_n: u16 big-endian][payload]   a voice packet for players to_1 .. to_n
 // relay -> client   [1][from: u16 big-endian][payload]               the same payload, and who sent it
 //
-// The payload is opaque here (Kotodama encrypts it with the room's key: the relay never hears anything).
+// The payload is opaque here (Koetama encrypts it with the room's key: the relay never hears anything).
 
 export const VOICE = 1;
 export const MAX_TO = 64;          // recipients in one packet (a Teardown session holds 12 players)
@@ -56,7 +56,7 @@ export function route(buf, from) {
   return { to, out };
 }
 
-/** Builds a client's frame (the tests; Kotodama does the same in Rust). */
+/** Builds a client's frame (the tests; Koetama does the same in Rust). */
 export function voiceFrame(to, payload) {
   const p = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
   const b = new Uint8Array(2 + 2 * to.length + p.length);

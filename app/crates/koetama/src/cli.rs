@@ -1,11 +1,11 @@
-//! Kotodama on the command line, for Teardown (engine/teardown_helper.py: the same flags): the same runtime, a status
+//! Koetama on the command line, for Teardown (engine/teardown_helper.py: the same flags): the same runtime, a status
 //! line, and the test modes that need no microphone.
 //!
-//!     kotodama --cli               start it, then play (a level with Proximity Babble Chat)
-//!     kotodama --cli --demo        no game needed: one voice walks a circle around you
-//!     kotodama --cli --list        sound devices;  --device NAME / --mic-device NAME pick one
-//!     kotodama --cli --transcribe some.wav --lang ru   a recording through the pipeline
-//!     kotodama --cli --auto-speech recorded lines as if spoken (needs the benchmark's export/)
+//!     koetama --cli               start it, then play (a level with Proximity Babble Chat)
+//!     koetama --cli --demo        no game needed: one voice walks a circle around you
+//!     koetama --cli --list        sound devices;  --device NAME / --mic-device NAME pick one
+//!     koetama --cli --transcribe some.wav --lang ru   a recording through the pipeline
+//!     koetama --cli --auto-speech recorded lines as if spoken (needs the benchmark's export/)
 //!
 //! Ctrl+C stops it.
 use crate::runtime::{MicSource, Options, Runtime, Status};
@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
-#[command(name = "kotodama --cli", about = "Kotodama on the command line, for Teardown", version = paths::VERSION)]
+#[command(name = "koetama --cli", about = "Koetama on the command line, for Teardown", version = paths::VERSION)]
 struct Args {
     /// list the sound devices
     #[arg(long)]
@@ -35,7 +35,7 @@ struct Args {
     /// through the REAL speech-to-text as if spoken, each in its own language (needs export/asrbench from the benchmark)
     #[arg(long = "auto-speech")]
     auto_speech: bool,
-    /// Kotodama's own volume, 0..1
+    /// Koetama's own volume, 0..1
     #[arg(long, default_value_t = 1.0)]
     volume: f64,
     /// never open the microphone
@@ -48,7 +48,7 @@ struct Args {
     /// CPU threads for the speech models
     #[arg(long, default_value_t = 4)]
     threads: usize,
-    /// where the mod looks for Kotodama's files (default: the mods folder / the Workshop folder)
+    /// where the mod looks for Koetama's files (default: the mods folder / the Workshop folder)
     #[arg(long = "io-dir")]
     io_dir: Option<String>,
     /// run a recording through the speech pipeline as if it came from the microphone: print the live words and the

@@ -1,4 +1,4 @@
-//! Kotodama's speech-to-text (engine/asr.py): what the player says, as live words while they talk and as a finished
+//! Koetama's speech-to-text (engine/asr.py): what the player says, as live words while they talk and as a finished
 //! line after. Chosen by the benchmarks in bench/ (see PROJECT.md):
 //!
 //! ```text
@@ -126,7 +126,7 @@ const fn lang(code: &'static str, name: &'static str, english: &'static str, tie
     Lang { code, name, english, tier }
 }
 
-/// Every language Kotodama writes (the game's PC.VOICE_LANGS, without "auto": a player who picks several gets it).
+/// Every language Koetama writes (the game's PC.VOICE_LANGS, without "auto": a player who picks several gets it).
 pub const LANGS: [Lang; 29] = [
     lang("en", "English", "English", Tier::Full),
     lang("es", "Español", "Spanish", Tier::Full),

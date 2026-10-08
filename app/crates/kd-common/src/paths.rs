@@ -1,13 +1,13 @@
-//! Where Kotodama keeps its things, and its name and version (engine/paths.py).
+//! Where Koetama keeps its things, and its name and version (engine/paths.py).
 use std::path::{Path, PathBuf};
 
-pub const APP_NAME: &str = "Kotodama";
-pub const APP_ID: &str = "kotodama";
+pub const APP_NAME: &str = "Koetama";
+pub const APP_ID: &str = "koetama";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// GitHub: releases, updates
-pub const REPO: &str = "AgeOfAlgorithms/kotodama";
+pub const REPO: &str = "AgeOfAlgorithms/koetama";
 
-/// This user's Kotodama folder: settings, downloaded models, the test voices.
+/// This user's Koetama folder: settings, downloaded models, the test voices.
 pub fn data_dir() -> PathBuf {
     if cfg!(windows) {
         let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(home);

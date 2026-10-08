@@ -51,7 +51,7 @@ fn wait_until(what: &str, f: impl Fn() -> bool) {
     }
 }
 
-/// A mod: connects (retrying while Kotodama starts listening), reads lines.
+/// A mod: connects (retrying while Koetama starts listening), reads lines.
 struct Client {
     w: TcpStream,
     r: BufReader<TcpStream>,
@@ -87,7 +87,7 @@ impl Client {
         self.w.write_all(b"\n").unwrap();
     }
 
-    /// the connection was closed by Kotodama (EOF or reset)
+    /// the connection was closed by Koetama (EOF or reset)
     fn closed(&mut self) -> bool {
         let mut b = [0u8; 256];
         loop {
@@ -111,7 +111,7 @@ fn socket_end_to_end() {
     let mut c = Client::connect(port);
     let hello = c.line();
     assert_eq!(hello["type"], "hello");
-    assert_eq!(hello["app"], "Kotodama");
+    assert_eq!(hello["app"], "Koetama");
     assert_eq!(hello["protocol"], 1);
     assert_eq!(hello["version"], kd_common::paths::VERSION);
     wait_until("the client is taken", || g.has_client());
@@ -146,7 +146,7 @@ fn socket_end_to_end() {
     assert!(!f.mic && f.vol == 1.0 && f.lang == "en" && f.live && f.speakers.is_empty() && f.seq == 2, "{f:?}");
     let bad = lines.lock().unwrap().iter().filter(|l| l.contains("malformed")).count();
     assert_eq!(bad, 1, "{:?}", lines.lock().unwrap());
-    // Kotodama -> mod
+    // Koetama -> mod
     let a_second_ago = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
     assert!(g.send('l', 3, " hello there ", Some(&[0.1, 0.654]), Some(a_second_ago)));
     let m = c.line();
@@ -168,7 +168,7 @@ fn socket_end_to_end() {
     assert_eq!(c2.line()["text"], "to the new one");
     assert!(g.peer().is_none(), "the new client has not said hello");
     // a line over 64 KB drops the connection
-    let _ = c2.w.write_all(&vec![b'x'; 70 * 1024]); // (Kotodama may close before the last bytes)
+    let _ = c2.w.write_all(&vec![b'x'; 70 * 1024]); // (Koetama may close before the last bytes)
     assert!(c2.closed(), "dropped");
     wait_until("the client is gone", || !g.has_client());
     assert!(!g.send_text("nobody"));
@@ -231,14 +231,14 @@ fn the_example_client() {
     wait_until("feeds from the script", || g.updates() >= 3);
     assert!(g.wants_mic() && g.feed().unwrap().speakers.len() == 1);
     assert_eq!(g.peer().as_deref(), Some("Example Game (Example Mod)"));
-    assert!(g.send('f', 1, "hello from Kotodama", Some(&[0.0, 0.3, 0.6]), Some(Instant::now())));
+    assert!(g.send('f', 1, "hello from Koetama", Some(&[0.0, 0.3, 0.6]), Some(Instant::now())));
     std::thread::sleep(Duration::from_millis(300));
     g.stop();
     let out = child.wait_with_output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     println!("{text}\n{:?}", lines.lock().unwrap());
-    assert!(text.contains("from Kotodama: {'type': 'hello'") && text.contains("[f] utterance 1: 'hello from Kotodama'"), "{text}");
-    assert!(text.contains("Kotodama closed the connection"));
+    assert!(text.contains("from Koetama: {'type': 'hello'") && text.contains("[f] utterance 1: 'hello from Koetama'"), "{text}");
+    assert!(text.contains("Koetama closed the connection"));
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn voice_room_fields() {
 
 #[test]
 fn a_connection_is_a_session_and_gets_its_room() {
-    // each connection's feeds carry its number as the session (Kotodama sends each a new room: kind "r")
+    // each connection's feeds carry its number as the session (Koetama sends each a new room: kind "r")
     let port = free_port();
     let sink = Arc::new(Sink::default());
     let (log, _) = logger();

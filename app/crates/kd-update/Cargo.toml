@@ -1,6 +1,6 @@
 [package]
 name = "kd-update"
-description = "Kotodama: updates from GitHub Releases (check, download and verify the installer, run it)"
+description = "Koetama: updates from GitHub Releases (check, download and verify the installer, run it)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

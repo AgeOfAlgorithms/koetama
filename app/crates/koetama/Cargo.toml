@@ -1,12 +1,12 @@
 [package]
-name = "kotodama"
-description = "Kotodama: proximity voice chat with live speech to text"
+name = "koetama"
+description = "Koetama: proximity voice chat with live speech to text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "kotodama"
+name = "koetama"
 path = "src/main.rs"
 
 [dependencies]

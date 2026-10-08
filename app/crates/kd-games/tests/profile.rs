@@ -112,7 +112,7 @@ fn bad_profiles_say_why() {
     let f = files_profile;
     let s = socket_profile;
     let cases: Vec<(Value, &str)> = vec![
-        (with(s(), "/format", Some(json!(2))), "profile format 2 is newer than this Kotodama reads (1): update Kotodama"),
+        (with(s(), "/format", Some(json!(2))), "profile format 2 is newer than this Koetama reads (1): update Koetama"),
         (with(s(), "/format", Some(json!("1"))), "\"format\": must be 1"),
         (with(s(), "/format", None), "\"format\" is missing"),
         (with(s(), "/id", None), "\"id\" is missing"),

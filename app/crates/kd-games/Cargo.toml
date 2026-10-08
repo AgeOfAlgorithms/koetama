@@ -1,6 +1,6 @@
 [package]
 name = "kd-games"
-description = "Kotodama: the Game trait, game mod profiles and their connectors (files, socket), finding Steam games"
+description = "Koetama: the Game trait, game mod profiles and their connectors (files, socket), finding Steam games"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

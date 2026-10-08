@@ -32,7 +32,7 @@ PREROLL = 1.0              # s before the detected speech fed too
 PTT_TAIL = 0.25            # push to talk: s of audio still taken after the key is let go, then the line ends
 MAX_LINE = 15.0            # s: a longer line is cut
 VAD_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx'
-import paths                                   # noqa: E402  (Kotodama's folders)
+import paths                                   # noqa: E402  (Koetama's folders)
 CACHE = paths.MODELS
 
 MODELS = {   # name: (Hugging Face repo, the exact revision tested, the files used); the loader: Models._load_<name>
@@ -242,7 +242,7 @@ LID_SURE = 0.8                # a short line: the detector's language only when 
 
 
 def lid_dir():
-    """where the language detector is: Kotodama's model folder (downloaded), the install's models folder (shipped
+    """where the language detector is: Koetama's model folder (downloaded), the install's models folder (shipped
     with it), else this repo's export/lid (where export_lid.py writes it)"""
     for d in (CACHE, os.path.join(paths.APP_ROOT, 'models'), os.path.join(paths.APP_ROOT, 'export', 'lid')):
         if os.path.exists(os.path.join(d, LID_NAME + '.onnx')) and os.path.exists(os.path.join(d, LID_NAME + '.json')):

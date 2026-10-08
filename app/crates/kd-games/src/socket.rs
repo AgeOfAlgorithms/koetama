@@ -1,11 +1,11 @@
-//! The SOCKET connector: for a game whose mod can open a TCP connection. Kotodama listens on 127.0.0.1:<port> (this
+//! The SOCKET connector: for a game whose mod can open a TCP connection. Koetama listens on 127.0.0.1:<port> (this
 //! computer only, never another interface); one client at a time (a new connection replaces the old one);
 //! newline-delimited JSON both ways (PROTOCOL.md "Adding a game mod: profiles"):
-//!   mod -> Kotodama    {"type":"hello","protocol":1,"game":..,"mod":..}   (optional)
+//!   mod -> Koetama    {"type":"hello","protocol":1,"game":..,"mod":..}   (optional)
 //!                      {"type":"feed","vol":..,"mic":..,"ptt":..,"lang":..,"live":..,"speakers":[{"id","src","talk","gain","az","el","muffle"}],
 //!                       "room":..,"key":..,"me":..,"to":[ids],"region":..}   (the voice room: PROTOCOL.md version 5)
 //!                      (whenever it changes and at least every second: no feed for kd_audio::STALE s = not connected)
-//!   Kotodama -> mod    {"type":"hello","app":"Kotodama","version":..,"protocol":1}   (on connect)
+//!   Koetama -> mod    {"type":"hello","app":"Koetama","version":..,"protocol":1}   (on connect)
 //!                      {"type":"msg","kind":"s"|"l"|"f","utt":n,"text":..,"times":[s..],"ago":s}   (what the player said)
 //!                      {"type":"msg","kind":"r","utt":0,"text":"<room>:<key>"}   (a new voice room, once per connection)
 //!                      {"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}   (the voice chat's link)
@@ -211,7 +211,7 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 Err(e) => {
                     let msg = if e.kind() == ErrorKind::AddrInUse {
                         format!(
-                            "{}: port {port} on 127.0.0.1 is busy (another program, or another Kotodama, uses it) - \
+                            "{}: port {port} on 127.0.0.1 is busy (another program, or another Koetama, uses it) - \
                              trying again every {} s",
                             profile.game,
                             RETRY.as_secs()
@@ -323,7 +323,7 @@ fn on_line(
             let peer = format!("{} ({})", s("game"), s("mod"));
             log(&format!("{}: hello from {peer}, protocol {protocol}", profile.game));
             if protocol > PROTOCOL {
-                log(&format!("{}: the mod speaks protocol {protocol}, this Kotodama {PROTOCOL}: update Kotodama", profile.game));
+                log(&format!("{}: the mod speaks protocol {protocol}, this Koetama {PROTOCOL}: update Koetama", profile.game));
             }
             *lock(&sh.peer) = Some(peer);
             Ok(())

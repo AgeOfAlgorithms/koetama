@@ -1,8 +1,8 @@
-"""Updates from GitHub Releases: is there a newer Kotodama, and (Windows) download its installer, check it, run it.
+"""Updates from GitHub Releases: is there a newer Koetama, and (Windows) download its installer, check it, run it.
 
-A release is tagged v<version> and has the assets Kotodama-Setup-<version>.exe (Windows installer), the Linux build,
+A release is tagged v<version> and has the assets Koetama-Setup-<version>.exe (Windows installer), the Linux build,
 and SHA256SUMS.txt ("<sha256>  <file name>" per line). The installer is checked against SHA256SUMS.txt, and - when
-this copy of Kotodama is code-signed - must carry a valid signature from the same publisher. Then it runs silently
+this copy of Koetama is code-signed - must carry a valid signature from the same publisher. Then it runs silently
 (it replaces the files and starts the new version) and this copy closes.
 """
 import hashlib
@@ -109,6 +109,6 @@ def download(info, progress=None):
 
 
 def install(path):
-    """run the installer silently (it closes Kotodama, replaces it and starts the new version); the caller exits"""
+    """run the installer silently (it closes Koetama, replaces it and starts the new version); the caller exits"""
     subprocess.Popen([path, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/RELAUNCH=1'],
                      creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0))

@@ -1,6 +1,6 @@
 [package]
 name = "kd-voice"
-description = "Kotodama: real voices between players - the relay client, end-to-end encryption, Opus, the jitter buffer"
+description = "Koetama: real voices between players - the relay client, end-to-end encryption, Opus, the jitter buffer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

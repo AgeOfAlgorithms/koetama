@@ -1,6 +1,6 @@
 //! Voices end to end through a relay: a stand-in relay here (tungstenite, the rules of relay/src/frames.js: each
 //! packet to the players it names only, never back to the sender), and the live one (#[ignore]d: it needs the
-//! internet). Four Kotodamas in one room: A talks (push to talk held) to B and D; B hears A's voice back (decoded,
+//! internet). Four Koetamas in one room: A talks (push to talk held) to B and D; B hears A's voice back (decoded,
 //! its level and pitch kept); C is not in A's `to` and gets nothing; D has the wrong key and plays nothing.
 //!     cargo test -p kd-voice --test relay -- --include-ignored     (the live relay too)
 use kd_audio::Streams;
@@ -273,7 +273,7 @@ fn connects_and_leaves_as_the_feed_says() {
     w.stop();
 }
 
-/// The live relay (KOTODAMA_RELAY or the deployed one): needs the internet.
+/// The live relay (KOETAMA_RELAY or the deployed one): needs the internet.
 #[test]
 #[ignore]
 fn voices_through_the_live_relay() {

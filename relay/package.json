@@ -1,7 +1,7 @@
 {
-  "name": "kotodama-relay",
+  "name": "koetama-relay",
   "private": true,
-  "description": "Kotodama's voice relay: one Cloudflare Durable Object per voice room",
+  "description": "Koetama's voice relay: one Cloudflare Durable Object per voice room",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",

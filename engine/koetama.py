@@ -1,9 +1,9 @@
-"""Kotodama: proximity voice chat with live speech-to-text for games. The window: pick the game, see whether it is
+"""Koetama: proximity voice chat with live speech-to-text for games. The window: pick the game, see whether it is
 connected, choose the microphone and the speakers, the volume; it shows what it hears and the speech-to-text's
 progress, and offers updates. The work is runtime.Runtime with the chosen game's module (games/).
 
-    python engine/kotodama.py          # the window
-    python engine/kotodama.py --cli    # (or engine/teardown_helper.py) the command line, with its test modes
+    python engine/koetama.py          # the window
+    python engine/koetama.py --cli    # (or engine/teardown_helper.py) the command line, with its test modes
 """
 import json
 import os
@@ -58,7 +58,7 @@ _mutex = None
 
 
 def single_instance():
-    """False if another Kotodama already runs (two would fight over the game's files)"""
+    """False if another Koetama already runs (two would fight over the game's files)"""
     global _mutex
     if sys.platform == 'win32':
         import ctypes

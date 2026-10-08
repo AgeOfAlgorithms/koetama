@@ -1,4 +1,4 @@
-# Builds Kotodama (the Rust app, app/) on GitHub: Windows (the folder + its installer) and Linux (a .tar.gz), with
+# Builds Koetama (the Rust app, app/) on GitHub: Windows (the folder + its installer) and Linux (a .tar.gz), with
 # SHA256SUMS.txt. Every push to main that changes the app (not the docs): the builds as artifacts (Actions tab -> the
 # run -> Artifacts). The Rust build cache is kept between runs. A tag v<version> (matching app/Cargo.toml's version):
 # also a DRAFT release with the files - nothing is public until it is published by hand. Code signing (SignPath) slots
@@ -68,37 +68,37 @@ jobs:
         run: python build.py
       - name: The build runs (the window, sound, ONNX, the detector, HTTPS)
         shell: bash
-        run: ./dist/Kotodama/Kotodama.exe --selftest
+        run: ./dist/Koetama/Koetama.exe --selftest
       - name: The installer installs, the installed app runs, the uninstaller removes it (and the models)
         shell: pwsh
         run: |
-          $setup = (Get-ChildItem dist\Kotodama-Setup-*.exe).FullName
+          $setup = (Get-ChildItem dist\Koetama-Setup-*.exe).FullName
           $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "setup exit code $($p.ExitCode)" }
-          $app = "$env:LOCALAPPDATA\Programs\Kotodama"
-          $p = Start-Process "$app\Kotodama.exe" -ArgumentList '--selftest' -Wait -PassThru -RedirectStandardOutput selftest.txt
+          $app = "$env:LOCALAPPDATA\Programs\Koetama"
+          $p = Start-Process "$app\Koetama.exe" -ArgumentList '--selftest' -Wait -PassThru -RedirectStandardOutput selftest.txt
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { throw "installed selftest exit code $($p.ExitCode)" }
           # (the player's data: the uninstaller asks, Yes by default - a silent uninstall removes it)
-          $data = "$env:LOCALAPPDATA\Kotodama"
+          $data = "$env:LOCALAPPDATA\Koetama"
           New-Item -ItemType Directory -Force "$data\models\some-model" | Out-Null
           Set-Content "$data\models\some-model\model.onnx" 'pretend'
           $p = Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           Start-Sleep 5
-          if (Test-Path "$app\Kotodama.exe") { throw 'the uninstaller left Kotodama.exe' }
-          if (Test-Path $data) { throw 'the uninstaller left the models and settings (%LOCALAPPDATA%\Kotodama)' }
+          if (Test-Path "$app\Koetama.exe") { throw 'the uninstaller left Koetama.exe' }
+          if (Test-Path $data) { throw 'the uninstaller left the models and settings (%LOCALAPPDATA%\Koetama)' }
       - uses: actions/upload-artifact@v4
         with:
-          name: kotodama-windows
+          name: koetama-windows
           path: |
-            dist/Kotodama-Setup*.exe
+            dist/Koetama-Setup*.exe
             dist/SHA256SUMS.txt
       - name: Draft release (a tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: dist/Kotodama-Setup*.exe
+          files: dist/Koetama-Setup*.exe
 
   linux:
     runs-on: ubuntu-22.04
@@ -140,20 +140,20 @@ jobs:
         run: python build.py --no-installer
       - name: The build runs (the window on a virtual screen, sound, ONNX, the detector, HTTPS)
         run: |
-          mkdir -p /tmp/try && tar -xzf dist/Kotodama-*-linux.tar.gz -C /tmp/try
-          xvfb-run -a /tmp/try/Kotodama/Kotodama --selftest
+          mkdir -p /tmp/try && tar -xzf dist/Koetama-*-linux.tar.gz -C /tmp/try
+          xvfb-run -a /tmp/try/Koetama/Koetama --selftest
       - uses: actions/upload-artifact@v4
         with:
-          name: kotodama-linux
+          name: koetama-linux
           path: |
-            dist/Kotodama*linux.tar.gz
+            dist/Koetama*linux.tar.gz
             dist/SHA256SUMS.txt
       - name: Draft release (a tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: dist/Kotodama*linux.tar.gz
+          files: dist/Koetama*linux.tar.gz
 
   sums:
     # one SHA256SUMS.txt for the release, from both builds
@@ -167,7 +167,7 @@ jobs:
       - name: SHA256SUMS.txt
         run: |
           cd art
-          sha256sum kotodama-windows/Kotodama-Setup*.exe kotodama-linux/Kotodama*linux.tar.gz | sed 's#  kotodama-[a-z]*/#  #' > ../SHA256SUMS.txt
+          sha256sum koetama-windows/Koetama-Setup*.exe koetama-linux/Koetama*linux.tar.gz | sed 's#  koetama-[a-z]*/#  #' > ../SHA256SUMS.txt
           cat ../SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:

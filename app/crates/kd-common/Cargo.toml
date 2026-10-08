@@ -1,6 +1,6 @@
 [package]
 name = "kd-common"
-description = "Kotodama: names and folders, a line's word units, model downloads, the game feed"
+description = "Koetama: names and folders, a line's word units, model downloads, the game feed"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

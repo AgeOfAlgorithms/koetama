@@ -4,10 +4,10 @@
 //!   via 48 kHz   16 -> 48 kHz -> 16 kHz with the microphone's own converter (kd_audio::Rechunk, as mic.rs: with the
 //!                voice chat the microphone runs at 48 kHz and the listener gets a 16 kHz copy)
 //!   via Opus     the same, with an Opus round trip at 48 kHz in between (kd_voice's codec, 24 kbit/s): what another
-//!                player's game would hear (Kotodama never transcribes it today)
+//!                player's game would hear (Koetama never transcribes it today)
 //! Word error rate per language (characters for Chinese). Needs the models, a few minutes (a report, no assertion:
 //! measured 2026-10-07 - as is 4.3 %, via 48 kHz 5.3 %, via Opus 5.4 %; German room clips suffer most under Opus):
-//!   cargo test -p kotodama --release --test transcribe_paths -- --ignored --nocapture
+//!   cargo test -p koetama --release --test transcribe_paths -- --ignored --nocapture
 use kd_audio::{read_wav, Rechunk};
 use kd_speech::{Callbacks, Listener, Models, RATE};
 use kd_voice::codec::{Decoder, Encoder, FrameDecoder};

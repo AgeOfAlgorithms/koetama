@@ -1,7 +1,7 @@
 //! Windows: the speech engine's DLLs next to the TEST binaries too.
 //!
 //! sherpa-onnx-sys (feature "shared") copies sherpa-onnx-c-api.dll and onnxruntime.dll into target/<profile>/ - next
-//! to a built program (kotodama.exe), where Windows looks first. Test binaries live in target/<profile>/deps/: cargo
+//! to a built program (koetama.exe), where Windows looks first. Test binaries live in target/<profile>/deps/: cargo
 //! puts target/<profile>/ on their PATH, but Windows resolves a DLL's own imports (sherpa-onnx-c-api.dll ->
 //! onnxruntime.dll) through the system folder BEFORE PATH, and Windows 10/11 ship an older onnxruntime.dll in
 //! System32 - the wrong one would load. So the DLLs are copied into deps/ as well: every test binary of the

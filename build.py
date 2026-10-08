@@ -1,8 +1,8 @@
-"""Build Kotodama (the Rust app, app/) for this system: dist/Kotodama/ (the program, the speech engine's two libraries,
+"""Build Koetama (the Rust app, app/) for this system: dist/Koetama/ (the program, the speech engine's two libraries,
 the language detector, the licenses), then on Windows its installer (Inno Setup) or elsewhere a .tar.gz, and
 SHA256SUMS.txt for the updater.
 
-    python build.py              # dist/Kotodama/ + dist/Kotodama-Setup-<version>.exe (Windows, with Inno Setup)
+    python build.py              # dist/Koetama/ + dist/Koetama-Setup-<version>.exe (Windows, with Inno Setup)
     python build.py --no-installer
     python build.py --skip-cargo # only redo the steps after the compile
 
@@ -22,7 +22,7 @@ import tarfile
 ROOT = os.path.dirname(os.path.abspath(__file__))
 APP_SRC = os.path.join(ROOT, 'app')
 DIST = os.path.join(ROOT, 'dist')
-NAME = 'Kotodama'
+NAME = 'Koetama'
 APP = os.path.join(DIST, NAME)
 WIN = sys.platform == 'win32'
 EXE = NAME + ('.exe' if WIN else '')
@@ -44,14 +44,14 @@ def run(cmd, **kw):
 
 
 def cargo():
-    run(['cargo', 'build', '--release', '-p', 'kotodama', '--locked'], cwd=APP_SRC)
+    run(['cargo', 'build', '--release', '-p', 'koetama', '--locked'], cwd=APP_SRC)
 
 
 def gather():
     if os.path.isdir(APP):
         shutil.rmtree(APP)
     os.makedirs(APP)
-    shutil.copy2(os.path.join(OUT, 'kotodama' + ('.exe' if WIN else '')), os.path.join(APP, EXE))
+    shutil.copy2(os.path.join(OUT, 'koetama' + ('.exe' if WIN else '')), os.path.join(APP, EXE))
     # (sherpa-onnx's build script copies its libraries into target/release when it runs; a restored build cache - CI's
     #  Rust cache tidies loose files there - skips it, so then they come from SHERPA_ONNX_LIB_DIR, where they were got)
     lib_dir = os.environ.get('SHERPA_ONNX_LIB_DIR', '')
@@ -84,9 +84,9 @@ def inno(ver):
         print('no Inno Setup (ISCC.exe): no installer')
         return None
     run([iscc, '/DAppVersion=' + ver, '/DAppName=' + NAME, '/DSourceDir=' + APP, '/DOutDir=' + DIST,
-         '/DIconFile=' + os.path.join(APP_SRC, 'assets', 'kotodama.ico'),
+         '/DIconFile=' + os.path.join(APP_SRC, 'assets', 'koetama.ico'),
          '/DArtDir=' + os.path.join(APP_SRC, 'assets', 'installer'),
-         os.path.join(ROOT, 'installer', 'kotodama.iss')])
+         os.path.join(ROOT, 'installer', 'koetama.iss')])
     return os.path.join(DIST, '%s-Setup-%s.exe' % (NAME, ver))
 
 

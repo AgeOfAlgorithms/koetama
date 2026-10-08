@@ -1,4 +1,4 @@
-# Kotodama in Rust: the crates and their interfaces
+# Koetama in Rust: the crates and their interfaces
 
 The Rust port of `engine/` (the Python app). The Python code stays as the REFERENCE: same behaviour, same constants,
 same files for the game. `app/fixtures/make_fixtures.py` runs the Python code and writes its answers (JSON) next to
@@ -13,7 +13,7 @@ itself; each crate's tests compare against them. Do not change the Python side t
       crates/kd-games         the Game trait, game mod profiles, connectors (files, socket), Steam (engine/games/, steam.py)
       crates/kd-update        updates from GitHub Releases                                        (engine/updater.py)
       crates/kd-voice         real voices between players: the relay, encryption, Opus, jitter   (new: no Python)
-      crates/kotodama         the program: runtime, window (egui), command line, selftest         (runtime.py, kotodama.py, teardown_helper.py)
+      crates/koetama         the program: runtime, window (egui), command line, selftest         (runtime.py, koetama.py, teardown_helper.py)
 
 Toolchain: Rust stable (MSVC on Windows). Engines: `sherpa-onnx` 1.13.8 (feature `shared`: sherpa-onnx-c-api.dll +
 onnxruntime.dll 1.28.2, copied next to the build's exe) and `ort` 2.0.0-rc.13 with `load-dynamic`, loading THAT SAME
@@ -40,7 +40,7 @@ feed::{Feed {seq, vol, sid, ack, ping, mic, ptt, lang, live, speakers: BTreeMap<
        trait FeedSink: Send + Sync { fn set_feed(&self, Feed); fn fresh(&self) -> bool }}
 ```
 The crates below depend only on kd-common (not on each other), so they can be written at the same time; the program
-(crates/kotodama) joins them: kd_audio::MixerSink is the FeedSink a game feeds, the test voices a game makes are wav
+(crates/koetama) joins them: kd_audio::MixerSink is the FeedSink a game feeds, the test voices a game makes are wav
 files the program loads with kd_audio::load_wav, and the real microphone (kd_audio::Input feeding a
 kd_speech::Listener) is in the program too.
 
@@ -178,7 +178,7 @@ pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedRea
                    make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown (= FilesGame), profile() }
 ```
 Env overrides as Python: SAVEPROBE_DIR (the feed file's folder; the file keeps the profile's name), HFP_MODS (the
-only output folder) - test_e2e.py uses them; KOTODAMA_PROFILES_DIR (tests: the profiles folder).
+only output folder) - test_e2e.py uses them; KOETAMA_PROFILES_DIR (tests: the profiles folder).
 
 ## kd-update (engine/updater.py)
 
@@ -195,18 +195,18 @@ pub fn install(path) -> io::Result<()>;                                // /VERYS
 pub const PAGE: &str;  pub fn api_url() -> String;
 ```
 
-## kotodama (the program)
+## koetama (the program)
 
-`kotodama` (window), `kotodama --cli [teardown_helper.py's flags]`, `kotodama --selftest`. Runtime as runtime.py
-(start / tick / stop / status), the window as kotodama.py (egui), the command line as teardown_helper.py - the same
-flags, so `engine/test_e2e.py` with `KOTODAMA_EXE=<the Rust exe>` tests the port end to end.
+`koetama` (window), `koetama --cli [teardown_helper.py's flags]`, `koetama --selftest`. Runtime as runtime.py
+(start / tick / stop / status), the window as koetama.py (egui), the command line as teardown_helper.py - the same
+flags, so `engine/test_e2e.py` with `KOETAMA_EXE=<the Rust exe>` tests the port end to end.
 
 ## kd-voice (real voices; PROTOCOL.md "Real voices: rooms and the relay (version 5)")
 
 No Python counterpart: the reference for the wire is the contract and the relay's own code (`relay/src/frames.js`).
 
 ```rust
-pub const RELAY: &str;  pub fn relay_url() -> String;    // KOTODAMA_RELAY overrides
+pub const RELAY: &str;  pub fn relay_url() -> String;    // KOETAMA_RELAY overrides
 pub const RATE: u32 = 48000;  FRAME = 960 (20 ms);  PER_PACKET = 3;  PACKET;  BITRATE = 24000
 pub mod frames { VOICE, MAX_TO, MAX_PAYLOAD, voice_frame(to, payload) -> Option<Vec<u8>>, parse_out(b) -> Option<(from, &[u8])>,
                  route(b, from) -> Option<(to, out)> /* the relay's rule: the tests' stand-in relay */, parse_id }
@@ -245,7 +245,7 @@ run with `cargo test -p <crate> -- --include-ignored`.
 
 ## Game mod profiles (2026-10-06: the user - games are added without code review)
 
-A game mod is a PROFILE (a small JSON file), never code: Kotodama's built-in CONNECTORS do the talking, a profile
+A game mod is a PROFILE (a small JSON file), never code: Koetama's built-in CONNECTORS do the talking, a profile
 only names one and gives its settings. Built-in profiles (Teardown) are compiled in; others are `*.json` files in
 `kd_games::profiles_dir()` (= `paths::data_dir()/games`), added from the window ("Add game mod...": a preview of what
 the profile reads, writes and listens on, then a copy into that folder) or dropped there by hand.
@@ -258,7 +258,7 @@ Connectors:
   It deletes only the files it writes (`<prefix>on`, `<prefix>p<n>`, `<prefix>t<n>.<ext>`, `<prefix>w<n>.tmp`), the
   prefix must be 3+ letters/digits/_ ending in `_`, and it writes only into folders that exist.
 - `socket`: a TCP server on 127.0.0.1 (the profile's port): newline-separated JSON both ways; the mod sends its
-  feed, Kotodama sends what the player said (no acks or pings: the connection is the liveness).
+  feed, Koetama sends what the player said (no acks or pings: the connection is the liveness).
 
 ```rust
 // kd-games (the interface the window and the runtime use)
@@ -269,8 +269,8 @@ Connectors:
     pub source: Option<PathBuf>,       // the profile file
     pub summary: Vec<String>,          // what it does, for the import preview: "reads <file>", "writes into <dir>",
                                        // "listens on 127.0.0.1:<port>" (placeholders already resolved here)
-    pub voices: bool,                  // "uses": "voices" - Kotodama plays the speakers from the feed (audio output)
-    pub speech: bool,                  // "uses": "speech" - Kotodama listens to the mic, sends what was said
+    pub voices: bool,                  // "uses": "voices" - Koetama plays the speakers from the feed (audio output)
+    pub speech: bool,                  // "uses": "speech" - Koetama listens to the mic, sends what was said
     pub profile: Arc<Profile>,         // the parsed profile
 }
 impl GameKind { pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game>; }

@@ -1,7 +1,7 @@
-// Kotodama's voice relay (PROTOCOL.md, "The voice relay"): a Cloudflare Worker with one Durable Object per voice
-// ROOM (a game session: its room name comes from the game). Each player's Kotodama holds a WebSocket to its room and
+// Koetama's voice relay (PROTOCOL.md, "The voice relay"): a Cloudflare Worker with one Durable Object per voice
+// ROOM (a game session: its room name comes from the game). Each player's Koetama holds a WebSocket to its room and
 // sends its voice as binary frames naming the players who should get it (those in range: the speaker's game decides);
-// the room forwards each frame to just them. Audio is end-to-end encrypted by Kotodama with a key only the session's
+// the room forwards each frame to just them. Audio is end-to-end encrypted by Koetama with a key only the session's
 // players have, so the relay only moves opaque bytes.
 //
 //   GET /v1/room/<32 hex>?me=<player id 1..65535>[&region=<wnam|enam|weur|...>]   (WebSocket upgrade)
@@ -21,7 +21,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/" || url.pathname === "/v1") {
-      return new Response("Kotodama voice relay (github.com/AgeOfAlgorithms/kotodama)\n", { status: 200 });
+      return new Response("Koetama voice relay (github.com/AgeOfAlgorithms/koetama)\n", { status: 200 });
     }
     const m = url.pathname.match(ROOM_PATH);
     if (!m) return new Response("not found\n", { status: 404 });
@@ -37,7 +37,7 @@ export default {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    // (keep-alives answered without waking the room: Kotodama sends "ping" every 20 s)
+    // (keep-alives answered without waking the room: Koetama sends "ping" every 20 s)
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.rate = new Map(); // ws -> {t: second, n: frames in it} (lost on hibernation: harmless)
   }

@@ -1,11 +1,11 @@
-"""Write THIRD_PARTY_NOTICES.txt for Kotodama (the Rust app, app/): every model it downloads or ships and every
+"""Write THIRD_PARTY_NOTICES.txt for Koetama (the Rust app, app/): every model it downloads or ships and every
 library built into it, with the attribution and the full license text each one asks for. Run it again whenever a
 model or a dependency changes (app/Cargo.lock).
 
     python engine/make_notices.py          (needs cargo on PATH; any Python 3)
 
 The Rust crates are the ones the program is built from on Windows and Linux (cargo metadata: normal dependencies of
-the kotodama crate - not the build tools or the tests'), each with the license files it ships; identical texts are
+the koetama crate - not the build tools or the tests'), each with the license files it ships; identical texts are
 printed once, with the crates that carry them. The speech engine's native libraries (sherpa-onnx, ONNX Runtime) and
 the model license texts are kept in engine/licenses/ (copied from each source).
 It stops when a license is not on the list of ones checked for commercial use (ALLOWED), or a crate carries no
@@ -71,14 +71,14 @@ NATIVE = [   # the speech engine's prebuilt libraries, shipped next to the progr
 
 
 def cargo_packages():
-    """the crates built into the program (kotodama's normal dependencies, transitively) on each of TARGETS"""
+    """the crates built into the program (koetama's normal dependencies, transitively) on each of TARGETS"""
     pkgs = {}
     for target in TARGETS:
         meta = json.loads(subprocess.run(['cargo', 'metadata', '--format-version', '1', '--locked', '--filter-platform', target],
                                          cwd=APP, check=True, capture_output=True, text=True, encoding='utf-8').stdout)
         by_id = {p['id']: p for p in meta['packages']}
         nodes = {n['id']: n for n in meta['resolve']['nodes']}
-        root = next(p['id'] for p in meta['packages'] if p['name'] == 'kotodama')
+        root = next(p['id'] for p in meta['packages'] if p['name'] == 'koetama')
         todo, seen = [root], set()
         while todo:
             i = todo.pop()
@@ -151,9 +151,9 @@ def spdx_ok(expr):
 
 def main():
     rule = '=' * 100
-    L = ['THIRD-PARTY NOTICES: Kotodama (github.com/AgeOfAlgorithms/kotodama)',
+    L = ['THIRD-PARTY NOTICES: Koetama (github.com/AgeOfAlgorithms/koetama)',
          '(written by engine/make_notices.py on %s; do not edit by hand)' % time.strftime('%Y-%m-%d'), '',
-         'Kotodama downloads the speech models below the first time it needs them (the language detector ships with it) '
+         'Koetama downloads the speech models below the first time it needs them (the language detector ships with it) '
          'and runs them on this computer. It is built from the libraries below. Each is listed with its authors, its '
          'license, where it comes from and what was changed; the license texts follow.', '', rule, 'MODELS', rule, '']
     texts = []

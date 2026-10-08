@@ -73,7 +73,7 @@ def main():
                     time.sleep(0.001)
         write()
         env = dict(os.environ, SAVEPROBE_DIR=td, HFP_MODS=mods, HF_HUB_DISABLE_SYMLINKS_WARNING='1', PYTHONIOENCODING='utf-8')
-        exe = os.environ.get('KOTODAMA_EXE')        # (a built Kotodama: python engine/test_e2e.py with KOTODAMA_EXE=dist/Kotodama/Kotodama.exe)
+        exe = os.environ.get('KOETAMA_EXE')        # (a built Koetama: python engine/test_e2e.py with KOETAMA_EXE=dist/Koetama/Koetama.exe)
         cmd = [exe, '--cli'] if exe else [sys.executable, '-u', os.path.join(HERE, 'teardown_helper.py')]
         p = subprocess.Popen(cmd + ['--volume', '0', '--mic-wav', wav,
                               '--seconds', str(int(dur + 40))], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

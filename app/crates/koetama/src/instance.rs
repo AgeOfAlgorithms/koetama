@@ -1,6 +1,6 @@
-//! One Kotodama at a time: two would fight over the game's files.
+//! One Koetama at a time: two would fight over the game's files.
 
-/// False if another Kotodama already runs. The lock lives as long as the program.
+/// False if another Koetama already runs. The lock lives as long as the program.
 #[cfg(windows)]
 pub fn single_instance() -> bool {
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};

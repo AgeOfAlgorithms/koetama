@@ -31,7 +31,7 @@ pub struct Options {
     /// the languages the player speaks (empty: the game's "Language I speak"); "auto speech" sets its own per line
     pub langs: Vec<String>,
     pub no_mic: bool,
-    /// where the mod looks for Kotodama's files (None: the game module's own)
+    /// where the mod looks for Koetama's files (None: the game module's own)
     pub io_dir: Option<PathBuf>,
 }
 
@@ -162,7 +162,7 @@ impl Runtime {
     ) -> Runtime {
         let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
-        // (real voices: for a game that plays voices; the relay is KOTODAMA_RELAY or Kotodama's own)
+        // (real voices: for a game that plays voices; the relay is KOETAMA_RELAY or Koetama's own)
         let voice = kind.voices.then(|| kd_voice::Voice::start(kd_voice::relay_url(), log.clone()));
         if let Some(v) = &voice {
             mixer.lock().unwrap().streams = Some(Box::new(v.playback()));

@@ -75,7 +75,7 @@ pub fn init_onnxruntime() -> Result<(), String> {
     .clone()
 }
 
-/// Where the language detector is: Kotodama's model folder (downloaded), the install's models folder (shipped
+/// Where the language detector is: Koetama's model folder (downloaded), the install's models folder (shipped
 /// with it), else this repo's export/lid (where export_lid.py writes it).
 pub fn lid_dir() -> Result<PathBuf, String> {
     let mut dirs = vec![paths::models_dir(), paths::app_root().join("models")];

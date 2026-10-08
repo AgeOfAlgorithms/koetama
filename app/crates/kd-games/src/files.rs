@@ -1,8 +1,8 @@
 //! The FILES connector: Teardown's link (PROTOCOL.md), for any game whose mod can write a file the game saves and
 //! read files next to itself. Parameterised by a profile (profile::FilesConfig):
-//!   game -> Kotodama   a file the game writes (Teardown: savegame.xml), polled: a regex finds each copy of the mod's
+//!   game -> Koetama   a file the game writes (Teardown: savegame.xml), polled: a regex finds each copy of the mod's
 //!                      feed string (parse_feed's format), a second one the tag of the copy that wrote it
-//!   Kotodama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>v<n> (it reads feed
+//!   Koetama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>v<n> (it reads feed
 //!                      version n: one for each, FEED_VERSIONS), <prefix>p<n> (the answer to ping n), <prefix>t<n>.<ext>
 //!                      (message n: what the player said; a Teardown prefab or JSON), <prefix>vc / <prefix>vx (the
 //!                      voice chat is in its room / can't reach the relay)
@@ -22,8 +22,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const TEXT_MAX: usize = 400; // characters of one text file
-/// the feed versions Kotodama reads, each announced by a <prefix>v<n> file next to <prefix>on (a mod sees whether
-/// this Kotodama knows its feed: older versions are read too, but only the newest has the voice room)
+/// the feed versions Koetama reads, each announced by a <prefix>v<n> file next to <prefix>on (a mod sees whether
+/// this Koetama knows its feed: older versions are read too, but only the newest has the voice room)
 pub const FEED_VERSIONS: [u32; 1] = [5];
 
 /// Teardown's file prefix (the files connector's default)
@@ -80,7 +80,7 @@ fn py_float(s: &str) -> Option<f64> {
     s.parse().ok()
 }
 
-// ---------------------------------------------------------------- the feed (game -> Kotodama)
+// ---------------------------------------------------------------- the feed (game -> Koetama)
 /// '5|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|id,src,talk,gain,az,el,muffle;...' (versions 4, 3 and
 /// 2 too: no room) -> a Feed, or None. A bad room, key or id: no room; bad ids in `to`: skipped (feed::voice_room,
 /// voice_to)
@@ -326,7 +326,7 @@ impl Drop for FeedReader {
     }
 }
 
-// ---------------------------------------------------------------- the messages (Kotodama -> game)
+// ---------------------------------------------------------------- the messages (Koetama -> game)
 /// Python's int(round(x)): halves to even.
 fn round_even(x: f64) -> i64 {
     x.round_ties_even() as i64 // (NaN: 0; Python would raise)
@@ -417,7 +417,7 @@ struct LinkState {
     live: bool,
 }
 
-/// Kotodama's files for the game: <prefix>on, the answer to each ping, numbered message files. Shared by the feed's
+/// Koetama's files for the game: <prefix>on, the answer to each ping, numbered message files. Shared by the feed's
 /// thread (on_feed) and the speech's (send_msg): Send + Sync.
 pub struct Link {
     /// a folder per profile entry (None: not on this PC) - tag_dirs index these

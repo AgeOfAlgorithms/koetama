@@ -1,4 +1,4 @@
-//! The window (engine/kotodama.py): pick the game, see whether it is connected, choose the microphone and the
+//! The window (engine/koetama.py): pick the game, see whether it is connected, choose the microphone and the
 //! speakers, the volume; it shows what it hears and the speech-to-text's progress, and offers updates.
 use crate::runtime::{Options, Runtime, Status};
 use crate::settings::Settings;
@@ -232,7 +232,7 @@ impl App {
                         }
                         ui.add_space(2.0);
                         ui.label(
-                            RichText::new("A profile is not a program: it only points Kotodama's own connectors at these \
+                            RichText::new("A profile is not a program: it only points Koetama's own connectors at these \
                                  files and ports. Add it if you trust where it came from.")
                                 .size(12.5)
                                 .color(theme::MUTED),
@@ -256,7 +256,7 @@ impl App {
                         });
                     }
                     Err(e) => {
-                        ui.label(RichText::new("This file is not a game mod profile Kotodama can use").size(16.0).family(theme::semibold()));
+                        ui.label(RichText::new("This file is not a game mod profile Koetama can use").size(16.0).family(theme::semibold()));
                         ui.label(RichText::new(path.display().to_string()).size(12.5).color(theme::MUTED));
                         ui.label(RichText::new(e).color(theme::BAD));
                         if ui.button("Close").clicked() {
@@ -337,7 +337,7 @@ impl App {
         });
         if langs.len() > 1 && !from_game {
             ui.label(
-                RichText::new("Several languages: Kotodama tells them apart as you speak.")
+                RichText::new("Several languages: Koetama tells them apart as you speak.")
                     .size(12.5)
                     .color(theme::MUTED),
             );
@@ -488,7 +488,7 @@ impl App {
                         open_url(&dir.display().to_string());
                     }
                 });
-                ui.label(RichText::new("A game mod made for Kotodama comes with a profile file (.json): add it here.").size(12.0).color(theme::MUTED));
+                ui.label(RichText::new("A game mod made for Koetama comes with a profile file (.json): add it here.").size(12.0).color(theme::MUTED));
             });
             let (text, colour) = match &self.status {
                 Some(st) if !st.error.is_empty() => (st.error.clone(), theme::BAD),
@@ -917,9 +917,9 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
 
 /// How the window is drawn: wgpu (Direct3D 12 on Windows: it falls back to Windows' own software renderer where
 /// there is no graphics driver - a virtual machine, a remote desktop - where OpenGL is only 1.1 and egui's OpenGL
-/// renderer cannot start), OpenGL (glow) elsewhere. KOTODAMA_RENDERER=wgpu|glow chooses.
+/// renderer cannot start), OpenGL (glow) elsewhere. KOETAMA_RENDERER=wgpu|glow chooses.
 pub fn renderer() -> eframe::Renderer {
-    match std::env::var("KOTODAMA_RENDERER").ok().as_deref() {
+    match std::env::var("KOETAMA_RENDERER").ok().as_deref() {
         Some("glow") => eframe::Renderer::Glow,
         Some("wgpu") => eframe::Renderer::Wgpu,
         _ if cfg!(windows) => eframe::Renderer::Wgpu,
@@ -939,7 +939,7 @@ pub fn main() -> i32 {
             .with_inner_size([820.0, 780.0])
             .with_min_inner_size([620.0, 560.0])
             .with_icon(egui::IconData {
-                rgba: include_bytes!("../../../assets/kotodama-128.rgba").to_vec(),
+                rgba: include_bytes!("../../../assets/koetama-128.rgba").to_vec(),
                 width: 128,
                 height: 128,
             }),
@@ -952,7 +952,7 @@ pub fn main() -> i32 {
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     ) {
         Ok(()) => 0,
-        Err(e) if std::env::var_os("KOTODAMA_RENDERER").is_none() => {
+        Err(e) if std::env::var_os("KOETAMA_RENDERER").is_none() => {
             // (that renderer would not start here: once more with the other one - in a new process, as a window
             //  system can be set up only once per process)
             let other = if first == eframe::Renderer::Wgpu {
@@ -965,7 +965,7 @@ pub fn main() -> i32 {
             match std::env::current_exe().and_then(|exe| {
                 std::process::Command::new(exe)
                     .args(args)
-                    .env("KOTODAMA_RENDERER", other)
+                    .env("KOETAMA_RENDERER", other)
                     .status()
             }) {
                 Ok(st) => st.code().unwrap_or(1),

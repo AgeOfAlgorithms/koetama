@@ -1,7 +1,7 @@
-THIRD-PARTY NOTICES: Kotodama (github.com/AgeOfAlgorithms/kotodama)
+THIRD-PARTY NOTICES: Koetama (github.com/AgeOfAlgorithms/koetama)
 (written by engine/make_notices.py on 2026-10-07; do not edit by hand)
 
-Kotodama downloads the speech models below the first time it needs them (the language detector ships with it) and runs them on this computer. It is built from the libraries below. Each is listed with its authors, its license, where it comes from and what was changed; the license texts follow.
+Koetama downloads the speech models below the first time it needs them (the language detector ships with it) and runs them on this computer. It is built from the libraries below. Each is listed with its authors, its license, where it comes from and what was changed; the license texts follow.
 
 ====================================================================================================
 MODELS

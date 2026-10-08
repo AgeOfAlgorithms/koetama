@@ -1,6 +1,6 @@
 //! Real voices between players (PROTOCOL.md "Real voices: rooms and the relay (version 5)"). The game names a voice
-//! ROOM (a name and a key every player in its session gets: Kotodama makes it, kind 'r'), whom this player's voice
-//! should reach now (`to`) and how loud each other player is (the speakers, src 0). Each Kotodama holds a WebSocket
+//! ROOM (a name and a key every player in its session gets: Koetama makes it, kind 'r'), whom this player's voice
+//! should reach now (`to`) and how loud each other player is (the speakers, src 0). Each Koetama holds a WebSocket
 //! to the room on the relay (a Cloudflare Worker) and sends its player's voice there, encrypted with the room's key:
 //! the relay only moves opaque bytes to the players named.
 //!
@@ -22,8 +22,8 @@ mod voice;
 
 pub use voice::{Playback, Sender, Voice, VoiceStatus, HEARD};
 
-/// The relay Kotodama uses (KOTODAMA_RELAY overrides it: tests, a relay of one's own)
-pub const RELAY: &str = "wss://kotodama-relay.ageofalgorithms.workers.dev";
+/// The relay Koetama uses (KOETAMA_RELAY overrides it: tests, a relay of one's own)
+pub const RELAY: &str = "wss://koetama-relay.ageofalgorithms.workers.dev";
 /// Hz: Opus's full band, and the mixer's rate
 pub const RATE: u32 = 48000;
 /// samples in one Opus frame (20 ms)
@@ -35,7 +35,7 @@ pub const PACKET: usize = FRAME * PER_PACKET;
 /// bits a second (Opus VOIP)
 pub const BITRATE: i32 = 24000;
 
-/// The relay's address: KOTODAMA_RELAY (set and not empty), else RELAY.
+/// The relay's address: KOETAMA_RELAY (set and not empty), else RELAY.
 pub fn relay_url() -> String {
-    std::env::var("KOTODAMA_RELAY").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| RELAY.into())
+    std::env::var("KOETAMA_RELAY").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| RELAY.into())
 }

@@ -1,6 +1,6 @@
 [package]
 name = "kd-speech"
-description = "Kotodama: speech to text - the models, the speech detector, the language stitching, live words, test microphones"
+description = "Koetama: speech to text - the models, the speech detector, the language stitching, live words, test microphones"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,5 +1,5 @@
 //! The real models on the benchmark clips against the Python answers (app/fixtures/real.json: make_fixtures.py --real).
-//! Needs the models (the Hugging Face cache / Kotodama's models folder) and export/ (the clips, the language
+//! Needs the models (the Hugging Face cache / Koetama's models folder) and export/ (the clips, the language
 //! detector): `cargo test -p kd-speech -- --include-ignored`.
 use kd_speech::*;
 use serde_json::Value;

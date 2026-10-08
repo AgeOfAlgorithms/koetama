@@ -1,5 +1,5 @@
-# Kotodama's voice relay: `npm run deploy` (from relay/, with the `relay` conda env: Node.js 22)
-name = "kotodama-relay"
+# Koetama's voice relay: `npm run deploy` (from relay/, with the `relay` conda env: Node.js 22)
+name = "koetama-relay"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 

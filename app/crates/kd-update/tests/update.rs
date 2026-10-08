@@ -24,8 +24,8 @@ fn versions() {
 fn rel(tag: &str, extra: &str) -> String {
     format!(
         r#"{{"tag_name": "{tag}", "body": "notes", "html_url": "https://example/rel", {extra} "assets": [
-            {{"name": "Kotodama-Setup-9.9.9.exe", "browser_download_url": "URL_EXE"}},
-            {{"name": "Kotodama-9.9.9-linux.tar.gz", "browser_download_url": "URL_TGZ"}},
+            {{"name": "Koetama-Setup-9.9.9.exe", "browser_download_url": "URL_EXE"}},
+            {{"name": "Koetama-9.9.9-linux.tar.gz", "browser_download_url": "URL_TGZ"}},
             {{"name": "SHA256SUMS.txt", "browser_download_url": "URL_SUMS"}}]}}"#
     )
 }
@@ -39,7 +39,7 @@ fn releases() {
         Release {
             version: "9.9.9".into(),
             notes: "notes".into(),
-            installer: Some("Kotodama-Setup-9.9.9.exe".into()),
+            installer: Some("Koetama-Setup-9.9.9.exe".into()),
             installer_url: Some("URL_EXE".into()),
             sums_url: Some("URL_SUMS".into()),
             page: "https://example/rel".into(),
@@ -53,20 +53,20 @@ fn releases() {
     assert!(parse_release(r#"{"message": "Not Found"}"#, cur).is_none());
     // (no installer for this system; odd assets skipped; no page: the releases page)
     let r = parse_release(
-        r#"{"tag_name": "v9.9.9", "body": null, "assets": [{"name": 5}, {"name": "kotodama-setup.zip",
-            "browser_download_url": "Z"}, {"name": "KOTODAMA-SETUP-x.EXE", "browser_download_url": "E"}]}"#,
+        r#"{"tag_name": "v9.9.9", "body": null, "assets": [{"name": 5}, {"name": "koetama-setup.zip",
+            "browser_download_url": "Z"}, {"name": "KOETAMA-SETUP-x.EXE", "browser_download_url": "E"}]}"#,
         cur,
     )
     .unwrap();
-    assert_eq!((r.installer.as_deref(), r.installer_url.as_deref(), r.sums_url), (Some("KOTODAMA-SETUP-x.EXE"), Some("E"), None));
+    assert_eq!((r.installer.as_deref(), r.installer_url.as_deref(), r.sums_url), (Some("KOETAMA-SETUP-x.EXE"), Some("E"), None));
     assert_eq!((r.notes.as_str(), r.page.as_str()), ("", PAGE));
 }
 
 #[test]
 fn sums() {
     let good = "ab".repeat(32);
-    let text = format!("{}  Kotodama-Setup-9.9.9.exe\r\n{}  other.tar.gz\n{} *bin.exe\n", good.to_uppercase(), "0".repeat(64), "1".repeat(64));
-    assert_eq!(expected_sha(&text, "Kotodama-Setup-9.9.9.exe"), Some(good));
+    let text = format!("{}  Koetama-Setup-9.9.9.exe\r\n{}  other.tar.gz\n{} *bin.exe\n", good.to_uppercase(), "0".repeat(64), "1".repeat(64));
+    assert_eq!(expected_sha(&text, "Koetama-Setup-9.9.9.exe"), Some(good));
     assert_eq!(expected_sha(&text, "bin.exe"), Some("1".repeat(64)));
     assert_eq!(expected_sha(&text, "missing.exe"), None);
     assert_eq!(expected_sha("a b c\n", "b"), None);
@@ -116,19 +116,19 @@ fn downloads_checked() {
     let good = sha256_file(&probe).unwrap();
     let _ = std::fs::remove_file(&probe);
     assert_eq!(good.len(), 64);
-    let sums = format!("{good}  Kotodama-Setup-9.9.9.exe\n{}  other.tar.gz\n", "0".repeat(64));
-    let (base, files) = serve(vec![("/Kotodama-Setup-9.9.9.exe", blob.clone()), ("/SHA256SUMS.txt", sums.into_bytes())]);
+    let sums = format!("{good}  Koetama-Setup-9.9.9.exe\n{}  other.tar.gz\n", "0".repeat(64));
+    let (base, files) = serve(vec![("/Koetama-Setup-9.9.9.exe", blob.clone()), ("/SHA256SUMS.txt", sums.into_bytes())]);
     let r = Release {
         version: "9.9.9".into(),
-        installer: Some("Kotodama-Setup-9.9.9.exe".into()),
-        installer_url: Some(format!("{base}/Kotodama-Setup-9.9.9.exe")),
+        installer: Some("Koetama-Setup-9.9.9.exe".into()),
+        installer_url: Some(format!("{base}/Koetama-Setup-9.9.9.exe")),
         sums_url: Some(format!("{base}/SHA256SUMS.txt")),
         ..Default::default()
     };
     let seen = Mutex::new(Vec::new());
     let path: PathBuf = download(&r, &|p| seen.lock().unwrap().push(p)).expect("the installer downloads");
     assert_eq!(std::fs::read(&path).unwrap(), blob, "... and matches its checksum");
-    assert_eq!(path.file_name().unwrap(), "Kotodama-Setup-9.9.9.exe");
+    assert_eq!(path.file_name().unwrap(), "Koetama-Setup-9.9.9.exe");
     let seen = seen.into_inner().unwrap();
     assert!(!seen.is_empty() && seen.iter().all(|p| (0.0..=1.0).contains(p)) && *seen.last().unwrap() == 1.0, "{seen:?}");
     let path2 = download(&r, &|_| {}).unwrap();
@@ -136,17 +136,17 @@ fn downloads_checked() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
     let _ = std::fs::remove_dir_all(path2.parent().unwrap());
 
-    files.lock().unwrap()[1].1 = format!("{}  Kotodama-Setup-9.9.9.exe\n", "f".repeat(64)).into_bytes();
+    files.lock().unwrap()[1].1 = format!("{}  Koetama-Setup-9.9.9.exe\n", "f".repeat(64)).into_bytes();
     let err = download(&r, &|_| {}).unwrap_err();
     assert_eq!(err, "the download does not match its checksum");
     files.lock().unwrap()[1].1 = b"nothing here\n".to_vec();
     assert_eq!(download(&r, &|_| {}).unwrap_err(), "the installer is not in SHA256SUMS.txt");
     let none = Release { sums_url: None, ..r.clone() };
     assert_eq!(download(&none, &|_| {}).unwrap_err(), "this release has no installer for this system");
-    let sneaky = Release { installer: Some("..\\Kotodama-Setup.exe".into()), ..r.clone() };
+    let sneaky = Release { installer: Some("..\\Koetama-Setup.exe".into()), ..r.clone() };
     assert!(download(&sneaky, &|_| {}).is_err(), "a name that is a path is refused");
     let gone = Release { installer_url: Some(format!("{base}/none.exe")), ..r };
-    files.lock().unwrap()[1].1 = format!("{good}  Kotodama-Setup-9.9.9.exe\n").into_bytes();
+    files.lock().unwrap()[1].1 = format!("{good}  Koetama-Setup-9.9.9.exe\n").into_bytes();
     assert!(download(&gone, &|_| {}).is_err(), "a missing file is an error");
 }
 

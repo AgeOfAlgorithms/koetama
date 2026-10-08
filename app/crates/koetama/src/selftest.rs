@@ -57,7 +57,7 @@ pub fn run() -> i32 {
         ))
     });
     step("model downloads (HTTPS)", &|| {
-        let d = std::env::temp_dir().join(format!("kotodama-selftest-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("koetama-selftest-{}", std::process::id()));
         std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
         let dest = d.join("tokens.txt");
         let url = format!(
@@ -141,7 +141,7 @@ fn window() -> Result<String, String> {
         ..Default::default()
     };
     eframe::run_native(
-        "Kotodama selftest",
+        "Koetama selftest",
         opts,
         Box::new(|_| Ok(Box::new(One(0)))),
     )

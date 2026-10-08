@@ -1,4 +1,4 @@
-//! The Link: Kotodama's files for the game. The scripted run of make_fixtures.py link_cases (app/fixtures/link.json:
+//! The Link: Koetama's files for the game. The scripted run of make_fixtures.py link_cases (app/fixtures/link.json:
 //! after each step the exact files in both folders and their contents, the result, mic/lang/live), then
 //! test_helper.py's link checks (pings wrapping at 1000, acks, sessions, word times, the Workshop folder).
 use kd_common::feed::Feed;

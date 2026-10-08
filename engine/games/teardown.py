@@ -1,7 +1,7 @@
 """Teardown, through the mod Proximity Babble Chat (its voice.lua). The link (PROTOCOL.md has the formats):
-  game -> Kotodama   savegame.xml: savegame.mod.pcvx.f, ~20 times a second - whom the player hears and how (volume,
+  game -> Koetama   savegame.xml: savegame.mod.pcvx.f, ~20 times a second - whom the player hears and how (volume,
                      direction, muffle), and what the game wants (the microphone, the language, a ping)
-  Kotodama -> game   small files next to the mod's folder: pcvx_on (running), pcvx_p<n> (the answer to ping n),
+  Koetama -> game   small files next to the mod's folder: pcvx_on (running), pcvx_p<n> (the answer to ping n),
                      pcvx_t<n>.xml (message n: what the player said)
 Teardown runs on Windows; on Linux (Steam Deck) through Proton - its files are then inside its Proton prefix.
 """
@@ -69,7 +69,7 @@ def io_dirs():
     return dirs
 
 
-# ---------------------------------------------------------------- the feed (game -> Kotodama)
+# ---------------------------------------------------------------- the feed (game -> Koetama)
 def voice_id(s):
     """a player id as the feed writes it: 1 to 5 ASCII digits, 1..65535 (else None)"""
     return int(s) if re.fullmatch(r'[0-9]{1,5}', s) and 1 <= int(s) <= 65535 else None
@@ -193,7 +193,7 @@ class FeedReader(threading.Thread):
             time.sleep(self.poll)
 
 
-# ---------------------------------------------------------------- the link (Kotodama -> game)
+# ---------------------------------------------------------------- the link (Koetama -> game)
 def times_hex(times):
     """unit start times (s) as the tag w: 4 hex digits each, in 1/100 s (up to 655 s)"""
     return ''.join('%04x' % max(0, min(0xFFFF, int(round(t * 100)))) for t in times)
@@ -212,7 +212,7 @@ def text_prefab(text, kind='f', utt=0, times=None, ago=None):
 
 
 class Link:
-    """Kotodama's files for the game: pcvx_on, the answer to each ping, numbered text files"""
+    """Koetama's files for the game: pcvx_on, the answer to each ping, numbered text files"""
     PREFIX = 'pcvx_'
 
     def __init__(self, dirs, log=print):

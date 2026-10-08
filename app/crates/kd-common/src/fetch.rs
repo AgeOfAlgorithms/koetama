@@ -1,5 +1,5 @@
 //! Model downloads (engine/fetch.py): the pinned files of a Hugging Face repo, over plain HTTPS. A file already in
-//! this machine's Hugging Face cache (a developer's) is used where it is; else it is downloaded once into Kotodama's
+//! this machine's Hugging Face cache (a developer's) is used where it is; else it is downloaded once into Koetama's
 //! models folder: `<models>/<owner>__<repo>/<revision>/<file>`. A download goes to `<file>.part` first, so a half
 //! file is never used, and a broken one goes on where it stopped (Range).
 use crate::paths;
@@ -8,9 +8,9 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// Where models come from: Hugging Face, or a mirror with the same layout (KOTODAMA_MODELS_URL).
+/// Where models come from: Hugging Face, or a mirror with the same layout (KOETAMA_MODELS_URL).
 pub fn base_url() -> String {
-    std::env::var("KOTODAMA_MODELS_URL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "https://huggingface.co".into())
+    std::env::var("KOETAMA_MODELS_URL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "https://huggingface.co".into())
 }
 
 /// The snapshot folder of repo@revision in the Hugging Face cache, if it is there.

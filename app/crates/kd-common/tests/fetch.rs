@@ -53,7 +53,7 @@ fn with_base<T>(base: &str, f: impl FnOnce() -> T) -> T {
     // (the tests in this file share the process environment: one at a time)
     static LOCK: Mutex<()> = Mutex::new(());
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    std::env::set_var("KOTODAMA_MODELS_URL", base);
+    std::env::set_var("KOETAMA_MODELS_URL", base);
     std::env::set_var("HF_HUB_CACHE", std::env::temp_dir().join("kd-no-hf-cache"));
     f()
 }

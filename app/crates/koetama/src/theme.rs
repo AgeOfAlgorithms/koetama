@@ -1,4 +1,4 @@
-//! Kotodama's look (the user's pick, 2026-10-06: "Ember", with the voice-wave icon; near-black, the user's ask): warm near-black, a red-to-amber
+//! Koetama's look (the user's pick, 2026-10-06: "Ember", with the voice-wave icon; near-black, the user's ask): warm near-black, a red-to-amber
 //! accent, rounded cards, the system's own UI font (fonts.rs). Dark only: it sits next to a game.
 use eframe::egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Margin, Mesh, Pos2, Rect, RichText, Sense,
@@ -288,7 +288,7 @@ fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: boo
     p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
     let tile = Rect::from_min_size(rect.min + Vec2::new(8.0, (rect.height() - 30.0) / 2.0), Vec2::splat(30.0));
     gradient(p, tile, RED, AMBER, 8.0);
-    // (the mod is the title - it is what links to Kotodama; the game it runs in under it)
+    // (the mod is the title - it is what links to Koetama; the game it runs in under it)
     let letter = mod_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
     p.text(tile.center(), egui::Align2::CENTER_CENTER, letter, FontId::new(16.0, semibold()), Color32::WHITE);
     let x = tile.right() + 10.0;

@@ -1,8 +1,8 @@
 //! Teardown, through the mod Proximity Babble Chat (its voice.lua) - engine/games/teardown.py. A BUILT-IN profile
 //! (profiles/teardown-proximity-babble-chat.json) on the files connector (files.rs; PROTOCOL.md has the formats):
-//!   game -> Kotodama   savegame.xml: savegame.mod.pcvx.f, ~20 times a second - whom the player hears and how
+//!   game -> Koetama   savegame.xml: savegame.mod.pcvx.f, ~20 times a second - whom the player hears and how
 //!                      (volume, direction, muffle), and what the game wants (the microphone, the language, a ping)
-//!   Kotodama -> game   small files next to the mod's folder: pcvx_on (running), pcvx_p<n> (the answer to ping n),
+//!   Koetama -> game   small files next to the mod's folder: pcvx_on (running), pcvx_p<n> (the answer to ping n),
 //!                      pcvx_t<n>.xml (message n: what the player said)
 //! Teardown runs on Windows; on Linux (Steam Deck) through Proton - its files are then inside its Proton prefix.
 use crate::files::{self, FilesGame};
@@ -22,7 +22,7 @@ pub const APPID: u32 = 1167630;
 pub const FEED: &str = r#"(?-u)<pcvx>\s*<f\s+value="([^"]*)"\s*/>\s*</pcvx>"#;
 pub const MODTAG: &str = r#"(?-u)<((?:local|steam)-[^\s/>]+)>"#;
 
-/// the game AND the mod: another Teardown mod made for Kotodama has its own id
+/// the game AND the mod: another Teardown mod made for Koetama has its own id
 pub const ID: &str = "teardown-proximity-babble-chat";
 pub const NAME: &str = "Teardown";
 pub const NEEDS: &str = "the Proximity Babble Chat mod";
@@ -71,7 +71,7 @@ fn files_config() -> &'static profile::FilesConfig {
     }
 }
 
-/// Where the test voices are made once: Kotodama's data folder; a developer's build: export/voicehelper in the repo.
+/// Where the test voices are made once: Koetama's data folder; a developer's build: export/voicehelper in the repo.
 pub fn work_dir() -> PathBuf {
     match paths::repo_root() {
         Some(repo) => repo.join("export").join("voicehelper"),

@@ -1,4 +1,4 @@
-//! The profiles folder (KOTODAMA_PROFILES_DIR: a temp one): games() lists built-ins then the valid files, a clash
+//! The profiles folder (KOETAMA_PROFILES_DIR: a temp one): games() lists built-ins then the valid files, a clash
 //! of ids or a bad file goes to bad_profiles(); load / install (replacing the same id) / remove (never a built-in).
 //! One test: the folder is an environment variable, shared by the whole process.
 use kd_games::{bad_profiles, by_id, games, install_profile, load_profile, profiles_dir, remove_profile};
@@ -33,7 +33,7 @@ fn the_profiles_folder() {
     let root = tmp("root");
     let dir = root.join("games");
     let outside = tmp("outside");
-    std::env::set_var("KOTODAMA_PROFILES_DIR", &dir);
+    std::env::set_var("KOETAMA_PROFILES_DIR", &dir);
     assert_eq!(profiles_dir(), dir);
     // no folder yet: the built-ins
     assert_eq!(ids(), ["teardown-proximity-babble-chat"]);
@@ -58,7 +58,7 @@ fn the_profiles_folder() {
     let why = |n: &str| bad.iter().find(|(p, _)| p.file_name().unwrap() == n).map(|(_, w)| w.clone()).unwrap_or_default();
     assert_eq!(bad.len(), 3, "{bad:?}");
     assert!(why("b.json").starts_with("b.json: not valid JSON"), "{bad:?}");
-    assert_eq!(why("c.json"), "the id \"teardown\" is already used by Kotodama's built-in Teardown: skipped");
+    assert_eq!(why("c.json"), "the id \"teardown\" is already used by Koetama's built-in Teardown: skipped");
     assert_eq!(why("d.JSON"), "the id \"example-game\" is already used by a.json: skipped");
 
     // load: the preview, nothing copied
@@ -77,7 +77,7 @@ fn the_profiles_folder() {
     // a built-in's id: refused
     let fake = outside.join("teardown.json");
     std::fs::write(&fake, socket("teardown", "Fake", 47125)).unwrap();
-    assert_eq!(install_profile(&fake).unwrap_err(), "the id \"teardown\" is Kotodama's built-in Teardown: a profile cannot replace it");
+    assert_eq!(install_profile(&fake).unwrap_err(), "the id \"teardown\" is Koetama's built-in Teardown: a profile cannot replace it");
     // a bad file: refused with its reason, nothing copied
     std::fs::write(outside.join("bad.json"), socket("x", "X", 47126)).unwrap();
     assert!(install_profile(&outside.join("bad.json")).unwrap_err().starts_with("bad.json: \"id\": \"x\""));
@@ -97,7 +97,7 @@ fn the_profiles_folder() {
     assert!(dir.join("zz-game.json").exists());
 
     // remove: only profile files, never a built-in
-    assert_eq!(remove_profile("teardown-proximity-babble-chat").unwrap_err(), "Teardown is built into Kotodama: it cannot be removed");
+    assert_eq!(remove_profile("teardown-proximity-babble-chat").unwrap_err(), "Teardown is built into Koetama: it cannot be removed");
     remove_profile("other-game").unwrap();
     assert!(!dir.join("other-game.json").exists());
     assert_eq!(remove_profile("other-game").unwrap_err(), "no game mod profile with the id \"other-game\"");

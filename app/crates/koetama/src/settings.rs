@@ -1,4 +1,4 @@
-//! The window's settings (settings.json in Kotodama's folder): the game, the microphone and speakers (by name), the
+//! The window's settings (settings.json in Koetama's folder): the game, the microphone and speakers (by name), the
 //! volume, whether to look for updates at start.
 use kd_common::paths;
 use serde_json::{Map, Value};

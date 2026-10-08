@@ -1,4 +1,4 @@
-//! A game mod PROFILE: a small JSON file naming one of Kotodama's built-in connectors and giving its settings - never
+//! A game mod PROFILE: a small JSON file naming one of Koetama's built-in connectors and giving its settings - never
 //! code (game mods are added without a code review). PROTOCOL.md "Adding a game mod: profiles" has the format; this
 //! is its parser and validator (readable errors, never a panic on a profile's content), the path placeholders and the
 //! summary the import preview shows.
@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The profile format this Kotodama reads.
+/// The profile format this Koetama reads.
 pub const FORMAT: u64 = 1;
 /// A profile file bigger than this is refused (a profile is a few hundred bytes).
 pub const MAX_SIZE: u64 = 64 * 1024;
@@ -292,9 +292,9 @@ pub struct Profile {
     pub needs: String,
     /// the Steam app that is the game (locate)
     pub steam_app: Option<u32>,
-    /// Kotodama plays the speakers from the feed ("uses": "voices")
+    /// Koetama plays the speakers from the feed ("uses": "voices")
     pub voices: bool,
-    /// Kotodama listens to the microphone and sends what the player said ("uses": "speech")
+    /// Koetama listens to the microphone and sends what the player said ("uses": "speech")
     pub speech: bool,
     pub test_voices: Vec<TestVoice>,
     pub speaker_names: BTreeMap<i64, String>,
@@ -411,7 +411,7 @@ impl Profile {
         match f.req("format")?.as_u64() {
             Some(FORMAT) => {}
             Some(n) if n > FORMAT => {
-                return Err(format!("profile format {n} is newer than this Kotodama reads ({FORMAT}): update Kotodama"))
+                return Err(format!("profile format {n} is newer than this Koetama reads ({FORMAT}): update Koetama"))
             }
             _ => return Err(format!("\"format\": must be {FORMAT}")),
         }
@@ -430,7 +430,7 @@ impl Profile {
             return Err(format!("\"url\": must be a web page (https://...), got {url:?}"));
         }
         let author = f.text("author", 80)?;
-        // (what the player needs, shown while Kotodama waits: always from the mod's name - a field for it only repeated it)
+        // (what the player needs, shown while Koetama waits: always from the mod's name - a field for it only repeated it)
         let needs = format!("the {mod_name} mod");
         let steam_app = match f.get("locate") {
             None => None,
@@ -620,7 +620,7 @@ fn parse_connector(v: &Value) -> Result<Connector, String> {
             if !safe_prefix(&prefix) {
                 return Err(format!(
                     "\"connector.out.prefix\": {prefix:?} must be 3 to 32 letters, digits or _ and end in _ (as \"pcvx_\"): \
-                     it names every file Kotodama writes and the only ones it deletes"
+                     it names every file Koetama writes and the only ones it deletes"
                 ));
             }
             let message = match out.opt_str("message")?.unwrap_or("teardown-prefab") {

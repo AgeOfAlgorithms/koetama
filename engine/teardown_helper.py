@@ -1,4 +1,4 @@
-"""Kotodama on the command line, for Teardown (the window is kotodama.py): the same runtime, a status line, and the
+"""Koetama on the command line, for Teardown (the window is koetama.py): the same runtime, a status line, and the
 test modes that need no microphone.
 
     python engine/teardown_helper.py            # start it, then play (a level with Proximity Babble Chat)
@@ -135,12 +135,12 @@ def main():
     ap.add_argument('--auto-speech', action='store_true', help='no microphone: recorded lines (English, one-word callouts, '
                     'Russian, Chinese, Spanish, German, mixed) played through the REAL speech-to-text as if spoken, each in its '
                     'own language - watch the live words and lines in the game (needs export/asrbench from the benchmark)')
-    ap.add_argument('--volume', type=float, default=1.0, help='Kotodama\'s own volume, 0..1')
+    ap.add_argument('--volume', type=float, default=1.0, help='Koetama\'s own volume, 0..1')
     ap.add_argument('--no-mic', action='store_true', help='never open the microphone')
     ap.add_argument('--lang', help='the language spoken (en, ru, zh, es, de, ...; auto) - default: the game\'s setting '
                     '"Language I speak"')
     ap.add_argument('--threads', type=int, default=4, help='CPU threads for the speech models')
-    ap.add_argument('--io-dir', help='where the mod looks for Kotodama\'s files (default: the mods folder / the Workshop folder)')
+    ap.add_argument('--io-dir', help='where the mod looks for Koetama\'s files (default: the mods folder / the Workshop folder)')
     ap.add_argument('--transcribe', metavar='WAV', help='run a recording through the speech pipeline as if it came from '
                     'the microphone: print the live words and the lines, and stop')
     ap.add_argument('--demo', action='store_true', help='no game: one voice walks a circle around you')

@@ -48,7 +48,7 @@ def main():
         dur = len(audio) / asr.RATE
         rows.append((script, H.times_hex(out), dur))
         print('-- %d: %d of %d words matched; heard: %s' % (i, len(known), len(b), heard), file=sys.stderr)
-    print('PC.VDUMMY_LINES = {   -- (engine/make_dummy_lines.py in the kotodama repo: the clips\' scripts,')
+    print('PC.VDUMMY_LINES = {   -- (engine/make_dummy_lines.py in the koetama repo: the clips\' scripts,')
     print('                      --  each word\'s start from Parakeet on the clip, 4 hex digits in 1/100 s; dur: the clip)')
     for script, w, dur in rows:
         print('\t{text = "%s",\n\t w = "%s", dur = %.2f},' % (script.replace('"', '\\"'), w, dur))

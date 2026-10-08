@@ -1,4 +1,4 @@
-//! The game's state as Kotodama sees it (engine/games/base.py): whom the player hears and how, and what the game
+//! The game's state as Koetama sees it (engine/games/base.py): whom the player hears and how, and what the game
 //! wants. A game module reads it from the game (Teardown: its savegame.xml) and hands it to the mixer and the runtime.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

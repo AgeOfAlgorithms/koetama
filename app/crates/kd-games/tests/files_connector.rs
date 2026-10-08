@@ -211,7 +211,7 @@ fn a_profile_game_end_to_end() {
     assert!(out.join("talky_p7").exists(), "the ping answered");
     assert!(g.send('f', 1, "hello", None, None));
     assert_eq!(std::fs::read_to_string(out.join("talky_t1.json")).unwrap(), "{\"k\":\"f\",\"u\":1,\"t\":\"hello\"}\n");
-    std::fs::write(out.join("talky_notes.txt"), "mine, not Kotodama's").unwrap();
+    std::fs::write(out.join("talky_notes.txt"), "mine, not Koetama's").unwrap();
     g.stop();
     assert_eq!(names(&out), ["talky_notes.txt"], "stop: its files gone, nothing else");
     assert!(!game_dir.join("missing").exists());

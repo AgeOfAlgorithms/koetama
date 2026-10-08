@@ -1,5 +1,5 @@
 """The running app, game-independent: the chosen game's link, the voice mixer and its output, the speech-to-text and
-the microphone. The window (kotodama.py) and the command line (teardown_helper.py) both drive one of these: start(),
+the microphone. The window (koetama.py) and the command line (teardown_helper.py) both drive one of these: start(),
 then tick() a few times a second, stop() at the end; status() says what is going on.
 
 The microphone is open only while the game wants it (its feed's mic flag) and is running; the speech models load the

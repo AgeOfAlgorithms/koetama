@@ -1,6 +1,6 @@
 [package]
 name = "kd-audio"
-description = "Kotodama: the voice mixer, the muffle low-pass, wav files, resampling, sound devices"
+description = "Koetama: the voice mixer, the muffle low-pass, wav files, resampling, sound devices"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

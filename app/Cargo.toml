@@ -1,4 +1,4 @@
-# Kotodama in Rust: one program (crates/kotodama) built from small crates, each the port of one part of engine/
+# Koetama in Rust: one program (crates/koetama) built from small crates, each the port of one part of engine/
 # (the Python app, kept as the reference: app/fixtures/make_fixtures.py writes its answers for the tests here).
 # DESIGN.md has the crates, their interfaces and which Python they replace.
 [workspace]
@@ -6,11 +6,11 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 license = "MIT"
 authors = ["AgeOfAlgorithms"]
-repository = "https://github.com/AgeOfAlgorithms/kotodama"
+repository = "https://github.com/AgeOfAlgorithms/koetama"
 
 [workspace.dependencies]
 kd-common = { path = "crates/kd-common" }

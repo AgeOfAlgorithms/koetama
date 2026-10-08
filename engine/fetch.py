@@ -1,6 +1,6 @@
 """Model downloads: the pinned files of a Hugging Face repo (asr.MODELS), over plain HTTPS - no Hugging Face library in
 the app (its lazy imports broke in the compiled build, and it brought ~20 MB of packages). A file already in this
-machine's Hugging Face cache (a developer's) is used where it is; else it is downloaded once into Kotodama's models
+machine's Hugging Face cache (a developer's) is used where it is; else it is downloaded once into Koetama's models
 folder: <models>/<owner>__<repo>/<revision>/<file>. A download goes to <file>.part first, so a half file is never used.
 """
 import os
@@ -9,7 +9,7 @@ import urllib.request
 
 import paths
 
-BASE = os.environ.get('KOTODAMA_MODELS_URL', 'https://huggingface.co')   # (a mirror later: same layout)
+BASE = os.environ.get('KOETAMA_MODELS_URL', 'https://huggingface.co')   # (a mirror later: same layout)
 
 
 def hf_cache_dir(repo, revision):

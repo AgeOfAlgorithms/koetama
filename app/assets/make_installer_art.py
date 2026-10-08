@@ -44,7 +44,7 @@ def wizard(w, h):
     img.paste(icon, ((w - icon.size[0]) // 2, int(46 * k)), icon)
     d = ImageDraw.Draw(img)
     title = font('seguisb.ttf', int(24 * k))
-    d.text((w / 2, 150 * k), 'Kotodama', font=title, fill=FG, anchor='mm')
+    d.text((w / 2, 150 * k), 'Koetama', font=title, fill=FG, anchor='mm')
     small = font('segoeui.ttf', int(10.5 * k))
     for i, line in enumerate(['proximity voice chat', 'with live speech to text']):
         d.text((w / 2, (174 + 14 * i) * k), line, font=small, fill=MUTED, anchor='mm')

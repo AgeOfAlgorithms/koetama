@@ -1,10 +1,10 @@
-"""Kotodama's icon (the user's pick, 2026-10-06: the "voice wave" shape in the Ember colours): a white speech bubble
+"""Koetama's icon (the user's pick, 2026-10-06: the "voice wave" shape in the Ember colours): a white speech bubble
 holding a voice's sound wave, on a rounded square going red to amber. Drawn here at 1024 px and scaled down:
 
     <conda>/envs/teardown/python.exe app/assets/make_icon.py
 
-Writes, next to this script: kotodama.ico (16-256 px: the exe, the installer, the taskbar), kotodama-128.rgba (the
-window's icon, raw pixels the program includes), kotodama-256.png and kotodama-512.png (Linux, the README). The small sizes (32 px and under) get fewer, thicker bars: the
+Writes, next to this script: koetama.ico (16-256 px: the exe, the installer, the taskbar), koetama-128.rgba (the
+window's icon, raw pixels the program includes), koetama-256.png and koetama-512.png (Linux, the README). The small sizes (32 px and under) get fewer, thicker bars: the
 eight thin ones blur into a smudge there.
 """
 import os
@@ -66,19 +66,19 @@ def main():
     big, small = icon(False), icon(True)
     sizes = [16, 24, 32, 48, 64, 128, 256]
     frames = [(small if s <= 32 else big).resize((s, s), Image.LANCZOS) for s in sizes]
-    frames[-1].save(os.path.join(HERE, 'kotodama.ico'), sizes=[(s, s) for s in sizes], append_images=frames[:-1])
-    big.resize((256, 256), Image.LANCZOS).save(os.path.join(HERE, 'kotodama-256.png'))
+    frames[-1].save(os.path.join(HERE, 'koetama.ico'), sizes=[(s, s) for s in sizes], append_images=frames[:-1])
+    big.resize((256, 256), Image.LANCZOS).save(os.path.join(HERE, 'koetama-256.png'))
     # (the window's own icon, built into the program as raw pixels: 128 x 128 RGBA, no image decoder needed. The SMALL
     #  design: Windows shows it at 16-32 px - the title bar, the taskbar - shrunk from this by eframe)
-    open(os.path.join(HERE, 'kotodama-128.rgba'), 'wb').write(small.resize((128, 128), Image.LANCZOS).convert('RGBA').tobytes())
-    big.resize((512, 512), Image.LANCZOS).save(os.path.join(HERE, 'kotodama-512.png'))
+    open(os.path.join(HERE, 'koetama-128.rgba'), 'wb').write(small.resize((128, 128), Image.LANCZOS).convert('RGBA').tobytes())
+    big.resize((512, 512), Image.LANCZOS).save(os.path.join(HERE, 'koetama-512.png'))
     preview = Image.new('RGBA', (16 + 24 + 32 + 48 + 64 + 128 + 256 + 8 * 12, 280), (0x1a, 0x15, 0x15, 255))
     x = 12
     for f in frames:
         preview.paste(f, (x, 270 - f.size[1]), f)
         x += f.size[0] + 12
     preview.save(os.path.join(HERE, 'icon-sizes-preview.png'))
-    print('wrote kotodama.ico (%s px), kotodama-256.png, kotodama-512.png' % ', '.join(map(str, sizes)))
+    print('wrote koetama.ico (%s px), koetama-256.png, koetama-512.png' % ', '.join(map(str, sizes)))
 
 
 if __name__ == '__main__':

@@ -8,18 +8,18 @@ fn main() {
     if target_os == "windows" {
         let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
         let icon = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default())
-            .join("../../assets/kotodama.ico");
+            .join("../../assets/koetama.ico");
         println!("cargo:rerun-if-changed={}", icon.display());
         let mut res = winresource::WindowsResource::new();
         res.set_icon(&icon.to_string_lossy());
-        res.set("ProductName", "Kotodama")
+        res.set("ProductName", "Koetama")
             .set(
                 "FileDescription",
-                "Kotodama: proximity voice chat with live speech to text",
+                "Koetama: proximity voice chat with live speech to text",
             )
-            .set("CompanyName", "Kotodama")
+            .set("CompanyName", "Koetama")
             .set("LegalCopyright", "Copyright (c) 2026 AgeOfAlgorithms (MIT)")
-            .set("OriginalFilename", "Kotodama.exe")
+            .set("OriginalFilename", "Koetama.exe")
             .set("ProductVersion", &version)
             .set("FileVersion", &version);
         if let Err(e) = res.compile() {

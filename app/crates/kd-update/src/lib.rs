@@ -1,9 +1,9 @@
-//! Updates from GitHub Releases (engine/updater.py): is there a newer Kotodama, and (Windows) download its installer,
+//! Updates from GitHub Releases (engine/updater.py): is there a newer Koetama, and (Windows) download its installer,
 //! check it, run it.
 //!
-//! A release is tagged v<version> and has the assets Kotodama-Setup-<version>.exe (Windows installer), the Linux
+//! A release is tagged v<version> and has the assets Koetama-Setup-<version>.exe (Windows installer), the Linux
 //! build, and SHA256SUMS.txt ("<sha256>  <file name>" per line). The installer is checked against SHA256SUMS.txt,
-//! and - when this copy of Kotodama is code-signed - must carry a valid signature from the same publisher. Then it
+//! and - when this copy of Koetama is code-signed - must carry a valid signature from the same publisher. Then it
 //! runs silently (it replaces the files and starts the new version) and this copy closes.
 use kd_common::{fetch, paths};
 use regex::Regex;
@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 /// The releases page (the newest).
-pub const PAGE: &str = "https://github.com/AgeOfAlgorithms/kotodama/releases/latest";
+pub const PAGE: &str = "https://github.com/AgeOfAlgorithms/koetama/releases/latest";
 /// What GitHub's API answers in.
 pub const ACCEPT: &str = "application/vnd.github+json";
 
@@ -49,7 +49,7 @@ pub struct Release {
     /// "1.2.3" (the tag without its v)
     pub version: String,
     pub notes: String,
-    /// the installer's file name (Kotodama-Setup-<version>.exe), if the release has one
+    /// the installer's file name (Koetama-Setup-<version>.exe), if the release has one
     pub installer: Option<String>,
     pub installer_url: Option<String>,
     /// SHA256SUMS.txt
@@ -193,7 +193,7 @@ pub fn signer(path: &Path) -> (Option<String>, Option<String>) {
     );
     let mut cmd = Command::new("powershell");
     cmd.args(["-NoProfile", "-Command", &ps]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    // (Windows PowerShell with its own modules: a PSModulePath inherited from PowerShell 7 - Kotodama started from
+    // (Windows PowerShell with its own modules: a PSModulePath inherited from PowerShell 7 - Koetama started from
     //  a pwsh window, or GitHub's runners - points it at modules it cannot load, and Get-AuthenticodeSignature fails)
     cmd.env_remove("PSModulePath");
     #[cfg(windows)]
@@ -231,7 +231,7 @@ pub fn signer(path: &Path) -> (Option<String>, Option<String>) {
     (field(0), field(1))
 }
 
-/// A new empty folder in the temp folder: kotodama-<...>.
+/// A new empty folder in the temp folder: koetama-<...>.
 fn fresh_temp_dir() -> io::Result<PathBuf> {
     let base = std::env::temp_dir();
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
@@ -294,7 +294,7 @@ pub fn download(r: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String> 
     Ok(path)
 }
 
-/// Run the installer silently, detached (it closes Kotodama, replaces it and starts the new version); the caller
+/// Run the installer silently, detached (it closes Koetama, replaces it and starts the new version); the caller
 /// exits.
 pub fn install(path: &Path) -> io::Result<()> {
     let mut cmd = Command::new(path);

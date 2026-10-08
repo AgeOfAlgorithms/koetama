@@ -315,7 +315,7 @@ mod tests {
         j.insert(Packet { seq: 0, last: true, frames: vec![vec![2]; 3] }, 0.0);
         let got = play(&mut j, 7, 0.0);
         assert_eq!(got, [1.0, 1.0, 1.0, 2.0, 2.0, 2.0].map(Some).into_iter().chain([None]).collect::<Vec<_>>());
-        // (the sender's Kotodama started over: its seq is far from the last one) - not late, a new start
+        // (the sender's Koetama started over: its seq is far from the last one) - not late, a new start
         j.insert(Packet { seq: 2_000_000, last: true, frames: vec![vec![7]; 3] }, 1.0);
         assert_eq!(j.late, 0);
         assert_eq!(play(&mut j, 3, 1.0), [7.0, 7.0, 7.0].map(Some).to_vec());

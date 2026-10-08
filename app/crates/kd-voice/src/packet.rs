@@ -4,7 +4,7 @@
 pub const VERSION: u8 = 1;
 /// flags: the last packet of a stretch of talking
 pub const LAST: u8 = 1;
-/// frames one packet may hold (Kotodama sends PER_PACKET)
+/// frames one packet may hold (Koetama sends PER_PACKET)
 pub const MAX_FRAMES: usize = 16;
 
 #[derive(Clone, Debug, Default, PartialEq)]

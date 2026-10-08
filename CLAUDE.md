@@ -1,5 +1,5 @@
 # Claude Code
-Read PROJECT.md first (Kotodama: the layout, environments, commands, the release plan, open items, and the full
+Read PROJECT.md first (Koetama: the layout, environments, commands, the release plan, open items, and the full
 research history), and PROTOCOL.md for the game link and how a game module works. The app is Rust, in `app/`
 (app/DESIGN.md: the crates and their interfaces); `engine/` is the first, Python version, kept as the REFERENCE the
 Rust tests compare against (app/fixtures/make_fixtures.py writes its answers) and for the benchmarks. A behaviour

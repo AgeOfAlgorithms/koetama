@@ -175,10 +175,10 @@ def _sounddevice():
         import ctypes.util
         import paths
         mine = os.path.join(paths.APP_ROOT, 'lib', 'libportaudio.so.2')
-        if os.path.exists(mine) and not getattr(ctypes.util, '_kotodama', False):
+        if os.path.exists(mine) and not getattr(ctypes.util, '_koetama', False):
             find = ctypes.util.find_library
             ctypes.util.find_library = lambda name: mine if 'portaudio' in name else find(name)
-            ctypes.util._kotodama = True
+            ctypes.util._koetama = True
     import sounddevice
     return sounddevice
 

@@ -17,7 +17,7 @@ fn a_prefix_in_use_is_refused_and_old_ids_are_the_builtins() {
     let dir = std::env::temp_dir().join(format!("kd-games-prefix-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("KOTODAMA_PROFILES_DIR", dir.join("games"));
+    std::env::set_var("KOETAMA_PROFILES_DIR", dir.join("games"));
     let src = dir.join("src");
     std::fs::create_dir_all(&src).unwrap();
 

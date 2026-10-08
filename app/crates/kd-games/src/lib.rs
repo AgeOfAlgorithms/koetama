@@ -1,5 +1,5 @@
-//! The game mods Kotodama works with (engine/games/). A game mod is a PROFILE (profile.rs: a small JSON file), never
-//! code: Kotodama's built-in CONNECTORS do the talking (files.rs: Teardown's link, through a file the game saves and
+//! The game mods Koetama works with (engine/games/). A game mod is a PROFILE (profile.rs: a small JSON file), never
+//! code: Koetama's built-in CONNECTORS do the talking (files.rs: Teardown's link, through a file the game saves and
 //! files next to the mod; socket.rs: a TCP connection on 127.0.0.1) and a profile only names one and gives its
 //! settings. Built-in profiles (Teardown) are compiled in; others are *.json files in [`profiles_dir`]. [`games`]
 //! lists them in the window's game picker.
@@ -36,10 +36,10 @@ pub trait Game: Send + Sync {
         (false, String::new())
     }
 
-    /// start listening to the game (a thread of its own); tell it Kotodama runs
+    /// start listening to the game (a thread of its own); tell it Koetama runs
     fn start(&mut self) {}
 
-    /// stop; tell the game Kotodama is gone
+    /// stop; tell the game Koetama is gone
     fn stop(&mut self) {}
 
     /// hand the game what the player said: kind 's' (they started talking), 'l' (the words so far, only ever
@@ -116,7 +116,7 @@ pub fn intern(s: &str) -> &'static str {
 }
 
 /// A game mod the program works with (the window's picker lists these): the game, the mod that links it to
-/// Kotodama and where to get that mod, what it does on this PC, and how to make its module.
+/// Koetama and where to get that mod, what it does on this PC, and how to make its module.
 #[derive(Clone)]
 pub struct GameKind {
     pub id: String,
@@ -136,9 +136,9 @@ pub struct GameKind {
     /// what it does, for the import preview: "reads <file>", "writes its message files (pcvx_*) into <dir>",
     /// "listens on 127.0.0.1:<port> (this computer only)" (placeholders resolved when it was listed)
     pub summary: Vec<String>,
-    /// Kotodama plays the speakers from the feed (the audio output is needed)
+    /// Koetama plays the speakers from the feed (the audio output is needed)
     pub voices: bool,
-    /// Kotodama listens to the microphone and sends what the player said (speech to text is needed)
+    /// Koetama listens to the microphone and sends what the player said (speech to text is needed)
     pub speech: bool,
     /// the profile itself
     pub profile: Arc<Profile>,
@@ -196,9 +196,9 @@ fn builtins() -> Vec<GameKind> {
     vec![GameKind::from_profile((*teardown::profile()).clone(), true, None)]
 }
 
-/// Where profile files are: Kotodama's data folder/games (KOTODAMA_PROFILES_DIR: tests).
+/// Where profile files are: Koetama's data folder/games (KOETAMA_PROFILES_DIR: tests).
 pub fn profiles_dir() -> PathBuf {
-    match std::env::var_os("KOTODAMA_PROFILES_DIR").filter(|v| !v.is_empty()) {
+    match std::env::var_os("KOETAMA_PROFILES_DIR").filter(|v| !v.is_empty()) {
         Some(d) => PathBuf::from(d),
         None => paths::data_dir().join("games"),
     }
@@ -275,7 +275,7 @@ fn listing() -> Arc<Listing> {
             Ok(g) => match all.iter().find(|o| o.id == canonical(&g.id)) {
                 Some(o) => {
                     let first = if o.builtin {
-                        format!("Kotodama's built-in {}", o.name)
+                        format!("Koetama's built-in {}", o.name)
                     } else {
                         o.source.as_ref().and_then(|s| s.file_name()).map_or(String::new(), |n| n.to_string_lossy().into_owned())
                     };
@@ -340,7 +340,7 @@ fn prefix_taken(g: &GameKind, others: &[GameKind]) -> Option<String> {
 pub fn install_profile(path: &Path) -> Result<GameKind, String> {
     let g = load_profile(path)?;
     if let Some(b) = builtins().iter().find(|b| b.id == canonical(&g.id)) {
-        return Err(format!("the id \"{}\" is Kotodama's built-in {}: a profile cannot replace it", g.id, b.name));
+        return Err(format!("the id \"{}\" is Koetama's built-in {}: a profile cannot replace it", g.id, b.name));
     }
     if let Some(who) = prefix_taken(&g, &games()) {
         return Err(format!(
@@ -395,7 +395,7 @@ fn same_id_files(dir: &Path, id: &str) -> Vec<PathBuf> {
 /// Remove a profile file's game (its file(s) in profiles_dir(); never a built-in).
 pub fn remove_profile(id: &str) -> Result<(), String> {
     if let Some(b) = builtins().iter().find(|b| b.id == id) {
-        return Err(format!("{} is built into Kotodama: it cannot be removed", b.name));
+        return Err(format!("{} is built into Koetama: it cannot be removed", b.name));
     }
     let files = same_id_files(&profiles_dir(), id);
     if files.is_empty() {
