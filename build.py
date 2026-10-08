@@ -52,10 +52,15 @@ def gather():
         shutil.rmtree(APP)
     os.makedirs(APP)
     shutil.copy2(os.path.join(OUT, 'kotodama' + ('.exe' if WIN else '')), os.path.join(APP, EXE))
+    # (sherpa-onnx's build script copies its libraries into target/release when it runs; a restored build cache - CI's
+    #  Rust cache tidies loose files there - skips it, so then they come from SHERPA_ONNX_LIB_DIR, where they were got)
+    lib_dir = os.environ.get('SHERPA_ONNX_LIB_DIR', '')
     for pat in LIBS:
         found = glob.glob(os.path.join(OUT, pat))
+        if not found and lib_dir:
+            found = glob.glob(os.path.join(lib_dir, pat)) or glob.glob(os.path.join(lib_dir, '..', 'bin', pat))
         if not found:
-            sys.exit('missing %s in %s (sherpa-onnx\'s build copies it there)' % (pat, OUT))
+            sys.exit('missing %s in %s or SHERPA_ONNX_LIB_DIR (sherpa-onnx\'s build copies it there)' % (pat, OUT))
         for p in found:
             shutil.copy2(p, os.path.join(APP, os.path.basename(p)), follow_symlinks=True)
     # the language detector (Apache-2.0; our ONNX export) ships with the app; the speech models download per language
