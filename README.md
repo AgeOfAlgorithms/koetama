@@ -30,13 +30,17 @@ Kotodama ("word spirit" in Japanese) runs next to your game. It plays the other 
 stand: louder when close, from their side, muffled behind walls. It also writes what you say as you say it, so the
 game can show your words in speech bubbles and a chat history. A spoken line can even open a door.
 
-**Everything runs on your own PC.** No audio or text is sent to any service, and no account is needed.
+**Speech to text runs on your own PC**, and no account is needed. Your voice reaches the other players through a
+small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
+bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.2.
+> **Status:** early prototype, version 0.3. See [What's new](#whats-new).
 
 ## Highlights
 
-- **Positional voices.** Each voice gets the game's volume, direction and muffling, with a short delay.
+- **Real voice chat.** Hear the other players where they stand: the game sets each voice's volume, direction and
+  muffling. Only the players in range get your voice, and a whisper stays private.
+- **Push to talk or always on.** Hold the game's talk key, or let Kotodama hear when you speak.
 - **Live words.** Your line appears while you talk and is finished when you stop. Words already shown never jump back.
 - **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line.
 - **Fair proximity.** Each word carries the time it was said, so a player who walks up mid-sentence sees only what
@@ -44,6 +48,40 @@ game can show your words in speech bubbles and a chat history. A spoken line can
 - **Light on your PC.** Only the speech models for your languages load: about 0.9 GB of memory for one language, up
   to 1.5 GB for several. It runs on the CPU, below the game's priority, and stays idle while you are silent.
 - **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
+
+## What's new
+
+### 0.3.0: real voice chat
+
+You can now hear the other players, not just their words. Your voice goes to the players close enough to hear you,
+through a small relay server, encrypted end to end.
+
+- **Real voices.** Kotodama sends your voice (Opus, about 3 KB/s while you talk) to the players in range of your
+  speaking mode, and plays theirs where they stand. Whispers reach only the players near you.
+- **Push to talk.** Hold the game's talk key to talk (the Teardown mod: B, rebindable), or choose always on. The
+  first syllable is not cut off, and a line ends a quarter second after you let go.
+- **Voice rooms.** Each game session gets its own room and key, made by Kotodama from your PC's secure random
+  numbers. The host can choose the region the room lives in (Auto: near the first player to join).
+- **Status for the game.** Kotodama tells the game which feed versions it reads, so a mod can ask an outdated
+  Kotodama to update, and whether the voice server can be reached.
+- **Self-test** now also sends a packet through the voice relay.
+
+### 0.2.0: the Rust app
+
+A rewrite of the whole app in Rust: a smaller download, no Python, and a window that works on any PC.
+
+- **Languages I speak.** Tick the languages you speak; only their speech models load (about 0.9 GB of memory for
+  one language). The list shows which languages are fully supported, in beta or experimental.
+- **Game mod profiles.** Games connect through profile files anyone can write (files or a local socket), added from
+  the window after a safety preview. Mods can use voices, speech to text, or both.
+- **A smaller language detector:** 43 MB instead of 86, with the same results.
+- **The Ember look:** a dark theme, the voice-wave icon, and an installer to match.
+
+### 0.1.0: the first version
+
+The first app, in Python, made for Teardown's Proximity Babble Chat mod: a window with a game picker, live words
+while you talk and the finished line when you stop, word times so a player who walks up mid-sentence sees only what
+they heard, test voices placed around you in the game, and a Windows installer with an updater.
 
 ## Install
 
@@ -95,7 +133,7 @@ follows the game's own language setting.
 
 | Part | How |
 |---|---|
-| Voices | The game sends each speaker's volume, direction and muffle; Kotodama mixes them in stereo, low-passed behind walls. |
+| Voices | Your voice is compressed (Opus, 24 kbit/s), encrypted (ChaCha20-Poly1305) and sent through the relay, a Cloudflare Worker ([`relay/`](relay/)), to the players in range. The game sends each speaker's volume, direction and muffle; Kotodama mixes them in stereo, low-passed behind walls. |
 | Speech detection | Silero VAD v5 finds where a line starts and ends. |
 | Speech to text | The line so far is transcribed again every second; only words two passes agree on are shown. One more pass when you stop gives the finished line. |
 | Language detection | SpeechBrain's VoxLingua107 detector splits a mixed-language line into stretches, each written by its language's model. |
