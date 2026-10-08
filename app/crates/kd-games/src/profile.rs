@@ -296,6 +296,8 @@ pub struct Profile {
     pub voices: bool,
     /// Koetama listens to the microphone and sends what the player said ("uses": "speech")
     pub speech: bool,
+    /// Koetama translates the chat lines the game sends ("uses": "translate"; off unless listed)
+    pub translate: bool,
     pub test_voices: Vec<TestVoice>,
     pub speaker_names: BTreeMap<i64, String>,
     pub connector: Connector,
@@ -440,21 +442,22 @@ impl Profile {
                 lf.int("steam_app", 1, u32::MAX as i64, "a Steam app id")?.map(|n| n as u32)
             }
         };
-        let (voices, speech) = match f.get("uses") {
-            None => (true, true),
+        let (voices, speech, translate) = match f.get("uses") {
+            None => (true, true, false),
             Some(Value::Array(a)) if !a.is_empty() => {
-                let (mut v, mut s) = (false, false);
+                let (mut v, mut s, mut t) = (false, false, false);
                 for x in a {
                     match x.as_str() {
                         Some("voices") => v = true,
                         Some("speech") => s = true,
-                        _ => return Err(format!("\"uses\": unknown {x} (known: \"voices\", \"speech\")")),
+                        Some("translate") => t = true,
+                        _ => return Err(format!("\"uses\": unknown {x} (known: \"voices\", \"speech\", \"translate\")")),
                     }
                 }
-                (v, s)
+                (v, s, t)
             }
             Some(_) => {
-                return Err("\"uses\": must be a list of at least one of \"voices\", \"speech\"".into());
+                return Err("\"uses\": must be a list of at least one of \"voices\", \"speech\", \"translate\"".into());
             }
         };
         let mut test_voices: Vec<TestVoice> = Vec::new();
@@ -494,6 +497,7 @@ impl Profile {
             steam_app,
             voices,
             speech,
+            translate,
             test_voices,
             speaker_names,
             connector,
@@ -559,6 +563,13 @@ impl Profile {
         }
         if self.speech {
             out.push("writes what you say (speech to text), while the game asks for the microphone".into());
+        }
+        if self.translate {
+            out.push(
+                "translates the chat lines the game sends, on this PC (Mozilla's translation models, downloaded the \
+                 first time a translation rule needs them)"
+                    .into(),
+            );
         }
         if !self.test_voices.is_empty() {
             out.push(format!("makes {} test voices with Windows' speech voices", self.test_voices.len()));

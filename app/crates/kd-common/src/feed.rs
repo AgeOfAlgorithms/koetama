@@ -57,6 +57,130 @@ pub struct Feed {
     /// where the room should live (a relay region, REGIONS); "": wherever the relay puts it (near the first player)
     #[serde(default)]
     pub region: String,
+    /// the player's translation rules (version 6): (from, to) in Koetama's language codes, at most MAX_RULES; empty:
+    /// translation off (translate_rules)
+    #[serde(default)]
+    pub rules: Vec<(String, String)>,
+    /// the lines the game wants translated (version 6): (id, text), at most MAX_REQUESTS, each id once; a text that
+    /// was not good UTF-8 of at most MAX_REQUEST_BYTES is "" (its reply: "") (translate_requests)
+    #[serde(default)]
+    pub translate: Vec<(i64, String)>,
+}
+
+/// the most translation rules a feed has
+pub const MAX_RULES: usize = 2;
+/// the most lines to translate in one feed
+pub const MAX_REQUESTS: usize = 16;
+/// the most bytes (UTF-8) of one line to translate
+pub const MAX_REQUEST_BYTES: usize = 400;
+/// the largest request id (15 digits: exact in a Lua number)
+pub const MAX_REQUEST_ID: i64 = 999_999_999_999_999;
+
+/// A language code as a rule names it: 1 to 16 ASCII letters, digits, - or _ (which languages have models is the
+/// translator's business: a rule it has none for is reported "unavailable").
+pub fn lang_code(s: &str) -> bool {
+    (1..=16).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+}
+
+/// The rules as the feed keeps them: good codes only, each rule once, the first MAX_RULES.
+pub fn translate_rules(rules: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for r in rules {
+        if out.len() == MAX_RULES {
+            break;
+        }
+        if lang_code(&r.0) && lang_code(&r.1) && !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+/// The feed's rules field (version 6): "ja>en,ko>en" -> [("ja", "en"), ("ko", "en")]; malformed items skipped.
+pub fn parse_rules(s: &str) -> Vec<(String, String)> {
+    if s.is_empty() {
+        return Vec::new();
+    }
+    translate_rules(s.split(',').filter_map(|item| item.split_once('>').map(|(a, b)| (a.to_string(), b.to_string()))))
+}
+
+/// A request id as the feed writes it: 1 to 15 ASCII digits, at least 1.
+pub fn request_id(s: &str) -> Option<i64> {
+    if s.is_empty() || s.len() > 15 || !s.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    s.parse().ok().filter(|&n| n >= 1)
+}
+
+/// A line to translate as the feed keeps it: good UTF-8 of at most MAX_REQUEST_BYTES, else "" (answered "").
+pub fn request_text(bytes: &[u8]) -> String {
+    if bytes.len() > MAX_REQUEST_BYTES {
+        return String::new();
+    }
+    String::from_utf8(bytes.to_vec()).unwrap_or_default()
+}
+
+/// The requests as the feed keeps them: good ids only (1..=MAX_REQUEST_ID), each id once (the first), the first
+/// MAX_REQUESTS.
+pub fn translate_requests(items: impl IntoIterator<Item = (Option<i64>, String)>) -> Vec<(i64, String)> {
+    let mut out: Vec<(i64, String)> = Vec::new();
+    for (id, text) in items {
+        if out.len() == MAX_REQUESTS {
+            break;
+        }
+        if let Some(id) = id.filter(|n| (1..=MAX_REQUEST_ID).contains(n)) {
+            if !out.iter().any(|(i, _)| *i == id) {
+                out.push((id, text));
+            }
+        }
+    }
+    out
+}
+
+/// The feed's requests field (version 6): "<id>:<hex of the UTF-8 text>;..." -> [(id, text)]. An item without a
+/// good id is skipped; one with a bad hex (odd, not hex digits) or text keeps its id with "" (answered "").
+pub fn parse_requests(s: &str) -> Vec<(i64, String)> {
+    let items = s.split(';').filter(|i| !i.is_empty()).filter_map(|item| {
+        let (id, hex) = item.split_once(':')?;
+        Some((request_id(id), request_text(&unhex(hex).unwrap_or_default())))
+    });
+    translate_requests(items)
+}
+
+/// Hex digits (either case) -> bytes; None if odd or not hex.
+fn unhex(h: &str) -> Option<Vec<u8>> {
+    if !h.len().is_multiple_of(2) || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).ok()).collect()
+}
+
+/// A translation rule's state, for the game (PROTOCOL.md version 6, message kind 'd').
+#[derive(Clone, Debug, PartialEq)]
+pub struct RuleState {
+    pub from: String,
+    pub to: String,
+    /// "ready", "downloading", "loading", "unavailable", "error"
+    pub state: String,
+    /// 0..1 while downloading
+    pub progress: f64,
+}
+
+impl RuleState {
+    /// "ja>en=ready", "ko>en=downloading 42" (whole percent, rounded down)
+    pub fn wire(&self) -> String {
+        if self.state == "downloading" {
+            let pct = if self.progress.is_finite() { (self.progress.clamp(0.0, 1.0) * 100.0).floor() as u32 } else { 0 };
+            format!("{}>{}={} {pct}", self.from, self.to, self.state)
+        } else {
+            format!("{}>{}={}", self.from, self.to, self.state)
+        }
+    }
+}
+
+/// The rules' states as message kind 'd' carries them: each wire(), comma-separated ("" for no rules).
+pub fn rules_wire(rules: &[RuleState]) -> String {
+    rules.iter().map(RuleState::wire).collect::<Vec<_>>().join(",")
 }
 
 /// the regions a voice room can be asked to live in (Cloudflare's Durable Object location hints; the relay's REGIONS)

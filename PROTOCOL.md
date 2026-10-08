@@ -140,6 +140,52 @@ created with that Durable Object location hint (best effort; only the first conn
 room: delivery, nobody out of range, the keep-alive, the time of one hop), `npm run deploy` (from `relay/`, the
 `relay` conda env: Node.js 22, Wrangler 4).
 
+## Translation (version 6)
+
+A player can have up to **two translation rules**, each "from language A into language B" (for example Japanese →
+English and Korean → English). The game sends Koetama the full chat lines it shows (typed lines, and spoken lines once
+finished - never live words); Koetama translates every stretch of a line that is in a rule's source language and sends
+the translation back. It all runs on the player's own PC, with Mozilla's Firefox Translations models (MPL-2.0, ~35 MB
+a direction, downloaded the first time a rule needs them; a pair without English goes through English: two models).
+
+**Mixed-language lines.** A line is split into stretches by script and language (a Japanese clause inside an English
+line, and so on); each stretch is detected on its own, the stretches in a rule's source language are translated, the
+rest are kept as they are, and the result keeps the original order. A line with nothing in a rule's source language
+gets an empty reply (no translation to show).
+
+### The feed, version 6
+
+    6|<seq>|<vol>|<session>|<ack>|<ping>|<mic>|<lang>|<live>|<room>|<key>|<me>|<to>|<region>|<rules>|<requests>|<speakers>
+
+The first fifteen fields are version 5's (up to and including region). New:
+
+| field | meaning |
+|---|---|
+| rules | up to two rules, comma-separated `from>to` with Koetama's language codes (`ja>en,ko>en`); empty = translation off. A rule whose two languages are the same, or with a language Mozilla has no model for, is ignored (and reported as `unavailable`) |
+| requests | the lines to translate, `<id>:<hex of the UTF-8 text>` separated by `;` (at most 16, each at most 400 bytes of text). The game chooses the ids (positive, unique in the session) and keeps a line in the feed until its reply arrives (it may drop it after ~10 s without one) |
+
+Version 5 is still read (no translation). Koetama announces `pcvx_v6` (and `pcvx_v5`) next to `pcvx_on`.
+
+### Koetama -> game
+
+Two new message kinds (the same prefab files as the others: `<body tags="pcvx k=<kind> u=<id> t=<hex>"/>`):
+
+| kind | meaning |
+|---|---|
+| `x` | the translation of request `u`: `t` is the hex of the translated line (empty: nothing in the line needed translating, or the rule's models are not ready - see `d`). Exactly one reply per request id. |
+| `d` | the rules' state, sent when it changes (at most every 0.5 s while downloading): `t` is the hex of `<from>><to>=<state>` per rule, comma-separated; state = `ready`, `downloading <0-100>`, `loading`, `unavailable` (no model), or `error` |
+
+### The socket connector
+
+The feed object takes `"rules": [["ja","en"], ["ko","en"]]` and `"translate": [{"id": 7, "text": "..."}]`; Koetama
+answers `{"type":"translation","id":7,"text":"..."}` and `{"type":"translate_status","rules":[{"from":"ja","to":"en",
+"state":"downloading","progress":0.42}]}`.
+
+### Profiles
+
+`"uses"` may include `"translate"` (default: off unless listed). A translate-only profile (`["translate"]`) needs no
+microphone, no voices and no relay.
+
 ## Adding a game mod: profiles
 
 Koetama's engine knows no game. Speech detection, speech to text and the language detector are the crate

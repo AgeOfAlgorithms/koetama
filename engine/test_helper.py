@@ -87,6 +87,12 @@ check(f and f['lang'] == 'ru' and f['mic'] is True and len(f['speakers']) == 1 a
       'version 3 carries the language the player speaks (version 2: English)')
 check(H.parse_feed('1|1|1.00|') is None and H.parse_feed('garbage') is None and H.parse_feed('2|x|1|1|1|1|1|') is None,
       'another version or a broken string is refused')
+# version 6: the translation rules and the lines to translate (PROTOCOL.md "Translation (version 6)")
+f6 = H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en,ko>en,zh>en|7:%s;8:zz;0:41;7:41|' % 'こんにちは'.encode().hex())
+check(f6 and f6['rules'] == [('ja', 'en'), ('ko', 'en')] and f6['translate'] == [(7, 'こんにちは'), (8, '')],
+      'version 6: the first two rules; each line by its id (a bad text keeps its id with "", a bad id is skipped)')
+check(H.parse_feed('5|9|1|5|0|1|1|en|1||||||')['rules'] == [] and H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en|') is None,
+      'version 5: no rules; a version 6 line without all its fields is refused')
 A, B = '2|5|1.00|7|0|1|0|2000,1,1,1.000,0.0,0.0,0.00', '2|9|1.00|3|0|1|0|'
 xml = ('<registry version="2.1.0">\n<savegame><mod>\n<local-proximity-chat>\n<pcmode value="s"/>\n<pcvx>\n\t<f value="%s"/>\n</pcvx>\n'
        '</local-proximity-chat>\n<steam-123>\n<pcvx>\n<f value="%s"/>\n</pcvx>\n</steam-123>\n</mod></savegame>\n</registry>\n' % (A, B)).encode()
@@ -118,9 +124,9 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
     open(os.path.join(local, 'other.txt'), 'w').write('1')
     link = H.Link([local, shop], log=lambda s: None)
     link.start()
-    check(names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5'] and names(shop) == ['pcvx_on', 'pcvx_v5'],
-          'start: "on" and "v5" (the feed version) in every folder a copy of the mod may look in; old files of mine swept, nothing else touched')
-    check(link.send_text('too early') is False and names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5'], 'no game yet: a text is not written')
+    check(names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5', 'pcvx_v6'] and names(shop) == ['pcvx_on', 'pcvx_v5', 'pcvx_v6'],
+          'start: "on", "v5" and "v6" (the feed versions) in every folder a copy of the mod may look in; old files of mine swept, nothing else touched')
+    check(link.send_text('too early') is False and names(local) == ['other.txt', 'pcvx_on', 'pcvx_v5', 'pcvx_v6'], 'no game yet: a text is not written')
 
     def fd(**kw):
         d = dict(seq=1, vol=1.0, sid=5, ack=0, ping=1, mic=False, speakers={})
@@ -165,6 +171,11 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
     link.send_msg('l', 8, 'no times here')
     t7 = open(os.path.join(local, 'pcvx_t8.xml'), encoding='utf-8').read()
     check(' w=' not in t7 and ' a=' not in t7, 'without times: no w / a tags (the game shows the words as before)')
+    check(link.send_translation(123456789012345, ' Hello ') and link.send_rules_state('ja>en=ready'), 'a translation and the rules\' states are sent')
+    t9 = open(os.path.join(local, 'pcvx_t9.xml'), encoding='utf-8').read()
+    t10 = open(os.path.join(local, 'pcvx_t10.xml'), encoding='utf-8').read()
+    check('tags="pcvx k=x u=123456789012345 t=%s"' % b'Hello'.hex() in t9 and 'tags="pcvx k=d u=0 t=%s"' % b'ja>en=ready'.hex() in t10,
+          '... kind x with the request id (the text stripped), kind d')
     link.on_feed(fd(ping=1, sid=6, ack=0), 'local-proximity-chat')
     check('pcvx_t2.xml' not in names(local) and 'pcvx_p1' in names(local) and link.n == 0, 'a new session (a level start): unread texts dropped, numbers start over')
     link.send_text('first of the new level')

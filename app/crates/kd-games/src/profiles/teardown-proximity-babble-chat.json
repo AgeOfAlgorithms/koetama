@@ -6,7 +6,7 @@
   "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496",
   "author": "AgeOfAlgorithms",
   "locate": {"steam_app": 1167630},
-  "uses": ["voices", "speech"],
+  "uses": ["voices", "speech", "translate"],
   "test_voices": [
     {"src": 1, "voice": "Microsoft Zira Desktop", "rate": -1,
      "text": "I am the whisperer. Stay close, or you will not hear me at all. One, two, three, four, five, six, seven, eight, nine, ten."},

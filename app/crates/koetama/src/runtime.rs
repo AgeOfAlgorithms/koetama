@@ -10,11 +10,16 @@
 //! Real voices (a game that plays voices; PROTOCOL.md version 5): the voice chat (kd_voice::Voice) follows each feed
 //! (the room, whom to send to, whom to hear), takes the microphone's audio and plays what arrives through the mixer;
 //! once per game session the runtime sends the game a fresh room (kind 'r').
+//!
+//! Translation (a game that uses it; PROTOCOL.md version 6): the translator (kd_translate::Translator) gets each
+//! feed's rules and new lines as the feed is read; its replies go to the game at once (kind 'x'), and the rules' states
+//! on each change (kind 'd') - again when the game starts a new session or reconnects.
 use crate::mic::Microphone;
 use kd_audio::{Mixer, MixerSink, Output, SharedMixer, STALE};
 use kd_common::Log;
 use kd_games::{Game, GameKind};
 use kd_speech::{Callbacks, Listener, Mic, ModelState, Models, MIXED_LANGS, MODEL_INFO};
+use kd_translate::service::{Event, RuleStatus, Translator};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +103,8 @@ pub struct Status {
     pub error: String,
     /// the voice chat (None: the game plays no voices)
     pub voice: Option<kd_voice::VoiceStatus>,
+    /// the translation rules and their states (None: the game does not use translation)
+    pub translate: Option<Vec<RuleStatus>>,
 }
 
 pub struct Runtime {
@@ -126,6 +133,26 @@ pub struct Runtime {
     /// the voice chat's state as last told to the game (and whether the game was connected then)
     voice_told: Option<&'static str>,
     voice_told_to: bool,
+    /// the translator (a game that uses translation)
+    translator: Option<Translator>,
+    /// the rules' states as last told to the game: (its session then, what was told)
+    rules_told: Arc<Mutex<Option<(i64, String)>>>,
+}
+
+/// The game, once it is made (the translator's replies go to it; the translator starts before it).
+type GameSlot = Arc<Mutex<Option<Arc<Mutex<Box<dyn Game>>>>>>;
+
+/// Tells the game the rules' states; remembers what was told in which session (false: no game listening).
+fn tell_rules(game: &Mutex<Box<dyn Game>>, rules: &[RuleStatus], told: &Mutex<Option<(i64, String)>>) -> bool {
+    let g = game.lock().unwrap();
+    let Some(sid) = g.feed().map(|f| f.sid) else { return false };
+    let common: Vec<kd_common::feed::RuleState> = rules.iter().map(RuleStatus::common).collect();
+    let wire = kd_common::feed::rules_wire(&common);
+    if !g.send_rules_state(&common) {
+        return false;
+    }
+    *told.lock().unwrap() = Some((sid, wire));
+    true
 }
 
 /// Where the game's feeds go: the mixer, the voice chat, and the push-to-talk key straight to the listener (as each
@@ -134,6 +161,9 @@ struct Sink {
     mixer: MixerSink,
     listener: Arc<Mutex<Option<Listener>>>,
     voice: Option<kd_voice::Voice>,
+    /// the translator, and the session its ids belong to
+    translator: Option<Translator>,
+    sid: Mutex<Option<i64>>,
 }
 
 impl kd_common::feed::FeedSink for Sink {
@@ -143,6 +173,20 @@ impl kd_common::feed::FeedSink for Sink {
         }
         if let Some(v) = &self.voice {
             v.set_feed(&feed);
+        }
+        if let Some(t) = &self.translator {
+            // (a new session: the game's ids start over)
+            let mut sid = self.sid.lock().unwrap();
+            if *sid != Some(feed.sid) {
+                if sid.is_some() {
+                    t.new_session();
+                }
+                *sid = Some(feed.sid);
+            }
+            t.set_rules(&feed.rules);
+            for (id, text) in &feed.translate {
+                t.request(*id, text); // (ids already queued or answered: ignored)
+            }
         }
         self.mixer.set_feed(feed);
     }
@@ -168,8 +212,33 @@ impl Runtime {
             mixer.lock().unwrap().streams = Some(Box::new(v.playback()));
         }
         let ptt_to: Arc<Mutex<Option<Listener>>> = Arc::new(Mutex::new(None));
-        let sink: Arc<dyn kd_common::feed::FeedSink> =
-            Arc::new(Sink { mixer: MixerSink(mixer.clone()), listener: ptt_to.clone(), voice: voice.clone() });
+        // (translation: the translator's replies and states go straight to the game)
+        let slot: GameSlot = Arc::new(Mutex::new(None));
+        let rules_told: Arc<Mutex<Option<(i64, String)>>> = Arc::new(Mutex::new(None));
+        let translator = kind.translate.then(|| {
+            let (slot, told) = (slot.clone(), rules_told.clone());
+            Translator::mozilla(
+                Arc::new(move |e| {
+                    let Some(game) = slot.lock().unwrap().clone() else { return };
+                    match e {
+                        Event::Reply { id, text } => {
+                            game.lock().unwrap().send_translation(id, &text);
+                        }
+                        Event::Status(rules) => {
+                            tell_rules(&game, &rules, &told);
+                        }
+                    }
+                }),
+                log.clone(),
+            )
+        });
+        let sink: Arc<dyn kd_common::feed::FeedSink> = Arc::new(Sink {
+            mixer: MixerSink(mixer.clone()),
+            listener: ptt_to.clone(),
+            voice: voice.clone(),
+            translator: translator.clone(),
+            sid: Mutex::new(None),
+        });
         let game = kind.make(sink, log.clone(), opts.io_dir.clone());
         // (no test voices: the game's test speakers are silent)
         let mut clips = HashMap::new();
@@ -184,12 +253,14 @@ impl Runtime {
             }
         }
         mixer.lock().unwrap().clips = clips;
+        let game = Arc::new(Mutex::new(game));
+        *slot.lock().unwrap() = Some(game.clone());
         let mut rt = Runtime {
             kind,
             log,
             opts,
             mixer,
-            game: Arc::new(Mutex::new(game)),
+            game,
             output: None,
             listener: None,
             mic: None,
@@ -204,6 +275,8 @@ impl Runtime {
             room_sid: None,
             voice_told: None,
             voice_told_to: false,
+            translator,
+            rules_told,
         };
         if rt.kind.voices {
             rt.open_output();
@@ -296,6 +369,10 @@ impl Runtime {
         self.output = None;
         if let Some(v) = &self.voice {
             v.stop();
+        }
+        // (before the game's lock is taken: the translator's thread may be waiting on it to send a reply)
+        if let Some(t) = &self.translator {
+            t.stop();
         }
         self.game.lock().unwrap().stop();
     }
@@ -403,8 +480,31 @@ impl Runtime {
         }
     }
 
+    /// The rules' states again when the game is in a session they were not told in (a new level, a reconnect); none
+    /// told while there are no rules.
+    fn tell_rules_again(&mut self) {
+        let Some(t) = &self.translator else { return };
+        let sid = {
+            let g = self.game.lock().unwrap();
+            match g.feed() {
+                Some(f) if g.connected() => f.sid,
+                _ => return,
+            }
+        };
+        if self.rules_told.lock().unwrap().as_ref().is_some_and(|(s, _)| *s == sid) {
+            return;
+        }
+        let rules = t.status();
+        if rules.is_empty() {
+            *self.rules_told.lock().unwrap() = Some((sid, String::new()));
+        } else {
+            tell_rules(&self.game, &rules, &self.rules_told);
+        }
+    }
+
     pub fn tick(&mut self) {
         self.send_room();
+        self.tell_rules_again();
         if let Some(v) = &self.voice {
             // (the voice chat's link, for the game to show: each change, and again when the game reconnects)
             let state = v.status().state;
@@ -539,6 +639,7 @@ impl Runtime {
             speakers,
             error: said.error.clone(),
             voice: self.voice.as_ref().map(|v| v.status()),
+            translate: self.translator.as_ref().map(|t| t.status()),
         }
     }
 

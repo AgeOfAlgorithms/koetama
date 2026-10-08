@@ -103,6 +103,15 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
   voices (16 kHz for the speech made from it). Opus is opus-rs (pure Rust, no CMake): unsafe-libopus was tried
   first and REJECTED - its SILK loss concealment gives full-scale noise. `cargo test -p kd-voice --test relay --
   --include-ignored` also runs four Koetamas through the live relay.
+- **Chat translation (2026-10-08; NOT tried in-game yet; the service tested with real downloads,
+  `examples/translate_live.rs`; the Marian engine in plain Rust matches Mozilla's quality at ~2.5x its WASM speed:
+  app/DESIGN.md "The engine"):** feed version 6 (rules, requests; Python reference and
+  fixtures too), messages `x` / `d`, the socket's `translation` / `translate_status`, profiles' `"translate"` (the
+  built-in Teardown profile has it), `kd-translate` catalog / detect / service, the runtime, a Translation card in the
+  window. Open: try it in-game with the mod; Maltese -> English has only a pre-release Mozilla model (used: no release
+  exists; nothing into Maltese); the model
+  list's `filter_expression` (some versions are meant for Android only) is not looked at - the newest numeric version
+  is used, as the benchmark did.
 - The models mirror (our own GitHub release) - after the repo is public.
 - Linux build: made by CI, not tried on a real Linux / Steam Deck; no auto-update there (the app opens the page).
 - The voice dummies' test voices are made with the Windows computer voices: none on Linux (silent dummies).
@@ -426,3 +435,14 @@ room). Measured from Toronto, one hop: Auto 61 ms, North America East 62, West 1
 Koetama writes `pcvx_v5` (each feed version it reads) next to `pcvx_on`: a mod that doesn't find its version tells
 its player to update Koetama. And `pcvx_vc` / `pcvx_vx` (in the room / the relay can't be reached: two failed
 tries in a row), shown on the mod's Voice page; the socket connector gets a `voice` line instead.
+
+**2026-10-08: chat translation (PROTOCOL.md "Translation (version 6)").** The game sends the chat lines it shows
+(feed v6: up to two rules `ja>en,ko>en`, up to 16 lines as `<id>:<hex>`); Koetama translates every stretch of a line
+in a rule's source language and answers each id once (`x`; "" when nothing needed it or the models are not ready),
+and tells the rules' states (`d`: ready / downloading N / loading / unavailable / error). Models: Mozilla's Firefox
+Translations (Remote Settings list, newest purely numeric version, sha256-checked downloads into
+`%LOCALAPPDATA%/Koetama/translate/<from>-<to>/<version>/`; a pair without English goes through it: two models; yue
+uses zh-Hant as a source only). Mixed-language lines are split by script, then by a small detector for Latin and
+Cyrillic text (whatlang, MIT, plus letter and little-word rules and a Maltese check; whatlang has no Maltese): 98.5 %
+of the 2900 NTREX sentences come out as one stretch in the right language (app/DESIGN.md, kd-translate). Translations
+are cut at 1000 characters (TRANSLATION_MAX; speech lines stay at 400).

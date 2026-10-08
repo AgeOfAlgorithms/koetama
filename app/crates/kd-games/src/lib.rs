@@ -13,7 +13,7 @@ pub mod steam;
 pub mod teardown;
 pub mod voices;
 
-use kd_common::feed::{Feed, FeedSink};
+use kd_common::feed::{Feed, FeedSink, RuleState};
 use kd_common::{paths, Log};
 use profile::{Connector, Profile};
 use std::collections::{HashMap, HashSet};
@@ -51,6 +51,17 @@ pub trait Game: Send + Sync {
 
     /// a typed line (--type, --auto): handed to the game as a finished line
     fn send_text(&self, _text: &str) -> bool {
+        false
+    }
+
+    /// the translation of the feed's request `id` (PROTOCOL.md version 6: kind 'x'; "" = nothing to show - exactly one
+    /// per id). False if no game is listening
+    fn send_translation(&self, _id: i64, _text: &str) -> bool {
+        false
+    }
+
+    /// the translation rules' states, sent when they change (kind 'd'). False if no game is listening
+    fn send_rules_state(&self, _rules: &[RuleState]) -> bool {
         false
     }
 
@@ -140,6 +151,8 @@ pub struct GameKind {
     pub voices: bool,
     /// Koetama listens to the microphone and sends what the player said (speech to text is needed)
     pub speech: bool,
+    /// Koetama translates the chat lines the game sends (PROTOCOL.md version 6: the translation models are needed)
+    pub translate: bool,
     /// the profile itself
     pub profile: Arc<Profile>,
 }
@@ -170,6 +183,7 @@ impl GameKind {
             summary: profile.summary(),
             voices: profile.voices,
             speech: profile.speech,
+            translate: profile.translate,
             profile: Arc::new(profile),
         }
     }

@@ -3,17 +3,21 @@
 //! newline-delimited JSON both ways (PROTOCOL.md "Adding a game mod: profiles"):
 //!   mod -> Koetama    {"type":"hello","protocol":1,"game":..,"mod":..}   (optional)
 //!                      {"type":"feed","vol":..,"mic":..,"ptt":..,"lang":..,"live":..,"speakers":[{"id","src","talk","gain","az","el","muffle"}],
-//!                       "room":..,"key":..,"me":..,"to":[ids],"region":..}   (the voice room: PROTOCOL.md version 5)
+//!                       "room":..,"key":..,"me":..,"to":[ids],"region":..,   (the voice room: PROTOCOL.md version 5)
+//!                       "rules":[["ja","en"],..],"translate":[{"id":7,"text":..},..]}   (translation: version 6)
 //!                      (whenever it changes and at least every second: no feed for kd_audio::STALE s = not connected)
 //!   Koetama -> mod    {"type":"hello","app":"Koetama","version":..,"protocol":1}   (on connect)
 //!                      {"type":"msg","kind":"s"|"l"|"f","utt":n,"text":..,"times":[s..],"ago":s}   (what the player said)
 //!                      {"type":"msg","kind":"r","utt":0,"text":"<room>:<key>"}   (a new voice room, once per connection)
 //!                      {"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}   (the voice chat's link)
+//!                      {"type":"translation","id":7,"text":..}   (request 7's translation; "": nothing to show)
+//!                      {"type":"translate_status","rules":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}
+//!                      (the rules' states, on each change; "progress" only while downloading)
 //! No acks or pings: the connection is the liveness.
-use crate::files::{as_used, cut_line, json_secs};
+use crate::files::{as_used, cut_line, cut_translation, json_secs};
 use crate::profile::{Connector, Profile};
 use crate::{intern, voices, Game};
-use kd_common::feed::{self, Feed, FeedSink, Speaker};
+use kd_common::feed::{self, Feed, FeedSink, RuleState, Speaker};
 use kd_common::{paths, Log};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -151,6 +155,37 @@ pub fn parse_socket_feed(v: &Value, seq: i64) -> Result<Feed, String> {
         }
         Some(_) => return Err("\"to\" must be a list of at most 256 player ids".into()),
     };
+    // translation (PROTOCOL.md version 6): rules with bad codes and requests with bad ids are skipped
+    let rules = match v.get("rules") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) if a.len() <= 16 => {
+            let mut pairs = Vec::new();
+            for r in a {
+                match r.as_array().map(Vec::as_slice) {
+                    Some([Value::String(from), Value::String(to)]) => pairs.push((from.clone(), to.clone())),
+                    _ => return Err("each of \"rules\" must be [from, to] (two language codes)".into()),
+                }
+            }
+            feed::translate_rules(pairs)
+        }
+        Some(_) => return Err("\"rules\" must be a list of at most 16 [from, to] rules".into()),
+    };
+    let translate = match v.get("translate") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) if a.len() <= 64 => {
+            let mut items = Vec::new();
+            for r in a {
+                let id = r.get("id").and_then(Value::as_i64);
+                let text = match r.get("text") {
+                    Some(Value::String(t)) => feed::request_text(t.as_bytes()),
+                    _ => return Err("each of \"translate\" must be {\"id\": a whole number, \"text\": a string}".into()),
+                };
+                items.push((id, text));
+            }
+            feed::translate_requests(items)
+        }
+        Some(_) => return Err("\"translate\" must be a list of at most 64 lines".into()),
+    };
     Ok(Feed {
         seq,
         vol: num(v, "vol", 1.0)?.clamp(0.0, 1.0),
@@ -170,7 +205,29 @@ pub fn parse_socket_feed(v: &Value, seq: i64) -> Result<Feed, String> {
         me,
         to,
         region,
+        rules,
+        translate,
     })
+}
+
+/// The translation message (PROTOCOL.md version 6).
+pub fn translation_line(id: i64, text: &str) -> String {
+    serde_json::json!({"type": "translation", "id": id, "text": cut_translation(text)}).to_string()
+}
+
+/// The rules' states message ("progress": 0..1, only while downloading).
+pub fn rules_state_line(rules: &[RuleState]) -> String {
+    let rules: Vec<Value> = rules
+        .iter()
+        .map(|r| {
+            let mut o = serde_json::json!({"from": r.from, "to": r.to, "state": r.state});
+            if r.state == "downloading" {
+                o["progress"] = Value::from((r.progress.clamp(0.0, 1.0) * 100.0).round() / 100.0);
+            }
+            o
+        })
+        .collect();
+    serde_json::json!({"type": "translate_status", "rules": rules}).to_string()
 }
 
 /// The connection being read, on the thread.
@@ -452,6 +509,14 @@ impl Game for SocketGame {
 
     fn set_voice_state(&self, state: &str) {
         self.send_line(&serde_json::json!({"type": "voice", "state": state}).to_string());
+    }
+
+    fn send_translation(&self, id: i64, text: &str) -> bool {
+        self.send_line(&translation_line(id, text))
+    }
+
+    fn send_rules_state(&self, rules: &[RuleState]) -> bool {
+        self.send_line(&rules_state_line(rules))
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

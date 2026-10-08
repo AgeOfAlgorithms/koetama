@@ -118,9 +118,9 @@ fn helper_link_checks() {
     std::fs::write(local.join("other.txt"), "1").unwrap();
     let link = Link::new(vec![local.clone(), shop.clone()], kd_common::null_log());
     link.start();
-    assert_eq!(names(&local), ["other.txt", "pcvx_on", "pcvx_v5"]);
-    assert_eq!(names(&shop), ["pcvx_on", "pcvx_v5"]);
-    assert!(!link.send_text("too early") && names(&local) == ["other.txt", "pcvx_on", "pcvx_v5"], "no game yet: a text is not written");
+    assert_eq!(names(&local), ["other.txt", "pcvx_on", "pcvx_v5", "pcvx_v6"]);
+    assert_eq!(names(&shop), ["pcvx_on", "pcvx_v5", "pcvx_v6"]);
+    assert!(!link.send_text("too early") && names(&local) == ["other.txt", "pcvx_on", "pcvx_v5", "pcvx_v6"], "no game yet: a text is not written");
     let fd = |sid, ack, ping, mic, lang: &str| feed(sid, ack, ping, mic, lang, true);
     link.on_feed(&fd(5, 0, 1, false, "en"), "local-proximity-chat");
     assert!(names(&local).contains(&"pcvx_p1".into()) && link.dir().as_deref() == Some(local.as_path()));

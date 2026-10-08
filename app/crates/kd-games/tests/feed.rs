@@ -1,6 +1,8 @@
 //! The feed and the message files against the Python answers (app/fixtures/feed.json, make_fixtures.py feed_cases):
-//! parse_feed (versions 5/4/3/2, the voice room, what is refused), find_feeds (each feed with its copy of the mod),
-//! text_prefab byte for byte, times_hex. Plus test_helper.py's feed checks.
+//! parse_feed (versions 6/5/4/3/2, the voice room, the translation rules and requests, what is refused), find_feeds
+//! (each feed with its copy of the mod), text_prefab and id_prefab byte for byte, times_hex. Plus test_helper.py's
+//! feed checks.
+use kd_games::files::{id_prefab, FEED_VERSIONS, TRANSLATION_MAX};
 use kd_games::teardown::{find_feeds, parse_feed, text_prefab, times_hex, TEXT_MAX};
 use serde_json::Value;
 
@@ -22,7 +24,7 @@ fn same_f64(want: &Value, got: f64) -> bool {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 27);
+    assert_eq!(cases.len(), 38);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -47,6 +49,20 @@ fn parse_as_python() {
         assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
         let to: Vec<i64> = want["to"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
         assert_eq!(f.to, to, "{text}");
+        let rules: Vec<(String, String)> = want["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (r[0].as_str().unwrap().to_string(), r[1].as_str().unwrap().to_string()))
+            .collect();
+        assert_eq!(f.rules, rules, "{text}");
+        let requests: Vec<(i64, String)> = want["translate"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (r[0].as_i64().unwrap(), r[1].as_str().unwrap().to_string()))
+            .collect();
+        assert_eq!(f.translate, requests, "{text}");
         let sp = want["speakers"].as_object().unwrap();
         assert_eq!(f.speakers.len(), sp.len(), "{text}");
         for (k, v) in sp {
@@ -91,6 +107,24 @@ fn prefabs_byte_identical() {
         assert_eq!(got, c["out"].as_str().unwrap());
     }
     assert_eq!(fx["TEXT_MAX"].as_u64().unwrap() as usize, TEXT_MAX);
+}
+
+#[test]
+fn id_prefabs_byte_identical() {
+    let fx = fixture();
+    let cases = fx["id_prefab"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for c in cases {
+        let got = id_prefab(c["text"].as_str().unwrap(), c["kind"].as_str().unwrap().chars().next().unwrap(), c["id"].as_i64().unwrap());
+        assert_eq!(got, c["out"].as_str().unwrap());
+        // (an id that fits a u32: the same as the speech messages' prefab)
+        if let Ok(u) = u32::try_from(c["id"].as_i64().unwrap()) {
+            assert_eq!(text_prefab(c["text"].as_str().unwrap(), c["kind"].as_str().unwrap().chars().next().unwrap(), u, None, None), got);
+        }
+    }
+    assert_eq!(fx["TRANSLATION_MAX"].as_u64().unwrap() as usize, TRANSLATION_MAX);
+    let versions: Vec<u32> = fx["FEED_VERSIONS"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+    assert_eq!(versions, FEED_VERSIONS, "the same feed versions announced");
 }
 
 #[test]

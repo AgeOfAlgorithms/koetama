@@ -48,6 +48,44 @@ pub fn voice_text(v: &kd_voice::VoiceStatus) -> (String, Color32) {
     }
 }
 
+/// A language's English name ("Japanese"; a code Koetama does not know: the code).
+fn english_name(code: &str) -> String {
+    kd_speech::lang_info(code).map_or_else(|| code.to_string(), |l| l.english.to_string())
+}
+
+/// A translation rule as the window says it: "Japanese → English", its state in words and its colour.
+pub fn rule_text(r: &kd_translate::service::RuleStatus) -> (String, String, Color32) {
+    use kd_translate::service::State;
+    let rule = format!("{} → {}", english_name(&r.from), english_name(&r.to));
+    let (state, colour) = match r.state {
+        State::Ready => ("ready".to_string(), theme::GOOD),
+        State::Downloading(f) => (format!("downloading {} %", kd_translate::service::percent(f)), theme::WARN),
+        State::Loading => ("loading".to_string(), theme::WARN),
+        State::Unavailable => ("no model for it".to_string(), theme::MUTED),
+        State::Error => ("failed - trying again in a minute".to_string(), theme::BAD),
+    };
+    (rule, state, colour)
+}
+
+/// The translation as the command line says it: "ja → en ready, ko → en 42 %" ("no rules" while the game sets none).
+pub fn translate_line(rules: &[kd_translate::service::RuleStatus]) -> String {
+    use kd_translate::service::State;
+    if rules.is_empty() {
+        return "no rules".into();
+    }
+    let parts: Vec<String> = rules
+        .iter()
+        .map(|r| {
+            let state = match r.state {
+                State::Downloading(f) => format!("{} %", kd_translate::service::percent(f)),
+                ref s => s.word().to_string(),
+            };
+            format!("{} → {} {state}", r.from, r.to)
+        })
+        .collect();
+    parts.join(", ")
+}
+
 pub fn download_text(d: &(String, u64, u64)) -> String {
     let (_, done, total) = d;
     if *total > 0 {
@@ -752,7 +790,8 @@ impl eframe::App for App {
                         ui.add_space(4.0);
 
                         // ---- sound
-                        theme::card(ui, "Sound", |ui| {
+                        // (a translate-only game mod: no sound to set)
+                        if self.kind.voices || self.kind.speech { theme::card(ui, "Sound", |ui| {
                             egui::Grid::new("sound")
                                 .num_columns(3)
                                 .spacing([12.0, 8.0])
@@ -821,7 +860,7 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                                     }
 }
                                 });
-                        });
+                        }); }
                         if ui.ctx().input(|i| i.pointer.any_released()) {
                             self.settings.save(); // (the volume: saved when the slider is let go)
                         }
@@ -887,6 +926,32 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                             }
                         }); }
                         ui.add_space(2.0);
+
+                        // ---- translation (a game that uses it: the rules are set in the game)
+                        if let Some(rules) = self.status.as_ref().and_then(|s| s.translate.as_ref()) {
+                            theme::card(ui, "Translation", |ui| {
+                                if rules.is_empty() {
+                                    ui.label(
+                                        RichText::new("off - the languages to translate are chosen in the game")
+                                            .color(theme::MUTED),
+                                    );
+                                }
+                                egui::Grid::new("translation").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                                    for r in rules {
+                                        let (rule, state, colour) = rule_text(r);
+                                        ui.label(RichText::new(rule).color(theme::FG));
+                                        theme::pill(ui, &state, colour);
+                                        ui.end_row();
+                                    }
+                                });
+                                ui.label(
+                                    RichText::new("on this PC, with Mozilla's translation models")
+                                        .size(12.0)
+                                        .color(theme::MUTED),
+                                );
+                            });
+                            ui.add_space(2.0);
+                        }
 
                         // ---- the log
                         theme::sunk(ui, |ui| {

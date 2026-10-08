@@ -1,0 +1,1287 @@
+[
+ {
+  "src": "es",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "es",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-es-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "fr",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "fr",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-fr-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "de",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "de",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-de-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "it",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "it",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-it-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "pt",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "pt",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ROMANCE-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "nl",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "nl",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-nl-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "pl",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "pl",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-pl-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "uk",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "uk",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-uk-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ru",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "ru",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ru-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "zh",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "zh-Hans",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-zh-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "yue",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "zh-Hant",
+    "en"
+   ]
+  ],
+  "opus": null
+ },
+ {
+  "src": "ja",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "ja",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ja-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ko",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "ko",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-ko-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "cs",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "cs",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-cs-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "sk",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "sk",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-sk-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ro",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "ro",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ROMANCE-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "hr",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "hr",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-zls-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "bg",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "bg",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-bg-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "fi",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "fi",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-fi-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "sv",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "sv",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-sv-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "hu",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "hu",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-hu-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "da",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "da",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-da-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "et",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "et",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-et-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "lv",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "lv",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-lv-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "lt",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "lt",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-lt-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "sl",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "sl",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-zls-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "el",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "el",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-el-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "mt",
+  "tgt": "en",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "mt",
+    "en"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-mt-en",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "es",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "es"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-es",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "fr",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "fr"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-fr",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "de",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "de"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-de",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "it",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "it"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-it",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "pt",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "pt"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-pt",
+    "por"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "nl",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "nl"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-nl",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "pl",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "pl"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-zlw",
+    "pol"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "uk",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "uk"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-uk",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "ru",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "ru"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-ru",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "zh",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "zh-Hans"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-zh",
+    "cmn_Hans"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "ja",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "ja"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-jap",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "ko",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "ko"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-ko",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "cs",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "cs"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-cs",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "sk",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "sk"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-sk",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "ro",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "ro"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-ro",
+    "ron"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "hr",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "hr"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-zls",
+    "hrv"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "bg",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "bg"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-bg",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "fi",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "fi"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-fi",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "sv",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "sv"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-sv",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "hu",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "hu"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-hu",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "da",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "da"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-da",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "et",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "et"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-et",
+    "est"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "lv",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "lv"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-lv",
+    "lav"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "lt",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "lt"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-lt",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "sl",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "sl"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-en-zls",
+    "slv"
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "el",
+  "kind": "with English",
+  "mozilla": [
+   [
+    "en",
+    "el"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-en-el",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "en",
+  "tgt": "mt",
+  "kind": "with English",
+  "mozilla": null,
+  "opus": [
+   [
+    "opus-mt-en-mt",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "de",
+  "tgt": "fr",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "de",
+    "en"
+   ],
+   [
+    "en",
+    "fr"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-de-fr",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "fr",
+  "tgt": "de",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "fr",
+    "en"
+   ],
+   [
+    "en",
+    "de"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-fr-de",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "es",
+  "tgt": "it",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "es",
+    "en"
+   ],
+   [
+    "en",
+    "it"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-es-it",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "it",
+  "tgt": "es",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "it",
+    "en"
+   ],
+   [
+    "en",
+    "es"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-it-es",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ru",
+  "tgt": "uk",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "ru",
+    "en"
+   ],
+   [
+    "en",
+    "uk"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ru-uk",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "uk",
+  "tgt": "ru",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "uk",
+    "en"
+   ],
+   [
+    "en",
+    "ru"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-uk-ru",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "pl",
+  "tgt": "cs",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "pl",
+    "en"
+   ],
+   [
+    "en",
+    "cs"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-pl-en",
+    null
+   ],
+   [
+    "opus-mt-en-cs",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "cs",
+  "tgt": "pl",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "cs",
+    "en"
+   ],
+   [
+    "en",
+    "pl"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-cs-en",
+    null
+   ],
+   [
+    "opus-mt-en-zlw",
+    "pol"
+   ]
+  ]
+ },
+ {
+  "src": "ja",
+  "tgt": "ko",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "ja",
+    "en"
+   ],
+   [
+    "en",
+    "ko"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ja-en",
+    null
+   ],
+   [
+    "opus-mt-tc-big-en-ko",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ko",
+  "tgt": "ja",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "ko",
+    "en"
+   ],
+   [
+    "en",
+    "ja"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-ko-en",
+    null
+   ],
+   [
+    "opus-mt-en-jap",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "zh",
+  "tgt": "ja",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "zh-Hans",
+    "en"
+   ],
+   [
+    "en",
+    "ja"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-tc-big-zh-ja",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ja",
+  "tgt": "zh",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "ja",
+    "en"
+   ],
+   [
+    "en",
+    "zh-Hans"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ja-en",
+    null
+   ],
+   [
+    "opus-mt-en-zh",
+    "cmn_Hans"
+   ]
+  ]
+ },
+ {
+  "src": "de",
+  "tgt": "ja",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "de",
+    "en"
+   ],
+   [
+    "en",
+    "ja"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-de-en",
+    null
+   ],
+   [
+    "opus-mt-en-jap",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ja",
+  "tgt": "de",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "ja",
+    "en"
+   ],
+   [
+    "en",
+    "de"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ja-de",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "ru",
+  "tgt": "es",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "ru",
+    "en"
+   ],
+   [
+    "en",
+    "es"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-ru-es",
+    null
+   ]
+  ]
+ },
+ {
+  "src": "es",
+  "tgt": "ru",
+  "kind": "between two others",
+  "mozilla": [
+   [
+    "es",
+    "en"
+   ],
+   [
+    "en",
+    "ru"
+   ]
+  ],
+  "opus": [
+   [
+    "opus-mt-es-ru",
+    null
+   ]
+  ]
+ }
+]

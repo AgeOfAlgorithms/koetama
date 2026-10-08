@@ -1,0 +1,11 @@
+# downloaded or regenerated (prep.py, run_mozilla.mjs, run_opus.py, mt_bench): models, test sentences, raw outputs
+models/
+opus_ct2/
+opus_src/
+node_modules/
+data/
+results/
+results_rust.json
+*.log
+score.out
+try.mjs

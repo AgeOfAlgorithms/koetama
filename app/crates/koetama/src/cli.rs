@@ -117,6 +117,9 @@ fn status_line(st: &Status, needs: &str) -> String {
             (sp.muffle * 100.0).round()
         ));
     }
+    if let Some(rules) = &st.translate {
+        parts.push(format!("translate: {}", crate::gui::translate_line(rules)));
+    }
     if let Some(v) = &st.voice {
         parts.push(match (v.state, v.heard) {
             ("connected", 0) => "voice: in the room".into(),

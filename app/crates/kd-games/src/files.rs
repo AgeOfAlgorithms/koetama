@@ -4,8 +4,8 @@
 //!                      feed string (parse_feed's format), a second one the tag of the copy that wrote it
 //!   Koetama -> game   small files in the folder the mod looks in: <prefix>on (running), <prefix>v<n> (it reads feed
 //!                      version n: one for each, FEED_VERSIONS), <prefix>p<n> (the answer to ping n), <prefix>t<n>.<ext>
-//!                      (message n: what the player said; a Teardown prefab or JSON), <prefix>vc / <prefix>vx (the
-//!                      voice chat is in its room / can't reach the relay)
+//!                      (message n: what the player said, a translation, the translation rules' states; a Teardown
+//!                      prefab or JSON), <prefix>vc / <prefix>vx (the voice chat is in its room / can't reach the relay)
 //! SAFETY: it writes only into folders that exist (never creates one), and deletes only files whose names are exactly
 //! its own patterns (Link::owns) - the prefix must be 3+ letters, digits or _ ending in _ (profile::safe_prefix).
 use crate::profile::{self, FilesConfig, MessageFormat, Profile};
@@ -22,9 +22,11 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const TEXT_MAX: usize = 400; // characters of one text file
+/// characters of one translation (kind 'x': a 400-byte line can come back longer)
+pub const TRANSLATION_MAX: usize = 1000;
 /// the feed versions Koetama reads, each announced by a <prefix>v<n> file next to <prefix>on (a mod sees whether
-/// this Koetama knows its feed: older versions are read too, but only the newest has the voice room)
-pub const FEED_VERSIONS: [u32; 1] = [5];
+/// this Koetama knows its feed: older versions are read too; version 5 has the voice room, 6 also translation)
+pub const FEED_VERSIONS: [u32; 2] = [5, 6];
 
 /// Teardown's file prefix (the files connector's default)
 pub const PREFIX: &str = profile::DEFAULT_PREFIX;
@@ -81,19 +83,21 @@ fn py_float(s: &str) -> Option<f64> {
 }
 
 // ---------------------------------------------------------------- the feed (game -> Koetama)
-/// '5|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|id,src,talk,gain,az,el,muffle;...' (versions 4, 3 and
-/// 2 too: no room) -> a Feed, or None. A bad room, key or id: no room; bad ids in `to`: skipped (feed::voice_room,
-/// voice_to)
+/// '6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|rules|requests|id,src,talk,gain,az,el,muffle;...'
+/// (version 5: no rules or requests; 4, 3 and 2: no room either) -> a Feed, or None. A bad room, key or id: no room;
+/// bad ids in `to`: skipped (feed::voice_room, voice_to); malformed rules and requests: skipped (feed::parse_rules,
+/// parse_requests)
 pub fn parse_feed(text: &str) -> Option<Feed> {
     let p: Vec<&str> = text.split('|').collect();
     let (seq, vol, sid, ack, ping, mic, lang, live, rest) = match (p[0], p.len()) {
+        ("6", 17) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[16]),
         ("5", 15) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[14]),
         ("4", 10) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]),
         ("3", 9) => (p[1], p[2], p[3], p[4], p[5], p[6], p[7], "1", p[8]),
         ("2", 8) => (p[1], p[2], p[3], p[4], p[5], p[6], "en", "1", p[7]),
         _ => return None,
     };
-    let ((room, key, me), to, region) = if p[0] == "5" {
+    let ((room, key, me), to, region) = if p[0] == "5" || p[0] == "6" {
         let to = if p[12].is_empty() { Vec::new() } else { feed::voice_to(p[12].split(',').map(feed::player_id)) };
         let rkm = feed::voice_room(p[9], p[10], feed::player_id(p[11]));
         let region = feed::voice_region(p[13], &rkm.0);
@@ -101,6 +105,8 @@ pub fn parse_feed(text: &str) -> Option<Feed> {
     } else {
         ((String::new(), String::new(), 0), Vec::new(), String::new())
     };
+    let (rules, translate) =
+        if p[0] == "6" { (feed::parse_rules(p[14]), feed::parse_requests(p[15])) } else { (Vec::new(), Vec::new()) };
     let mut speakers = BTreeMap::new();
     for item in rest.split(';') {
         if item.is_empty() {
@@ -143,6 +149,8 @@ pub fn parse_feed(text: &str) -> Option<Feed> {
         me,
         to,
         region,
+        rules,
+        translate,
     })
 }
 
@@ -348,6 +356,24 @@ pub fn text_prefab(text: &str, kind: char, utt: u32, times: Option<&[f64]>, ago:
     };
     let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
     format!("<prefab version=\"1.5.2\">\n\t<body tags=\"pcvx k={kind} u={utt} t={hex}{extra}\"/>\n</prefab>\n")
+}
+
+/// A message with an id and a text only (PROTOCOL.md version 6: 'x' the translation of request u, 'd' the rules'
+/// states; any id, not only a u32 utterance): Python's text_prefab(text, kind, id).
+pub fn id_prefab(text: &str, kind: char, id: i64) -> String {
+    let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("<prefab version=\"1.5.2\">\n\t<body tags=\"pcvx k={kind} u={id} t={hex}\"/>\n</prefab>\n")
+}
+
+/// id_prefab as the json format writes it: {"k": kind, "u": id, "t": the text}.
+pub fn id_json(text: &str, kind: char, id: i64) -> String {
+    let t = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
+    format!("{{\"k\":\"{kind}\",\"u\":{id},\"t\":{t}}}\n")
+}
+
+/// A translation as it is sent: stripped, at most TRANSLATION_MAX characters.
+pub(crate) fn cut_translation(text: &str) -> String {
+    py_strip(text).chars().take(TRANSLATION_MAX).collect()
 }
 
 /// Seconds as JSON, to 1/100 s (never NaN or infinite: 0).
@@ -663,24 +689,43 @@ impl Link {
     /// when the line's audio began) - written with how long ago t0 is now. False if no game is listening.
     pub fn send_msg(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool {
         let (text, times) = cut_line(text, times);
+        if kind == 'l' && text.is_empty() {
+            return false;
+        }
+        self.write_msg(kind, utt as i64, &text, times.as_deref(), t0)
+    }
+
+    /// The translation of request `id` (PROTOCOL.md version 6, kind 'x'; "" = nothing to show). False if no game is
+    /// listening.
+    pub fn send_translation(&self, id: i64, text: &str) -> bool {
+        self.write_msg('x', id, &cut_translation(text), None, None)
+    }
+
+    /// The translation rules' states (kind 'd': feed::rules_wire). False if no game is listening.
+    pub fn send_rules_state(&self, rules: &[feed::RuleState]) -> bool {
+        self.write_msg('d', 0, &feed::rules_wire(rules), None, None)
+    }
+
+    /// One numbered message file (written whole: through <prefix>w<n>.tmp), kept until the game acks it.
+    fn write_msg(&self, kind: char, u: i64, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool {
         let mut s = self.lock();
         let Some(dir) = s.dir.clone() else {
             return false;
         };
-        if kind == 'l' && text.is_empty() {
-            return false;
-        }
         s.n += 1;
         let path = self.path(&dir, &format!("t{}.{}", s.n, self.rules.message.ext()));
         let tmp = self.path(&dir, &format!("w{}.tmp", s.n));
-        let ago = match (&times, t0) {
+        let ago = match (times, t0) {
             (Some(_), Some(t0)) => Some(t0.elapsed().as_secs_f64()),
             _ => None,
         };
-        let times = if ago.is_some() { times.as_deref() } else { None };
-        let written = match self.rules.message {
-            MessageFormat::TeardownPrefab => write_text(&tmp, &text_prefab(&text, kind, utt, times, ago)),
-            MessageFormat::Json => fs::write(&tmp, json_message(&text, kind, utt, times, ago)),
+        let times = if ago.is_some() { times } else { None };
+        // (a speech message's utterance is a u32; a translation's id is the game's: any positive number)
+        let written = match (self.rules.message, u32::try_from(u)) {
+            (MessageFormat::TeardownPrefab, Ok(utt)) => write_text(&tmp, &text_prefab(text, kind, utt, times, ago)),
+            (MessageFormat::Json, Ok(utt)) => fs::write(&tmp, json_message(text, kind, utt, times, ago)),
+            (MessageFormat::TeardownPrefab, Err(_)) => write_text(&tmp, &id_prefab(text, kind, u)),
+            (MessageFormat::Json, Err(_)) => fs::write(&tmp, id_json(text, kind, u)),
         };
         // (appears complete, never half-written)
         if let Err(e) = written.and_then(|_| fs::rename(&tmp, &path)) {
@@ -811,6 +856,10 @@ pub(crate) fn as_used(mut feed: Feed, p: &Profile) -> Feed {
     if !p.voices {
         feed.speakers.clear();
     }
+    if !p.translate {
+        feed.rules.clear();
+        feed.translate.clear();
+    }
     feed
 }
 
@@ -838,8 +887,10 @@ impl Game for FilesGame {
         let on_feed = move |feed: Feed, tag: &str| {
             let feed = as_used(feed, &p);
             *keep.lock().unwrap_or_else(|e| e.into_inner()) = Some(feed.clone());
-            sink.set_feed(feed.clone());
+            // (the link first: a new session's files are set up before anything the sink starts - a translation
+            // of this feed's lines - can answer into it)
             link.on_feed(&feed, tag);
+            sink.set_feed(feed);
         };
         self.reader = Some(FeedReader::start_with(self.save.clone(), FeedReader::POLL, self.rules.clone(), on_feed));
     }
@@ -859,6 +910,14 @@ impl Game for FilesGame {
 
     fn send_text(&self, text: &str) -> bool {
         self.link.send_text(text)
+    }
+
+    fn send_translation(&self, id: i64, text: &str) -> bool {
+        self.link.send_translation(id, text)
+    }
+
+    fn send_rules_state(&self, rules: &[feed::RuleState]) -> bool {
+        self.link.send_rules_state(rules)
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

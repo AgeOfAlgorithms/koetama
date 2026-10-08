@@ -20,6 +20,7 @@ from games.base import Game
 
 APPID = 1167630
 TEXT_MAX = 400         # characters of one text file
+TRANSLATION_MAX = 1000  # characters of one translation (kind "x": a 400-byte line can come back longer)
 FEED = re.compile(rb'<pcvx>\s*<f\s+value="([^"]*)"\s*/>\s*</pcvx>')
 MODTAG = re.compile(rb'<((?:local|steam)-[^\s/>]+)>')
 
@@ -80,18 +81,62 @@ REGIONS = ('wnam', 'enam', 'sam', 'weur', 'eeur', 'apac', 'apac-ne', 'apac-se', 
 
 
 # the feed versions this reads, each announced by a <prefix>v<n> file next to <prefix>on (Rust: files.rs FEED_VERSIONS)
-FEED_VERSIONS = (5,)
+FEED_VERSIONS = (5, 6)
+
+# translation (version 6; Rust: kd_common::feed): at most 2 rules, 16 lines of at most 400 bytes, ids of 1-15 digits
+MAX_RULES, MAX_REQUESTS, MAX_REQUEST_BYTES = 2, 16, 400
+LANG_CODE = re.compile(r'[A-Za-z0-9_-]{1,16}')
+
+
+def parse_rules(s):
+    """'ja>en,ko>en' -> [('ja', 'en'), ('ko', 'en')]: good codes only, each rule once, the first MAX_RULES"""
+    out = []
+    for item in s.split(',') if s else ():
+        a, sep, b = item.partition('>')
+        if len(out) < MAX_RULES and sep and LANG_CODE.fullmatch(a) and LANG_CODE.fullmatch(b) and (a, b) not in out:
+            out.append((a, b))
+    return out
+
+
+def request_text(b):
+    """a line to translate: good UTF-8 of at most MAX_REQUEST_BYTES, else '' (answered '')"""
+    if len(b) > MAX_REQUEST_BYTES:
+        return ''
+    try:
+        return b.decode('utf-8')
+    except UnicodeDecodeError:
+        return ''
+
+
+def parse_requests(s):
+    """'<id>:<hex of the UTF-8 text>;...' -> [(id, text)]: an item without a good id (1 to 15 ASCII digits, at least
+    1) skipped; a bad hex or text keeps its id with ''; each id once (the first), the first MAX_REQUESTS"""
+    out = []
+    for item in s.split(';'):
+        rid, sep, hx = item.partition(':')
+        if not item or not sep or not re.fullmatch(r'[0-9]{1,15}', rid) or int(rid) < 1:
+            continue
+        if len(out) == MAX_REQUESTS:
+            break
+        if int(rid) in [i for i, _ in out]:
+            continue
+        good = len(hx) % 2 == 0 and re.fullmatch(r'[0-9a-fA-F]*', hx)
+        out.append((int(rid), request_text(bytes.fromhex(hx)) if good else ''))
+    return out
 
 
 def parse_feed(text):
-    """'5|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|id,src,talk,gain,az,el,muffle;...' (versions 4, 3
-    and 2 too: no room) -> a dict, or None. A bad room, key or id: no room ('', '', 0); bad ids in `to` are skipped
-    (each kept once, at most 64)"""
+    """'6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|rules|requests|id,src,talk,gain,az,el,muffle;...'
+    (version 5: no rules or requests; 4, 3 and 2: no room either) -> a dict, or None. A bad room, key or id: no room
+    ('', '', 0); bad ids in `to` are skipped (each kept once, at most 64); malformed rules and requests skipped
+    (parse_rules, parse_requests)"""
     try:
         parts = text.split('|')
         live = '1'
-        room = key = me = to = region = ''
-        if parts[0] == '5' and len(parts) == 15:
+        room = key = me = to = region = rules = requests = ''
+        if parts[0] == '6' and len(parts) == 17:
+            _, seq, vol, sid, ack, ping, mic, lang, live, room, key, me, to, region, rules, requests, rest = parts
+        elif parts[0] == '5' and len(parts) == 15:
             _, seq, vol, sid, ack, ping, mic, lang, live, room, key, me, to, region, rest = parts
         elif parts[0] == '4' and len(parts) == 10:
             _, seq, vol, sid, ack, ping, mic, lang, live, rest = parts
@@ -122,7 +167,8 @@ def parse_feed(text):
         # mic: 0 off, 1 listen (voice detection), 2 / 3 push to talk with the key up / held (ptt; None: no push to talk)
         return dict(seq=int(seq), vol=float(vol), sid=int(sid), ack=int(ack), ping=int(ping), mic=mic in ('1', '2', '3'),
                     ptt={'2': False, '3': True}.get(mic), lang=lang or 'en', live=live != '0', speakers=speakers,
-                    room=room, key=key, me=me, to=ids, region=region)
+                    room=room, key=key, me=me, to=ids, region=region, rules=parse_rules(rules),
+                    translate=parse_requests(requests))
     except ValueError:
         return None
 
@@ -287,6 +333,14 @@ class Link:
         text = text.strip()
         return bool(text) and self.send_msg('f', 0, text)
 
+    def send_translation(self, rid, text):
+        """the translation of request rid (version 6, kind "x"; "" = nothing to show); False if no game is listening"""
+        return self._write('x', rid, text.strip()[:TRANSLATION_MAX])
+
+    def send_rules_state(self, text):
+        """the translation rules' states (kind "d": "ja>en=ready,ko>en=downloading 42"); False if no game is listening"""
+        return self._write('d', 0, text)
+
     def send_msg(self, kind, utt, text, times=None, t0=None):
         """hand a message to the game: kind "s" (the player started talking: no text yet), "l" (the live words so far)
         or "f" (the finished line; "" = nothing made out: the live words go); times: each unit's start (s after t0,
@@ -297,8 +351,14 @@ class Link:
         if times is not None:                                # (cut with the text: the first n units keep their times)
             n = len(asr.units(text))
             times = list(times)[:n] if len(times) >= n else None
+        if kind == 'l' and not text:
+            return False
+        return self._write(kind, utt, text, times, t0)
+
+    def _write(self, kind, utt, text, times=None, t0=None):
+        """one numbered message file (written whole), kept until the game acks it"""
         with self.lock:
-            if self.dir is None or (kind == 'l' and not text):
+            if self.dir is None:
                 return False
             self.n += 1
             path = self._path(self.dir, 't%d.xml' % self.n)

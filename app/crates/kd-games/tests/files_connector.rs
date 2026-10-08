@@ -67,10 +67,10 @@ fn json_messages_and_a_safe_sweep() {
     assert_eq!(link.dirs(), [a.clone(), b.clone(), gone.clone()]);
     link.start();
     let mut want: Vec<String> =
-        DECOYS.iter().map(|s| s.to_string()).chain(["talky_on".into(), "talky_p5".into(), "talky_v5".into()]).collect();
+        DECOYS.iter().map(|s| s.to_string()).chain(["talky_on".into(), "talky_p5".into(), "talky_v5".into(), "talky_v6".into()]).collect();
     want.sort();
-    assert_eq!(names(&a), want, "old files of mine swept, the decoys kept; on and the feed version (v5) written");
-    assert_eq!(names(&b), ["talky_on", "talky_v5"]);
+    assert_eq!(names(&a), want, "old files of mine swept, the decoys kept; on and the feed versions (v5, v6) written");
+    assert_eq!(names(&b), ["talky_on", "talky_v5", "talky_v6"]);
     // the voice chat's state: vc in the room, vx unreachable, neither otherwise - in every folder
     link.set_voice("connected");
     assert!(names(&a).contains(&"talky_vc".into()) && names(&b).contains(&"talky_vc".into()));

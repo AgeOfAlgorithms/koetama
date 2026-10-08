@@ -58,6 +58,11 @@ MODELS = [
     dict(name='Silero VAD v5', by='Silero Team', license='MIT', text='silero-vad.txt', source='https://github.com/snakers4/silero-vad',
          use='finding where speech starts and ends',
          changes='The ONNX file as published by the sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx/releases).'),
+    dict(name='Firefox Translations models (translations-models, Bergamot / Marian)', by='Mozilla',
+         license='Mozilla Public License 2.0 (MPL-2.0)', text='MPL-2.0.txt',
+         source='https://github.com/mozilla/translations (the files: Mozilla Remote Settings, collection translations-models)',
+         use='chat translation (only the directions a translation rule needs)',
+         changes="None: downloaded as Mozilla publishes them and run by Koetama's own engine (app/crates/kd-translate)."),
 ]
 
 
@@ -153,7 +158,7 @@ def main():
     rule = '=' * 100
     L = ['THIRD-PARTY NOTICES: Koetama (github.com/AgeOfAlgorithms/koetama)',
          '(written by engine/make_notices.py on %s; do not edit by hand)' % time.strftime('%Y-%m-%d'), '',
-         'Koetama downloads the speech models below the first time it needs them (the language detector ships with it) '
+         'Koetama downloads the speech and translation models below the first time it needs them (the language detector ships with it) '
          'and runs them on this computer. It is built from the libraries below. Each is listed with its authors, its '
          'license, where it comes from and what was changed; the license texts follow.', '', rule, 'MODELS', rule, '']
     texts = []

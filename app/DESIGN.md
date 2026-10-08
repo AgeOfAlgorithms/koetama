@@ -13,6 +13,7 @@ itself; each crate's tests compare against them. Do not change the Python side t
       crates/kd-games         the Game trait, game mod profiles, connectors (files, socket), Steam (engine/games/, steam.py)
       crates/kd-update        updates from GitHub Releases                                        (engine/updater.py)
       crates/kd-voice         real voices between players: the relay, encryption, Opus, jitter   (new: no Python)
+      crates/kd-translate     chat translation: Mozilla's models, language detection, the translator (engine/mt.py)
       crates/koetama         the program: runtime, window (egui), command line, selftest         (runtime.py, koetama.py, teardown_helper.py)
 
 Toolchain: Rust stable (MSVC on Windows). Engines: `sherpa-onnx` 1.13.8 (feature `shared`: sherpa-onnx-c-api.dll +
@@ -37,6 +38,11 @@ feed::{Feed {seq, vol, sid, ack, ping, mic, ptt, lang, live, speakers: BTreeMap<
             room, key, me, to},                      // (version 5: the voice room; "" / 0 / [] without one)
        Speaker {src, talk, gain, az, el, muffle},   // src 0: a real player, id = their player id
        MAX_ID, MAX_TO, player_id(&str), voice_room(room, key, me) -> (room, key, me), voice_to(ids) -> Vec<i64>,
+       // version 6 (translation): Feed { rules: Vec<(from, to)>, translate: Vec<(id, text)> } ([] without)
+       MAX_RULES, MAX_REQUESTS, MAX_REQUEST_BYTES, MAX_REQUEST_ID, lang_code, parse_rules("ja>en,ko>en"),
+       parse_requests("<id>:<hex>;..."), translate_rules(pairs), translate_requests(items), request_id, request_text,
+       RuleState { from, to, state: "ready" | "downloading" | "loading" | "unavailable" | "error", progress },
+       rules_wire(&[RuleState]) -> "ja>en=ready,ko>en=downloading 42",
        trait FeedSink: Send + Sync { fn set_feed(&self, Feed); fn fresh(&self) -> bool }}
 ```
 The crates below depend only on kd-common (not on each other), so they can be written at the same time; the program
@@ -158,6 +164,8 @@ pub trait Game: Send {
     fn start(&mut self);  fn stop(&mut self);
     fn send(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool;
     fn send_text(&self, text: &str) -> bool;                             // a typed line (--type, --auto)
+    fn send_translation(&self, id: i64, text: &str) -> bool;             // version 6: kind 'x' (one per request id)
+    fn send_rules_state(&self, rules: &[RuleState]) -> bool;             // version 6: kind 'd' (on each change)
     fn test_voices(&self) -> HashMap<i64, PathBuf>;                      // wav files (the program loads them)
     fn speaker_name(&self, src: i64) -> String;
     fn feed(&self) -> Option<Feed>;                                      // the latest
@@ -171,8 +179,10 @@ pub mod steam { steam_root, libraries, app_library, install_dir, workshop_dir, p
 pub mod profile { Profile, Connector, FilesConfig, SocketConfig, MessageFormat, TestVoice, PathTemplate, PathSpec,
                   Place, safe_prefix, this_pc }                          // the profile format, validation, summary
 pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, parse_feed, find_feeds, text_prefab,
-                json_message, times_hex }                               // the files connector
-pub mod socket { SocketGame, parse_socket_feed, PROTOCOL, MAX_LINE }   // the socket connector
+                json_message, times_hex, id_prefab, id_json, FEED_VERSIONS = [5, 6], TRANSLATION_MAX }
+                                                                        // the files connector
+pub mod socket { SocketGame, parse_socket_feed, translation_line, rules_state_line, PROTOCOL, MAX_LINE }
+                                                                        // the socket connector
 pub mod voices { make_in, for_profile }                                 // test voices (Windows SAPI)
 pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedReader, times_hex, text_prefab, Link,
                    make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown (= FilesGame), profile() }
@@ -271,6 +281,7 @@ Connectors:
                                        // "listens on 127.0.0.1:<port>" (placeholders already resolved here)
     pub voices: bool,                  // "uses": "voices" - Koetama plays the speakers from the feed (audio output)
     pub speech: bool,                  // "uses": "speech" - Koetama listens to the mic, sends what was said
+    pub translate: bool,               // "uses": "translate" - Koetama translates the chat lines the feed sends
     pub profile: Arc<Profile>,         // the parsed profile
 }
 impl GameKind { pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game>; }
@@ -285,5 +296,124 @@ pub fn bad_profiles() -> Vec<(PathBuf, String)>;                   // files in t
 games()/by_id()/bad_profiles() are cached until the folder's *.json files change (cheap every frame; the first call
 resolves the placeholders: registry + Steam's .vdf files, a few ms). make() is cheap; Game::start() starts the
 connector's thread; Game::test_voices() blocks (PowerShell makes missing wavs, seconds each). A profile's "uses"
-lists "voices" and/or "speech" (default both): a speech-only game's feed has no speakers, a voices-only game's feed
-never asks for the microphone (the connectors enforce both).
+lists "voices", "speech" and/or "translate" (default: voices and speech): a speech-only game's feed has no speakers,
+a voices-only game's feed never asks for the microphone, a game without "translate" has no rules or requests (the
+connectors enforce all three). A translate-only game needs no microphone, no sound output and no relay.
+
+## kd-translate (PROTOCOL.md "Translation (version 6)"; engine/mt.py is the engine's reference)
+
+Chat translation on the player's PC with Mozilla's Firefox Translations models (MPL-2.0, ~20-55 MB a direction,
+downloaded the first time a rule needs them). Four modules:
+
+```rust
+pub mod engine { Model::load(dir) -> Result<Model, String>; model.translate(text) -> Result<String, String>; bytes() }
+                                       // one direction (Marian, 8-bit) in plain Rust: below
+pub mod catalog {                      // Mozilla's list and the downloads
+    RECORDS_URL, CDN_URL, LIST_MAX_AGE (a day), LIST_FILE, root() -> data_dir()/translate,
+    mozilla_code(lang, source) -> Option<&str>,    // zh -> zh-Hans; yue -> zh-Hant as a SOURCE only; else the same
+    numeric_version("2.1") -> Some([2, 1]),        // pre-releases ("1.0a1"): None - used only by a direction with
+                                                   // no release at all (Maltese -> English)
+    ModelFile { name, kind, size, sha256, location } .url(),
+    Direction { from, to, version, files } .key() "ja-en", .id() "ja-en/2.1", .dir(root), .bytes(), .present(root),
+    Catalog::parse(json)?; .direction(from, to) -> newest numeric whole version (else newest pre-release); .route(from, to) -> Result<Vec<Direction>, why>
+                                                   // one direction with English, two through it
+    load_list(root, max_age, get, log) -> Catalog  // kept in <root>/models.json, fetched at most daily, offline: the kept one
+    fetch_route(root, &[Direction], progress(done, total), download, log) -> folders
+                                                   // <root>/<from>-<to>/<version>/<own name>, via <name>.dl, sha256 checked,
+                                                   // reused when there, the direction's other versions deleted
+    get_list, download_file (kd_common::fetch), sha256_file }
+pub mod detect {                       // which language each stretch of a line is in
+    LANGS (Koetama's 29), MIN_WORDS, SPLIT_WORDS, SPLIT_SURE,
+    stretches(line) -> Vec<Stretch { start, end, lang: Option<&str> }>,  // in order, covering the line
+    detect(text) -> Option<&str>,                  // the main language (stretches weighed by their letters)
+    no_space(c) }                                  // Chinese / Japanese: no space when stretches are joined
+pub mod service {                      // the translator
+    trait Engine: Send + Sync { translate(&self, text) },   // Model (behind a lock) or a test's fake
+    trait Provider: Send + Sync { prepare(from, to, progress) -> Prepared, load(id, dir) -> Arc<dyn Engine> },
+    Mozilla::new(root, log),                       // the real Provider: catalog + engine::Model
+    enum Prepared { Ready(Vec<(id, dir)>), Unavailable(why), Error(why) },
+    enum State { Ready, Downloading(0..1), Loading, Unavailable, Error }  .wire() "downloading 42", .word()
+    RuleStatus { from, to, state } .wire(), .common() -> kd_common::feed::RuleState;  status_text(&[RuleStatus]),
+    enum Event { Reply { id, text }, Status(Vec<RuleStatus>) },
+    #[derive(Clone)] Translator::start(provider, on_event, log) / Translator::mozilla(on_event, log);
+        .set_rules(&[(from, to)])  .request(id, text) -> bool (false: id already queued / answered)
+        .new_session()  .status()  .stop()
+    MAX_RULES = 2, STATUS_EVERY = 0.5 s, RETRY_AFTER = 60 s, join_pieces, percent }
+```
+
+Detection (detect.rs): the line is cut by script (Han, kana, Hangul, Latin, Cyrillic, Greek, other; punctuation,
+digits and spaces go with the neighbouring stretch: up to the first space with the one before, opening brackets and
+quotes with the one after). Kana anywhere in the line makes its Han Japanese; a character only written Cantonese uses
+(嘅 咗 喺 哋 ...) makes it Cantonese; else Han is Chinese; Hangul Korean, Greek Greek, other scripts unknown. Latin and
+Cyrillic text: whatlang (MIT; trigram profiles, restricted to Koetama's languages), with letters that rule a close
+neighbour out (ě ř ů: not Slovak; ы э: not Ukrainian; ñ: not Portuguese, ...), the little words of a short line when
+the trigrams are unsure, a Croatian / Slovene word vote, and Maltese - which whatlang does not know - by ħ ċ ġ, "għ"
+or its hyphenated articles. A Latin / Cyrillic stretch under MIN_WORDS words, or (with other scripts in the line)
+mostly capitalised words - names, brands - takes the line's main language. Within one script, a clause (cut after
+". ! ? ; : ," and a space) becomes a stretch of its own only when it has SPLIT_WORDS lower-case words, the trigrams
+are SPLIT_SURE sure, the little words agree, and its language is not KIN to the run's (es/pt/it/fr/ro/mt, cs/sk/pl,
+hr/sl, ru/uk/bg, da/sv, fi/et, lv/lt, de/nl). Measured on the NTREX-128 sentences of bench/mt/data (100 per language,
+2900): 98.5 % come out as one stretch in the right language (the main language right: 98.6 %); Cantonese 93 % (lines
+without a Cantonese-only character read as Chinese - the translator lets Chinese and Cantonese stand in for each
+other), Croatian 94 %, Slovene 94 %, the rest 96-100 %.
+
+The translator (service.rs): one thread; a rule's models are got ready on a helper thread (Provider::prepare: the
+list, the downloads - one rule at a time), then loaded on the translator's thread (shared by rules through the same
+direction, let go when no rule uses them). A request: detect::stretches; a stretch in a ready rule's source language
+(the first rule from it; Chinese / Cantonese stand in for each other when only one has a rule) goes through the rule's
+model(s); the rest are kept; pieces are joined again (two kept pieces as they were; next to a translated one a space,
+unless either side is Chinese or Japanese). "" when nothing was translated or the result is the line itself. Exactly
+one reply per id; a new session forgets the ids and drops (never answers) what is still queued from the old one, even
+a line being translated when it changed. States are told on each change, a download's progress at most every 0.5 s;
+a failed rule is tried again after RETRY_AFTER; rules Koetama can never have (the same language twice, a code it does
+not know, into Cantonese) are "unavailable" without asking Mozilla's list.
+
+The program (runtime.rs): a game kind with `translate` gets a Translator::mozilla. Its Sink hands each feed's rules
+and requests to it as the feed is read (a new session in the feed: new_session first); the files connector runs the
+Link before the Sink, so a new session's files are set up before a reply can be written. Replies go to the game at
+once (Game::send_translation), the states on each Status event (Game::send_rules_state) and again in tick() when the
+game is in a session they were not told in (none told while there are no rules). Runtime::stop stops the translator
+before taking the game's lock (its thread may be waiting on that lock to send a reply). The window shows a
+"Translation" card (each rule: "Japanese → English" and its state); the command line's status line "translate: ja →
+en ready, ko → en 42 %". Tests: tests/catalog.rs (a canned list, a fake CDN), tests/detect.rs (NTREX, chat lines,
+mixed lines), tests/service.rs (a fake engine and model source), kd-games tests/translation.rs and tests/feed.rs
+(version 6 against the Python fixtures).
+
+### The engine (`engine.rs`, `engine/gemm.rs`, `engine/marian.rs`, `engine/spm.rs`)
+
+Mozilla's models are Marian "transformer" students (each file's own config, special:model.yml): an encoder of 6
+layers (self-attention, feed-forward, each "dan": add, layer-norm), a decoder of 2 or 4 layers whose self-attention
+is an SSRU (a gated running sum: no growing cache), attention over the encoder, a feed-forward; width 384 (or 256 for
+the "tiny" ones), 8 heads, feed-forward 1536, the output layer tied to the target embeddings over the lexical
+shortlist (the 100 commonest words plus each source word's best 50). Greedy, at most 2x the source's tokens.
+
+- `marian.rs`: the binary model (u64 version, count, headers, names, shapes, padding, data; 8-bit tensors stored
+  transposed - [out][in] - with their float multiplier after them; `<name>_QuantMultA` = the input's alpha) and the
+  binary shortlist.
+- `gemm.rs`: intgemm's arithmetic - the input quantized with the file's alpha (rounded half to even, clipped to
+  +-127), integer dot products, divided back by alpha x the weights' multiplier. AVX2 when the CPU has it
+  (`maddubs(|w|, sign(x, w))`: right for the weights' -128 too), plain Rust otherwise; the same integers either way.
+- `spm.rs`: SentencePiece unigram, from the .spm protobuf: the precompiled nmt_nfkc map (a Darts trie), extra spaces
+  removed, U+2581 for spaces and one in front, the best split by score, unknown characters as UTF-8 byte pieces;
+  decoding back. Matches Python's sentencepiece on every fixture line (`app/fixtures/mt.json`, made by
+  `make_mt_fixtures.py`), byte for byte.
+- `engine.rs`: the model in memory stays 8-bit, the embeddings too (a row is turned into floats when looked up), so
+  a direction holds about its files' size. `translate(line)` cuts the line into sentences (. ! ? and 。！？), a
+  sentence longer than 128 tokens at word starts, and joins the results (no space after / before CJK).
+
+Tested against engine/mt.py (`tests/engine.rs`; skipped without `bench/mt/models`): the same source ids and
+shortlists always; 21 of 28 translations token for token the same - the others part at a near tie, where a value a
+hair from a rounding boundary (17.499996) rounds the other way than numpy's summation order gives; Mozilla's own
+WASM build agrees with mt.py on about half the sentences for the same reason.
+
+Measured (`examples/mt_bench.rs` on bench/mt's NTREX sentences, 100 per direction, one thread, Ryzen 7 3700X,
+scored by `bench/mt/score_rust.py` -> `bench/mt/RUST.md`):
+
+| | chrF Rust | chrF Mozilla (WASM) | ms a sentence (p90) | Mozilla WASM | load | memory |
+|---|---|---|---|---|---|---|
+| with English (54 directions) | 55.1 | 55.2 | 20 (36) | 52 | 27 ms | ~40 MB |
+| through English (16 pairs) | 40.3 | 40.4 | 44 (78) | 114 | 64 ms | ~90 MB |
+
+(News sentences, ~25 words; chat lines are shorter: 5-25 ms. `examples/translate_live.rs` runs the translator with
+the real downloads end to end.)
+

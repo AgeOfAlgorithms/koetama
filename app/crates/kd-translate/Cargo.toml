@@ -1,0 +1,14 @@
+[package]
+name = "kd-translate"
+description = "Koetama: chat translation on the player's PC - Mozilla's Firefox Translations models (Marian) run in Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kd-common.workspace = true
+serde_json = "1"
+# (catalog.rs: the downloaded model files' checksums)
+sha2.workspace = true
+# (detect.rs: which language a Latin / Cyrillic stretch is in - trigram profiles, pure Rust, MIT)
+whatlang = "0.18"
