@@ -21,6 +21,12 @@
 </p>
 
 <p align="center">
+  <sub>Windows code signing: free code signing provided by <a href="https://about.signpath.io/">SignPath.io</a>, certificate
+  by <a href="https://signpath.org/">SignPath Foundation</a> (being set up: current downloads are not signed yet, so
+  Windows may warn on first install; see the <a href="#code-signing-policy">code signing policy</a>).</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/AgeOfAlgorithms/koetama/releases"><img src="https://img.shields.io/github/v/release/AgeOfAlgorithms/koetama?include_prereleases&label=release&color=f26d2a" alt="Release"></a>
   <a href="https://github.com/AgeOfAlgorithms/koetama/actions/workflows/build.yml"><img src="https://github.com/AgeOfAlgorithms/koetama/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3a2c2b" alt="Windows | Linux">
