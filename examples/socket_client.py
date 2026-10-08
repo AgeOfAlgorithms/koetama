@@ -61,7 +61,7 @@ def main():
             time.sleep(2)
     sock.settimeout(None)
     threading.Thread(target=read_lines, args=(sock,), daemon=True).start()
-    send(sock, {"type": "hello", "protocol": 1, "game": "Example Game", "mod": "Example Voice Link"})
+    send(sock, {"type": "hello", "protocol": 1, "game": "Example Game", "mod": "Example Mod"})
     t0 = time.time()
     try:
         while True:

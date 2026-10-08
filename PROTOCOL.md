@@ -211,11 +211,11 @@ A profile using the socket connector only changes `connector`: `{"type": "socket
 | `mod` | required | The mod's name (1 to 80 characters). |
 | `url` | required | The mod's page, `https://...` or `http://...` (the window opens it in the browser). |
 | `author` | required | Who made the mod and the profile. |
-| `needs` | optional | What players need, shown while Kotodama waits for the game. Default: `the <mod> mod`. |
+| `needs` | optional | What players need, shown while Kotodama waits for the game: "Waiting for <game>: start it with <needs>". Default: `the <mod> mod`. |
 | `locate` | optional | `{"steam_app": N}`: the game's Steam app id. Kotodama shows where it's installed, or that it's missing. |
 | `uses` | optional | `["voices", "speech"]` (the default), or just one of them. `voices`: Kotodama plays the speakers in the feed (other players' voices). `speech`: Kotodama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Kotodama drops them). A voices-only mod's `mic` is ignored, so the microphone never opens. |
 | `test_voices` | optional | Up to 16 recorded voices for the mod's test speakers: `{"src": 1..999, "voice": "<Windows voice>", "rate": -10..10, "text": "..."}`. They're made once with the Windows speech voices (none on other systems), and a speaker with that `src` plays them. |
-| `speaker_names` | optional | `{"<src>": "name"}`: what the window calls the test speakers. |
+| `speaker_names` | optional | Names for the mod's TEST speakers (the sample voices of `test_voices`, by `src`) in Kotodama's window, e.g. `{"1": "the whisperer"}`. Real players need nothing: they show as "player <id>". Only useful with `test_voices`. |
 | `connector` | required | `{"type": "files", ...}` or `{"type": "socket", ...}`, described below. |
 
 Unknown fields are errors, so a typo doesn't get silently ignored. Text may not contain control characters. A profile
@@ -276,7 +276,7 @@ When a mod connects, Kotodama sends:
 
 The mod sends, first (optional):
 
-    {"type":"hello","protocol":1,"game":"Example Game","mod":"Example Voice Link"}
+    {"type":"hello","protocol":1,"game":"Example Game","mod":"Example Mod"}
 
 then its feed, whenever it changes and at least once a second:
 

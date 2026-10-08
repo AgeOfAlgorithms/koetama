@@ -317,6 +317,6 @@ fn the_example_profile() {
     assert_eq!(found, vec![("steam-77".to_string(), "4|1|1|1|0|1|1|en|1|".to_string())]);
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../examples/profiles/example-socket.json");
     let p = Profile::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
-    assert_eq!((p.id.as_str(), p.game.as_str()), ("example-game-example-voice", "Example Game"));
+    assert_eq!((p.id.as_str(), p.game.as_str()), ("example-game-example-mod", "Example Game"));
     assert!(matches!(p.connector, Connector::Socket(ref c) if c.port == 47120));
 }

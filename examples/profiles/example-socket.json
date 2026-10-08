@@ -1,12 +1,11 @@
 {
   "format": 1,
-  "id": "example-game-example-voice",
+  "id": "example-game-example-mod",
   "game": "Example Game",
-  "mod": "Example Voice Link",
-  "url": "https://example.com/example-voice-link",
+  "mod": "Example Mod",
+  "url": "https://example.com/example-mod",
   "author": "An Example Modder",
-  "needs": "the Example Voice Link mod",
+  "needs": "the Example Mod",
   "uses": ["voices", "speech"],
-  "speaker_names": {"1": "the test speaker"},
   "connector": {"type": "socket", "port": 47120}
 }

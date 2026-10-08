@@ -230,7 +230,7 @@ fn the_example_client() {
         .expect("python");
     wait_until("feeds from the script", || g.updates() >= 3);
     assert!(g.wants_mic() && g.feed().unwrap().speakers.len() == 1);
-    assert_eq!(g.peer().as_deref(), Some("Example Game (Example Voice Link)"));
+    assert_eq!(g.peer().as_deref(), Some("Example Game (Example Mod)"));
     assert!(g.send('f', 1, "hello from Kotodama", Some(&[0.0, 0.3, 0.6]), Some(Instant::now())));
     std::thread::sleep(Duration::from_millis(300));
     g.stop();
