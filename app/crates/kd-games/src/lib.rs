@@ -7,6 +7,7 @@
 //! The engine (speech to text, the voice mixer) knows no game; a connector is only the game's LINK. The game's state,
 //! as the connector reads it, is a FEED (kd_common::feed::Feed), handed to the mixer (a FeedSink) and kept by the game.
 pub mod files;
+pub mod lines;
 pub mod profile;
 pub mod socket;
 pub mod steam;
@@ -61,7 +62,7 @@ pub trait Game: Send + Sync {
     }
 
     /// the translation rules' states, sent when they change (kind 'd'). False if no game is listening
-    fn send_rules_state(&self, _rules: &[RuleState]) -> bool {
+    fn send_translations_state(&self, _rules: &[RuleState]) -> bool {
         false
     }
 

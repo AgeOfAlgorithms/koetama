@@ -57,18 +57,18 @@ pub struct Feed {
     /// where the room should live (a relay region, REGIONS); "": wherever the relay puts it (near the first player)
     #[serde(default)]
     pub region: String,
-    /// the player's translation rules (version 6): (from, to) in Koetama's language codes, at most MAX_RULES; empty:
-    /// translation off (translate_rules)
+    /// the player's translations (version 6): (from, to) in Koetama's language codes, at most MAX_TRANSLATIONS; empty:
+    /// translation off (translation_pairs)
     #[serde(default)]
-    pub rules: Vec<(String, String)>,
+    pub translations: Vec<(String, String)>,
     /// the lines the game wants translated (version 6): (id, text), at most MAX_REQUESTS, each id once; a text that
     /// was not good UTF-8 of at most MAX_REQUEST_BYTES is "" (its reply: "") (translate_requests)
     #[serde(default)]
-    pub translate: Vec<(i64, String)>,
+    pub to_translate: Vec<(i64, String)>,
 }
 
 /// the most translation rules a feed has
-pub const MAX_RULES: usize = 2;
+pub const MAX_TRANSLATIONS: usize = 2;
 /// the most lines to translate in one feed
 pub const MAX_REQUESTS: usize = 16;
 /// the most bytes (UTF-8) of one line to translate
@@ -82,11 +82,11 @@ pub fn lang_code(s: &str) -> bool {
     (1..=16).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
-/// The rules as the feed keeps them: good codes only, each rule once, the first MAX_RULES.
-pub fn translate_rules(rules: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
+/// The rules as the feed keeps them: good codes only, each rule once, the first MAX_TRANSLATIONS.
+pub fn translation_pairs(rules: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for r in rules {
-        if out.len() == MAX_RULES {
+        if out.len() == MAX_TRANSLATIONS {
             break;
         }
         if lang_code(&r.0) && lang_code(&r.1) && !out.contains(&r) {
@@ -96,12 +96,12 @@ pub fn translate_rules(rules: impl IntoIterator<Item = (String, String)>) -> Vec
     out
 }
 
-/// The feed's rules field (version 6): "ja>en,ko>en" -> [("ja", "en"), ("ko", "en")]; malformed items skipped.
-pub fn parse_rules(s: &str) -> Vec<(String, String)> {
+/// The feed's translations field (version 6): "ja>en,ko>en" -> [("ja", "en"), ("ko", "en")]; malformed items skipped.
+pub fn parse_translations(s: &str) -> Vec<(String, String)> {
     if s.is_empty() {
         return Vec::new();
     }
-    translate_rules(s.split(',').filter_map(|item| item.split_once('>').map(|(a, b)| (a.to_string(), b.to_string()))))
+    translation_pairs(s.split(',').filter_map(|item| item.split_once('>').map(|(a, b)| (a.to_string(), b.to_string()))))
 }
 
 /// A request id as the feed writes it: 1 to 15 ASCII digits, at least 1.
@@ -179,7 +179,7 @@ impl RuleState {
 }
 
 /// The rules' states as message kind 'd' carries them: each wire(), comma-separated ("" for no rules).
-pub fn rules_wire(rules: &[RuleState]) -> String {
+pub fn translations_wire(rules: &[RuleState]) -> String {
     rules.iter().map(RuleState::wire).collect::<Vec<_>>().join(",")
 }
 

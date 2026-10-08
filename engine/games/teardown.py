@@ -83,12 +83,12 @@ REGIONS = ('wnam', 'enam', 'sam', 'weur', 'eeur', 'apac', 'apac-ne', 'apac-se', 
 # the feed versions this reads, each announced by a <prefix>v<n> file next to <prefix>on (Rust: files.rs FEED_VERSIONS)
 FEED_VERSIONS = (5, 6)
 
-# translation (version 6; Rust: kd_common::feed): at most 2 rules, 16 lines of at most 400 bytes, ids of 1-15 digits
+# translation (version 6; Rust: kd_common::feed): at most 2 translations, 16 lines of at most 400 bytes, ids of 1-15 digits
 MAX_RULES, MAX_REQUESTS, MAX_REQUEST_BYTES = 2, 16, 400
 LANG_CODE = re.compile(r'[A-Za-z0-9_-]{1,16}')
 
 
-def parse_rules(s):
+def parse_translations(s):
     """'ja>en,ko>en' -> [('ja', 'en'), ('ko', 'en')]: good codes only, each rule once, the first MAX_RULES"""
     out = []
     for item in s.split(',') if s else ():
@@ -126,16 +126,16 @@ def parse_requests(s):
 
 
 def parse_feed(text):
-    """'6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|rules|requests|id,src,talk,gain,az,el,muffle;...'
-    (version 5: no rules or requests; 4, 3 and 2: no room either) -> a dict, or None. A bad room, key or id: no room
-    ('', '', 0); bad ids in `to` are skipped (each kept once, at most 64); malformed rules and requests skipped
-    (parse_rules, parse_requests)"""
+    """'6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|translations|requests|id,src,talk,gain,az,el,muffle;...'
+    (version 5: no translations or requests; 4, 3 and 2: no room either) -> a dict, or None. A bad room, key or id: no room
+    ('', '', 0); bad ids in `to` are skipped (each kept once, at most 64); malformed translations and requests skipped
+    (parse_translations, parse_requests)"""
     try:
         parts = text.split('|')
         live = '1'
-        room = key = me = to = region = rules = requests = ''
+        room = key = me = to = region = translations = requests = ''
         if parts[0] == '6' and len(parts) == 17:
-            _, seq, vol, sid, ack, ping, mic, lang, live, room, key, me, to, region, rules, requests, rest = parts
+            _, seq, vol, sid, ack, ping, mic, lang, live, room, key, me, to, region, translations, requests, rest = parts
         elif parts[0] == '5' and len(parts) == 15:
             _, seq, vol, sid, ack, ping, mic, lang, live, room, key, me, to, region, rest = parts
         elif parts[0] == '4' and len(parts) == 10:
@@ -167,8 +167,8 @@ def parse_feed(text):
         # mic: 0 off, 1 listen (voice detection), 2 / 3 push to talk with the key up / held (ptt; None: no push to talk)
         return dict(seq=int(seq), vol=float(vol), sid=int(sid), ack=int(ack), ping=int(ping), mic=mic in ('1', '2', '3'),
                     ptt={'2': False, '3': True}.get(mic), lang=lang or 'en', live=live != '0', speakers=speakers,
-                    room=room, key=key, me=me, to=ids, region=region, rules=parse_rules(rules),
-                    translate=parse_requests(requests))
+                    room=room, key=key, me=me, to=ids, region=region, translations=parse_translations(translations),
+                    to_translate=parse_requests(requests))
     except ValueError:
         return None
 
@@ -337,8 +337,8 @@ class Link:
         """the translation of request rid (version 6, kind "x"; "" = nothing to show); False if no game is listening"""
         return self._write('x', rid, text.strip()[:TRANSLATION_MAX])
 
-    def send_rules_state(self, text):
-        """the translation rules' states (kind "d": "ja>en=ready,ko>en=downloading 42"); False if no game is listening"""
+    def send_translations_state(self, text):
+        """the translations' states (kind "d": "ja>en=ready,ko>en=downloading 42"); False if no game is listening"""
         return self._write('d', 0, text)
 
     def send_msg(self, kind, utt, text, times=None, t0=None):

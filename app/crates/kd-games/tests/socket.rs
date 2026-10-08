@@ -114,11 +114,12 @@ fn socket_end_to_end() {
     assert_eq!(hello["app"], "Koetama");
     assert_eq!(hello["protocol"], 1);
     assert_eq!(hello["version"], kd_common::paths::VERSION);
+    assert_eq!(hello["features"], json!(["speech", "voices", "rooms"]), "what the profile uses");
     wait_until("the client is taken", || g.has_client());
     c.send(r#"{"type":"hello","protocol":1,"game":"Example Game","mod":"Example Voice"}"#);
     c.send(
-        r#"{"type":"feed","vol":0.5,"mic":true,"lang":"ru","live":false,"speakers":[
-            {"id":7,"src":1,"talk":true,"gain":0.8,"az":90,"el":-5.5,"muffle":0.25},{"id":8,"src":2}]}"#
+        r#"{"type":"feed","volume":0.5,"mic":true,"lang":"ru","live":false,"speakers":[
+            {"id":7,"src":1,"talk":true,"gain":0.8,"azimuth":90,"elevation":-5.5,"muffle":0.25},{"id":8,"src":2}]}"#
             .replace('\n', "")
             .as_str(),
     );
@@ -135,7 +136,7 @@ fn socket_end_to_end() {
     assert_eq!(g.describe(), vec![format!("listening on 127.0.0.1:{port} (this computer only)"), "connected: Example Game (Example Voice)".into()]);
     // malformed lines: skipped, logged once; unknown types ignored; blank lines nothing
     c.send("this is not json");
-    c.send(r#"{"type":"feed","vol":"loud"}"#);
+    c.send(r#"{"type":"feed","volume":"loud"}"#);
     c.send(r#"{"no":"type"}"#);
     c.send(r#"{"type":"feed","speakers":[{"src":1}]}"#);
     c.send(r#"{"type":"future-thing","x":1}"#);
@@ -290,7 +291,7 @@ fn voice_room_fields() {
 
 #[test]
 fn a_connection_is_a_session_and_gets_its_room() {
-    // each connection's feeds carry its number as the session (Koetama sends each a new room: kind "r")
+    // each connection's feeds carry its number as the session (Koetama sends each a new room: {"type":"room"})
     let port = free_port();
     let sink = Arc::new(Sink::default());
     let (log, _) = logger();
@@ -304,7 +305,7 @@ fn a_connection_is_a_session_and_gets_its_room() {
     let text = format!("{}:{}", "a".repeat(32), "b".repeat(64));
     assert!(g.send('r', 0, &text, None, None));
     let m = c.line();
-    assert!(m["type"] == "msg" && m["kind"] == "r" && m["text"] == text.as_str(), "{m}");
+    assert_eq!(m, json!({"type": "room", "room": "a".repeat(32), "key": "b".repeat(64)}));
     let mut c2 = Client::connect(port);
     c2.line();
     c2.send(r#"{"type":"feed"}"#);

@@ -1,5 +1,5 @@
 //! The feed and the message files against the Python answers (app/fixtures/feed.json, make_fixtures.py feed_cases):
-//! parse_feed (versions 6/5/4/3/2, the voice room, the translation rules and requests, what is refused), find_feeds
+//! parse_feed (versions 6/5/4/3/2, the voice room, the translations and the lines to translate, what is refused), find_feeds
 //! (each feed with its copy of the mod), text_prefab and id_prefab byte for byte, times_hex. Plus test_helper.py's
 //! feed checks.
 use kd_games::files::{id_prefab, FEED_VERSIONS, TRANSLATION_MAX};
@@ -49,20 +49,20 @@ fn parse_as_python() {
         assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
         let to: Vec<i64> = want["to"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
         assert_eq!(f.to, to, "{text}");
-        let rules: Vec<(String, String)> = want["rules"]
+        let translations: Vec<(String, String)> = want["translations"]
             .as_array()
             .unwrap()
             .iter()
             .map(|r| (r[0].as_str().unwrap().to_string(), r[1].as_str().unwrap().to_string()))
             .collect();
-        assert_eq!(f.rules, rules, "{text}");
-        let requests: Vec<(i64, String)> = want["translate"]
+        assert_eq!(f.translations, translations, "{text}");
+        let requests: Vec<(i64, String)> = want["to_translate"]
             .as_array()
             .unwrap()
             .iter()
             .map(|r| (r[0].as_i64().unwrap(), r[1].as_str().unwrap().to_string()))
             .collect();
-        assert_eq!(f.translate, requests, "{text}");
+        assert_eq!(f.to_translate, requests, "{text}");
         let sp = want["speakers"].as_object().unwrap();
         assert_eq!(f.speakers.len(), sp.len(), "{text}");
         for (k, v) in sp {

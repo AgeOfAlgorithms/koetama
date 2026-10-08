@@ -175,7 +175,7 @@ def feed_cases():
              for f in feeds]
     feeds += ['5|3|1|5|0|1|1|en|1|%s|%s|7|2|weur|' % (room, key), '5|3|1|5|0|1|1|en|1|%s|%s|7|2|auto|' % (room, key),
               '5|3|1|5|0|1|1|en|1|%s|%s|7|2|WEUR|' % (room, key), '5|3|1|5|0|1|1|en|1||||weur|']
-    # version 6: the translation rules and the lines to translate (bad ones skipped; a bad text keeps its id with '')
+    # version 6: the translations and the lines to translate (bad ones skipped; a bad text keeps its id with '')
     def hx(t):
         return t.encode('utf-8').hex()
     feeds += ['6|4|1|5|0|1|1|en|1|%s|%s|7|2|weur|ja>en,ko>en|7:%s;8:%s|2,0,0,0.8,30,0,0.1' % (
@@ -206,7 +206,7 @@ def feed_cases():
                                         ('Привет 我们', 'l', 5, [0.0, 0.5, 0.75, 1.0], 1.234),
                                         ('x', 'f', 0, [700.0], 0.004), ('a b', 'l', 1, [-1.0, 0.126], -2.0)]]
     hexes = [dict(times=t, out=td.times_hex(t)) for t in ([], [0.0, 0.01, 1.5, 655.35, 700.0, -3.0], [0.005, 0.015, 0.025])]
-    # (version 6's messages: a translation of request u, the rules' states; ids past a u32 too)
+    # (version 6's messages: a translation of line u, the translations' states; ids past a u32 too)
     ids = [dict(text=t, kind=k, id=i, out=td.text_prefab(t, k, i))
            for t, k, i in [('Hello, how are you?', 'x', 7), ('', 'x', 8), ('こんにちは', 'x', 123456789012345),
                            ('ja>en=ready,ko>en=downloading 42', 'd', 0), ('', 'd', 0)]]

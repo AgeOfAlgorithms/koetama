@@ -1,6 +1,8 @@
-# The game link (Teardown), version 4
+# Koetama's game protocol (feed version 6)
 
-(Koetama's link with Teardown, and how to add another game's mod: see "Adding a game mod: profiles" at the end.)
+How a game mod talks to Koetama. The first part is the files connector as Teardown uses it (feed versions 4, 5 and 6
+in order: speech, real voices, translation); "Adding a game mod: profiles" at the end covers other games, the
+profiles and the socket connector.
 
 How a game mod and the helper program talk. Both run on the same PC, one helper per player. A Teardown
 mod's Lua cannot open sockets, write files or reach the network. It *can* write registry keys under
@@ -45,7 +47,7 @@ Workshop content folder when there is one.
 | file | meaning |
 |---|---|
 | `pcvx_on` | the helper is running (removed when it stops). The mod looks for it once a second. |
-| `pcvx_v<n>` | one per feed version this Koetama reads (now `pcvx_v5`), written with `pcvx_on`. A mod whose version is missing knows this Koetama is too old for its feed (it would never answer): the Teardown mod says "Your Koetama is too outdated. Please update it from the app." |
+| `pcvx_v<n>` | one per feed version this Koetama reads (now `pcvx_v5` and `pcvx_v6`), written with `pcvx_on`. A mod whose version is missing knows this Koetama is too old for its feed (it would never answer): the Teardown mod says "Your Koetama is too outdated. Please update it from the app." |
 | `pcvx_vc` / `pcvx_vx` | the voice chat is in its room (`vc`) / can't reach the relay: the last tries failed, it keeps trying (`vx`); neither: no room, or connecting. The mod shows it and tells its player when voices can't arrive. |
 | `pcvx_p<n % 1000>` | the answer to ping n. If no answer comes for ~5 s, the helper counts as gone (a crashed helper leaves `pcvx_on` behind). |
 | `pcvx_t<n>.xml` | message n (1, 2, ... per session): a prefab `<body tags="pcvx k=<kind> u=<utterance> t=<hex of the UTF-8 text> [w=<times> a=<ago>]"/>`. The mod `Spawn`s it, reads the tags, `Delete`s what it made, and acks n in the feed. |
@@ -100,7 +102,8 @@ Version 4 is still read (no room: no real voices).
 
 The socket connector's feed object takes the same as `"room"`, `"key"`, `"me"` (numbers / strings as above),
 `"to": [ids]` and `"region"`. It is told the voice chat's state with a line
-`{"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}` at each change.
+`{"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}` at each change, and gets its room as
+`{"type":"room","room":..,"key":..}`.
 
 ### Who makes the room: Koetama
 
@@ -110,7 +113,8 @@ random (OS randomness). The Teardown mod forwards it to the host (`server.pc_roo
 gets for the session and publishes it to every player (`shared.pcVoiceRoom = {id, key}`); every player's game puts
 that one into its feed. So any player with Koetama can make the session's room, the host doesn't need Koetama,
 and the key reaches only the players in the session. A game that does not know `r` reads it as an empty finished
-line, which does nothing. (The socket connector: `{"type":"msg","kind":"r","text":"<room>:<key>"}`.)
+line, which does nothing. (The socket connector, and the files connector's `json` messages:
+`{"type":"room","room":"<room>","key":"<key>"}`.)
 
 ### Sending and receiving (Koetama)
 
@@ -142,26 +146,27 @@ room: delivery, nobody out of range, the keep-alive, the time of one hop), `npm 
 
 ## Translation (version 6)
 
-A player can have up to **two translation rules**, each "from language A into language B" (for example Japanese →
+A player can have up to **two translations**, each "from language A into language B" (for example Japanese →
 English and Korean → English). The game sends Koetama the full chat lines it shows (typed lines, and spoken lines once
-finished - never live words); Koetama translates every stretch of a line that is in a rule's source language and sends
-the translation back. It all runs on the player's own PC, with Mozilla's Firefox Translations models (MPL-2.0, ~35 MB
-a direction, downloaded the first time a rule needs them; a pair without English goes through English: two models).
+finished - never live words); Koetama translates every stretch of a line that is in a translation's source language
+and sends the translation back. It all runs on the player's own PC, with Mozilla's Firefox Translations models (MPL-2.0, ~35 MB
+a direction, downloaded the first time a translation needs them; a pair without English goes through English: two
+models).
 
 **Mixed-language lines.** A line is split into stretches by script and language (a Japanese clause inside an English
-line, and so on); each stretch is detected on its own, the stretches in a rule's source language are translated, the
-rest are kept as they are, and the result keeps the original order. A line with nothing in a rule's source language
-gets an empty reply (no translation to show).
+line, and so on); each stretch is detected on its own, the stretches in a translation's source language are
+translated, the rest are kept as they are, and the result keeps the original order. A line with nothing in a
+translation's source language gets an empty reply (no translation to show).
 
 ### The feed, version 6
 
-    6|<seq>|<vol>|<session>|<ack>|<ping>|<mic>|<lang>|<live>|<room>|<key>|<me>|<to>|<region>|<rules>|<requests>|<speakers>
+    6|<seq>|<vol>|<session>|<ack>|<ping>|<mic>|<lang>|<live>|<room>|<key>|<me>|<to>|<region>|<translations>|<requests>|<speakers>
 
 The first fifteen fields are version 5's (up to and including region). New:
 
 | field | meaning |
 |---|---|
-| rules | up to two rules, comma-separated `from>to` with Koetama's language codes (`ja>en,ko>en`); empty = translation off. A rule whose two languages are the same, or with a language Mozilla has no model for, is ignored (and reported as `unavailable`) |
+| translations | up to two, comma-separated `from>to` with Koetama's language codes (`ja>en,ko>en`); empty = translation off. One whose two languages are the same, or with a language Mozilla has no model for, translates nothing (it is reported as `unavailable`). Cantonese (`yue`) only as a source; Maltese only into English. Two with the same source language: the first is used |
 | requests | the lines to translate, `<id>:<hex of the UTF-8 text>` separated by `;` (at most 16, each at most 400 bytes of text). The game chooses the ids (positive, unique in the session) and keeps a line in the feed until its reply arrives (it may drop it after ~10 s without one) |
 
 Version 5 is still read (no translation). Koetama announces `pcvx_v6` (and `pcvx_v5`) next to `pcvx_on`.
@@ -172,18 +177,19 @@ Two new message kinds (the same prefab files as the others: `<body tags="pcvx k=
 
 | kind | meaning |
 |---|---|
-| `x` | the translation of request `u`: `t` is the hex of the translated line (empty: nothing in the line needed translating, or the rule's models are not ready - see `d`). Exactly one reply per request id. |
-| `d` | the rules' state, sent when it changes (at most every 0.5 s while downloading): `t` is the hex of `<from>><to>=<state>` per rule, comma-separated; state = `ready`, `downloading <0-100>`, `loading`, `unavailable` (no model), or `error` |
+| `x` | the translation of request `u`: `t` is the hex of the translated line, at most 1000 characters (empty: nothing in the line needed translating, the translation came out the same, the line was malformed, or the models are not ready - see `d`). Exactly one reply per request id. |
+| `d` | the translations' states (`u=0`), sent when one changes (at most every 0.5 s while downloading): `t` is the hex of `<from>><to>=<state>` per translation, comma-separated; state = `ready`, `downloading <0-100>`, `loading`, `unavailable` (no model), or `error` (tried again after a minute) |
 
 ### The socket connector
 
-The feed object takes `"rules": [["ja","en"], ["ko","en"]]` and `"translate": [{"id": 7, "text": "..."}]`; Koetama
-answers `{"type":"translation","id":7,"text":"..."}` and `{"type":"translate_status","rules":[{"from":"ja","to":"en",
-"state":"downloading","progress":0.42}]}`.
+The feed object takes `"translations": [{"from":"ja","to":"en"}, {"from":"ko","to":"en"}]` and
+`"to_translate": [{"id": 7, "text": "..."}]`; Koetama answers `{"type":"translation","id":7,"text":"..."}` and
+`{"type":"translations_status","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}`
+(`progress` 0..1, only while downloading). The files connector's `json` messages are the same two objects.
 
 ### Profiles
 
-`"uses"` may include `"translate"` (default: off unless listed). A translate-only profile (`["translate"]`) needs no
+`"uses"` may include `"translate"` (default: off unless listed). The socket connector's hello lists it in `features`. A translate-only profile (`["translate"]`) needs no
 microphone, no voices and no relay.
 
 ## Adding a game mod: profiles
@@ -257,7 +263,7 @@ A profile using the socket connector only changes `connector`: `{"type": "socket
 | `url` | required | The mod's page, `https://...` or `http://...` (the window opens it in the browser). |
 | `author` | required | Who made the mod and the profile. |
 | `locate` | optional | `{"steam_app": N}`: the game's Steam app id. Koetama shows where it's installed, or that it's missing. |
-| `uses` | optional | `["voices", "speech"]` (the default), or just one of them. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `mic` is ignored, so the microphone never opens. |
+| `uses` | optional | Any of `"voices"`, `"speech"`, `"translate"`; the default is `["voices", "speech"]`. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `mic` is ignored, so the microphone never opens. `translate`: Koetama translates the chat lines the game sends ("Translation (version 6)"); without it the feed's translations and lines are ignored. |
 | `test_voices` | optional | Up to 16 recorded voices for the mod's test speakers: `{"src": 1..999, "voice": "<Windows voice>", "rate": -10..10, "text": "..."}`. They're made once with the Windows speech voices (none on other systems), and a speaker with that `src` plays them. |
 | `speaker_names` | optional | Names for the mod's TEST speakers (the sample voices of `test_voices`, by `src`) in Koetama's window, e.g. `{"1": "the whisperer"}`. Real players need nothing: they show as "player <id>". Only useful with `test_voices`. |
 | `connector` | required | `{"type": "files", ...}` or `{"type": "socket", ...}`, described below. |
@@ -297,16 +303,18 @@ Teardown's does.
 | `out.prefix` | default `pcvx_` | The start of every file name Koetama writes. Unique among game mods: a profile whose prefix another one uses is refused (the two would remove each other's files), so pick one from your mod's name (`pcvx_` is Proximity Babble Chat's). |
 | `out.message` | default `teardown-prefab` | How a message file is written: `teardown-prefab` (`<prefix>t<n>.xml`, exactly the prefab described above) or `json` (`<prefix>t<n>.json`). |
 
-The feed string is the one described above (`4|seq|volume|session|ack|ping|mic|lang|live|speakers`). Koetama reads the
-file every 10 ms. A feed string that changes counts as live, but whatever was in the file when Koetama started does
-not. The files Koetama writes and the way acks, pings and sessions work are also as described above, with the
-profile's prefix. A `json` message is one line:
+The feed string is the one described above (version 6, `6|seq|volume|...|translations|requests|speakers`; 5, 4, 3
+and 2 are still read). Koetama reads the file every 10 ms. A feed string that changes counts as live, but whatever
+was in the file when Koetama started does not. The files Koetama writes and the way acks, pings and sessions work are
+also as described above, with the profile's prefix. A `json` message file holds one line: the same object the socket
+connector sends for it (below), so one parser serves both:
 
-    {"k":"l","u":7,"t":"hello there","w":[0.1,0.55],"a":2.03}
+    {"type":"msg","kind":"l","utt":7,"text":"hello there","times":[0.1,0.55],"ago":2.03}
+    {"type":"room","room":"<32 hex>","key":"<64 hex>"}
+    {"type":"translation","id":7,"text":"Hello"}
+    {"type":"translations_status","translations":[{"from":"ja","to":"en","state":"ready"}]}
 
-`k` is the kind (`s`, `l`, `f`), `u` the utterance and `t` the plain UTF-8 text. `w` holds each unit's start in seconds
-after the line's audio began, and `a` how many seconds ago that was when the file was written. `w` and `a` come
-together or not at all.
+The voice chat's state stays in the `vc` / `vx` files (as for Teardown).
 
 ### The socket connector
 
@@ -316,7 +324,11 @@ sides send JSON objects, one per line (`\n` ends a line).
 
 When a mod connects, Koetama sends:
 
-    {"type":"hello","app":"Koetama","version":"0.3.1","protocol":1}
+    {"type":"hello","app":"Koetama","version":"0.4.0","protocol":1,"features":["speech","voices","rooms","translate"]}
+
+`features` says what this Koetama does for the game: what the profile uses (`speech`, `voices`, `translate`), and
+`rooms` (real voices through the relay, version 5) with `voices`. A Koetama before 0.4.0 sends no `features`: read
+that as `["speech","voices"]`. Look a feature up before relying on it; an unknown one is a newer feature, ignore it.
 
 The mod sends, first (optional):
 
@@ -324,19 +336,22 @@ The mod sends, first (optional):
 
 then its feed, whenever it changes and at least once a second:
 
-    {"type":"feed","vol":1.0,"mic":true,"lang":"en","live":true,
-     "speakers":[{"id":7,"src":1,"talk":true,"gain":0.8,"az":90,"el":0,"muffle":0.25}]}
+    {"type":"feed","volume":1.0,"mic":true,"lang":"en","live":true,
+     "speakers":[{"id":7,"src":1,"talk":true,"gain":0.8,"azimuth":90,"elevation":0,"muffle":0.25}]}
 
 (The example is split over two lines here, but it is sent as one.)
 
 | feed field | default | meaning |
 |---|---|---|
-| `vol` | 1 | 0..1, the player's voice volume |
+| `volume` | 1 | 0..1, the player's voice volume |
 | `mic` | false | the player's speech should be heard and written (the microphone opens only then) |
 | `ptt` | none | push to talk: `true` while the talk key is held, `false` while it is up (a line starts only while it is held and ends 0.25 s after it is let go); left out or `null`: always on (the speech detector decides). Send a feed as soon as the key changes |
 | `lang` | `en` | the language the player speaks (`en`, `ru`, `zh`, ... or `auto`) |
 | `live` | true | live words while the player talks; false: only the finished line |
-| `speakers` | none | the voices to play: `id` (required, a whole number), `src` (0 = a real player, 1..: a test voice), `talk`, `gain` 0..1, `az` (degrees from where the camera looks, 90 = right), `el` (degrees up), `muffle` 0..1 |
+| `speakers` | none | the voices to play: `id` (required, a whole number), `src` (0 = a real player, 1..: a test voice), `talk`, `gain` 0..1, `azimuth` (degrees from where the camera looks, 90 = right), `elevation` (degrees up), `muffle` 0..1 |
+| `room`, `key`, `me`, `to`, `region` | none | the voice room ("Real voices", version 5): strings, a whole number, a list of ids, a string |
+| `translations` | none | up to two `{"from": .., "to": ..}` ("Translation (version 6)") |
+| `to_translate` | none | the lines to translate, `{"id": .., "text": ..}`, at most 16 of at most 400 bytes; keep each until its `translation` arrives |
 
 The game counts as connected while feeds arrive. If none comes for 1.5 s, the game shows as paused and its voices
 stop. There are no acks or pings, because the connection itself shows the game is there.
@@ -349,6 +364,11 @@ Koetama sends what the player said:
 
 The kinds are the same as for the files connector. `times` holds each unit's start, in seconds after the line's audio
 began, and `ago` how long ago that was when the line was sent. They come together, and only when known.
+
+And, as the game uses them: `{"type":"room","room":..,"key":..}` (a new voice room, once per connection),
+`{"type":"voice","state":"off"|"connecting"|"connected"|"unreachable"}` (the voice chat's link, at each change),
+`{"type":"translation","id":..,"text":..}` and `{"type":"translations_status","translations":[..]}` (version 6).
+Every object Koetama sends starts with `"type"`.
 
 Koetama skips a line that isn't JSON, or a feed it can't read, and logs the first one per connection. It ignores
 messages with an unknown `type`, which leaves room for later versions. A line longer than 64 KB drops the connection.
@@ -363,8 +383,10 @@ test: install `examples/profiles/example-socket.json`, pick "Example Game" in Ko
   command.
 - The files connector writes only into folders that already exist (it never creates one). Every file it writes
   starts with the prefix. The prefix must be 3 or more letters, digits or `_`, ending in `_`. The connector deletes
-  only files whose whole names are exactly `<prefix>on`, `<prefix>p<digits>`, `<prefix>t<digits>.<xml or json>` or
-  `<prefix>w<digits>.tmp`, and nothing else, not even another file starting with the prefix.
+  only files whose whole names are exactly `<prefix>on`, `<prefix>vc`, `<prefix>vx`, `<prefix>v<digits>`,
+  `<prefix>p<digits>`, `<prefix>t<digits>.<xml or json>` or `<prefix>w<digits>.tmp`, and nothing else, not even
+  another file starting with the prefix.
 - The socket connector listens only on 127.0.0.1, on the profile's port (1024 to 65535). It reads only the messages
-  above and sends only what the player said.
+  above, and sends only the ones above: what the player said, the voice room and the voice chat's state, and
+  translations of the lines the game sent.
 - The window shows players all of this, with real paths, before a profile is installed.

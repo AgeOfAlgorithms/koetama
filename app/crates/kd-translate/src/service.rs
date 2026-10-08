@@ -1,7 +1,7 @@
 //! The translator (PROTOCOL.md "Translation (version 6)"): the game's rules and the lines it wants translated, on a
 //! thread of its own.
 //!
-//! Up to MAX_RULES rules "from A into B". A new rule's models are got ready at once on a helper thread (Mozilla's
+//! Up to MAX_TRANSLATIONS rules "from A into B". A new rule's models are got ready at once on a helper thread (Mozilla's
 //! list, the downloads: Provider::prepare), then loaded on the translator's thread; a model no rule uses any more is
 //! let go. Each rule has a state (ready, downloading N %, loading, unavailable, error) - told on each change through
 //! Event::Status (a download's progress at most every STATUS_EVERY).
@@ -23,7 +23,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// the most rules a player has (PROTOCOL.md)
-pub const MAX_RULES: usize = 2;
+pub const MAX_TRANSLATIONS: usize = 2;
 /// a download's progress is told at most this often
 pub const STATUS_EVERY: Duration = Duration::from_millis(500);
 /// a rule whose models failed (no internet, a broken file) is tried again after this
@@ -304,10 +304,10 @@ impl Translator {
         let _ = lock(&self.inner.tx).send(m);
     }
 
-    /// The game's rules (the first MAX_RULES): a change gets the new ones' models ready and lets go of the old ones'.
+    /// The game's rules (the first MAX_TRANSLATIONS): a change gets the new ones' models ready and lets go of the old ones'.
     /// Cheap when nothing changed (every feed calls it).
     pub fn set_rules(&self, rules: &[(String, String)]) {
-        let rules: Vec<(String, String)> = rules.iter().take(MAX_RULES).cloned().collect();
+        let rules: Vec<(String, String)> = rules.iter().take(MAX_TRANSLATIONS).cloned().collect();
         let mut kept = lock(&self.inner.rules);
         if *kept != rules {
             kept.clone_from(&rules);
@@ -679,7 +679,7 @@ mod tests {
         let all =
             [r("ja", "en", State::Ready), r("ko", "en", State::Downloading(0.429)), r("mt", "en", State::Unavailable)];
         let common: Vec<_> = all.iter().map(RuleStatus::common).collect();
-        assert_eq!(kd_common::feed::rules_wire(&common), status_text(&all), "the connectors write the same");
+        assert_eq!(kd_common::feed::translations_wire(&common), status_text(&all), "the connectors write the same");
         assert_eq!((percent(1.0), percent(0.999), percent(-1.0), percent(f64::NAN)), (100, 99, 0, 0));
     }
 

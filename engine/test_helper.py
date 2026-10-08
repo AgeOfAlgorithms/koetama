@@ -87,12 +87,12 @@ check(f and f['lang'] == 'ru' and f['mic'] is True and len(f['speakers']) == 1 a
       'version 3 carries the language the player speaks (version 2: English)')
 check(H.parse_feed('1|1|1.00|') is None and H.parse_feed('garbage') is None and H.parse_feed('2|x|1|1|1|1|1|') is None,
       'another version or a broken string is refused')
-# version 6: the translation rules and the lines to translate (PROTOCOL.md "Translation (version 6)")
+# version 6: the translations and the lines to translate (PROTOCOL.md "Translation (version 6)")
 f6 = H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en,ko>en,zh>en|7:%s;8:zz;0:41;7:41|' % 'こんにちは'.encode().hex())
-check(f6 and f6['rules'] == [('ja', 'en'), ('ko', 'en')] and f6['translate'] == [(7, 'こんにちは'), (8, '')],
-      'version 6: the first two rules; each line by its id (a bad text keeps its id with "", a bad id is skipped)')
-check(H.parse_feed('5|9|1|5|0|1|1|en|1||||||')['rules'] == [] and H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en|') is None,
-      'version 5: no rules; a version 6 line without all its fields is refused')
+check(f6 and f6['translations'] == [('ja', 'en'), ('ko', 'en')] and f6['to_translate'] == [(7, 'こんにちは'), (8, '')],
+      'version 6: the first two translations; each line by its id (a bad text keeps its id with "", a bad id is skipped)')
+check(H.parse_feed('5|9|1|5|0|1|1|en|1||||||')['translations'] == [] and H.parse_feed('6|9|1|5|0|1|1|en|1||||||ja>en|') is None,
+      'version 5: no translations; a version 6 line without all its fields is refused')
 A, B = '2|5|1.00|7|0|1|0|2000,1,1,1.000,0.0,0.0,0.00', '2|9|1.00|3|0|1|0|'
 xml = ('<registry version="2.1.0">\n<savegame><mod>\n<local-proximity-chat>\n<pcmode value="s"/>\n<pcvx>\n\t<f value="%s"/>\n</pcvx>\n'
        '</local-proximity-chat>\n<steam-123>\n<pcvx>\n<f value="%s"/>\n</pcvx>\n</steam-123>\n</mod></savegame>\n</registry>\n' % (A, B)).encode()
@@ -171,7 +171,7 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
     link.send_msg('l', 8, 'no times here')
     t7 = open(os.path.join(local, 'pcvx_t8.xml'), encoding='utf-8').read()
     check(' w=' not in t7 and ' a=' not in t7, 'without times: no w / a tags (the game shows the words as before)')
-    check(link.send_translation(123456789012345, ' Hello ') and link.send_rules_state('ja>en=ready'), 'a translation and the rules\' states are sent')
+    check(link.send_translation(123456789012345, ' Hello ') and link.send_translations_state('ja>en=ready'), 'a translation and the translations\' states are sent')
     t9 = open(os.path.join(local, 'pcvx_t9.xml'), encoding='utf-8').read()
     t10 = open(os.path.join(local, 'pcvx_t10.xml'), encoding='utf-8').read()
     check('tags="pcvx k=x u=123456789012345 t=%s"' % b'Hello'.hex() in t9 and 'tags="pcvx k=d u=0 t=%s"' % b'ja>en=ready'.hex() in t10,

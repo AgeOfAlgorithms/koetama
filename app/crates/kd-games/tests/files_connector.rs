@@ -91,13 +91,17 @@ fn json_messages_and_a_safe_sweep() {
     assert!(link.send_text("typed"));
     assert!(link.send_msg('s', 8, "", None, None));
     let t1: Value = serde_json::from_str(&std::fs::read_to_string(a.join("talky_t1.json")).unwrap()).unwrap();
-    assert_eq!((t1["k"].as_str(), t1["u"].as_u64(), t1["t"].as_str()), (Some("l"), Some(7), Some("héllo wörld 你好")));
-    let w: Vec<f64> = t1["w"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+    assert_eq!((t1["kind"].as_str(), t1["utt"].as_u64(), t1["text"].as_str()), (Some("l"), Some(7), Some("héllo wörld 你好")));
+    let w: Vec<f64> = t1["times"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
     assert_eq!(w, [0.1, 0.55, 1.0, 1.2], "unit times in s, to 1/100 s (four units: 你 and 好 each one)");
-    let age = t1["a"].as_f64().unwrap();
+    let age = t1["ago"].as_f64().unwrap();
     assert!((1.95..2.6).contains(&age), "{age}");
-    assert_eq!(std::fs::read_to_string(a.join("talky_t2.json")).unwrap(), "{\"k\":\"f\",\"u\":0,\"t\":\"typed\"}\n", "no times: no w, no a");
-    assert_eq!(std::fs::read_to_string(a.join("talky_t3.json")).unwrap(), "{\"k\":\"s\",\"u\":8,\"t\":\"\"}\n");
+    assert_eq!(
+        std::fs::read_to_string(a.join("talky_t2.json")).unwrap(),
+        "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":0,\"text\":\"typed\"}\n",
+        "no times: no times or ago"
+    );
+    assert_eq!(std::fs::read_to_string(a.join("talky_t3.json")).unwrap(), "{\"type\":\"msg\",\"kind\":\"s\",\"utt\":8,\"text\":\"\"}\n");
     assert!(!names(&a).iter().any(|n| n.ends_with(".tmp") && n.starts_with("talky_w")), "written whole (a .tmp renamed)");
     // acks drop what the game has read
     link.on_feed(&feed(1, 2, 3), "");
@@ -146,9 +150,21 @@ fn unsafe_prefixes_refused() {
 
 #[test]
 fn json_message_format() {
-    assert_eq!(json_message("a \"q\"\n", 'f', 3, None, None), "{\"k\":\"f\",\"u\":3,\"t\":\"a \\\"q\\\"\\n\"}\n");
-    assert_eq!(json_message("x", 'l', 1, Some(&[0.004, 2.5]), Some(-1.0)), "{\"k\":\"l\",\"u\":1,\"t\":\"x\",\"w\":[0,2.5],\"a\":0}\n");
-    assert_eq!(json_message("x", 'l', 1, Some(&[f64::NAN]), Some(1.234)), "{\"k\":\"l\",\"u\":1,\"t\":\"x\",\"w\":[0],\"a\":1.23}\n");
+    // (the same objects the socket connector sends: lines.rs)
+    assert_eq!(json_message("a \"q\"\n", 'f', 3, None, None), "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":3,\"text\":\"a \\\"q\\\"\\n\"}\n");
+    assert_eq!(
+        json_message("x", 'l', 1, Some(&[0.004, 2.5]), Some(-1.0)),
+        "{\"type\":\"msg\",\"kind\":\"l\",\"utt\":1,\"text\":\"x\",\"times\":[0,2.5],\"ago\":0}\n"
+    );
+    assert_eq!(
+        json_message("x", 'l', 1, Some(&[f64::NAN]), Some(1.234)),
+        "{\"type\":\"msg\",\"kind\":\"l\",\"utt\":1,\"text\":\"x\",\"times\":[0],\"ago\":1.23}\n"
+    );
+    assert_eq!(
+        json_message(&format!("{}:{}", "a".repeat(32), "b".repeat(64)), 'r', 0, None, None),
+        format!("{{\"type\":\"room\",\"room\":\"{}\",\"key\":\"{}\"}}\n", "a".repeat(32), "b".repeat(64)),
+        "the voice room: its own object"
+    );
 }
 
 /// A stand-in mixer: keeps the feeds.
@@ -210,7 +226,7 @@ fn a_profile_game_end_to_end() {
     assert!(sink.0.lock().unwrap().iter().all(|f| f.speakers.is_empty()));
     assert!(out.join("talky_p7").exists(), "the ping answered");
     assert!(g.send('f', 1, "hello", None, None));
-    assert_eq!(std::fs::read_to_string(out.join("talky_t1.json")).unwrap(), "{\"k\":\"f\",\"u\":1,\"t\":\"hello\"}\n");
+    assert_eq!(std::fs::read_to_string(out.join("talky_t1.json")).unwrap(), "{\"type\":\"msg\",\"kind\":\"f\",\"utt\":1,\"text\":\"hello\"}\n");
     std::fs::write(out.join("talky_notes.txt"), "mine, not Koetama's").unwrap();
     g.stop();
     assert_eq!(names(&out), ["talky_notes.txt"], "stop: its files gone, nothing else");

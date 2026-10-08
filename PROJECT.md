@@ -106,7 +106,7 @@ later). The language detector (Apache-2.0) ships inside the app. Optional: a win
 - **Chat translation (2026-10-08; NOT tried in-game yet; the service tested with real downloads,
   `examples/translate_live.rs`; the Marian engine in plain Rust matches Mozilla's quality at ~2.5x its WASM speed:
   app/DESIGN.md "The engine"):** feed version 6 (rules, requests; Python reference and
-  fixtures too), messages `x` / `d`, the socket's `translation` / `translate_status`, profiles' `"translate"` (the
+  fixtures too), messages `x` / `d`, the socket's `translation` / `translations_status`, profiles' `"translate"` (the
   built-in Teardown profile has it), `kd-translate` catalog / detect / service, the runtime, a Translation card in the
   window. Open: try it in-game with the mod; Maltese -> English has only a pre-release Mozilla model (used: no release
   exists; nothing into Maltese); the model

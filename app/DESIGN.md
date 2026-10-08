@@ -165,7 +165,7 @@ pub trait Game: Send {
     fn send(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool;
     fn send_text(&self, text: &str) -> bool;                             // a typed line (--type, --auto)
     fn send_translation(&self, id: i64, text: &str) -> bool;             // version 6: kind 'x' (one per request id)
-    fn send_rules_state(&self, rules: &[RuleState]) -> bool;             // version 6: kind 'd' (on each change)
+    fn send_translations_state(&self, states: &[RuleState]) -> bool;     // version 6: kind 'd' (on each change)
     fn test_voices(&self) -> HashMap<i64, PathBuf>;                      // wav files (the program loads them)
     fn speaker_name(&self, src: i64) -> String;
     fn feed(&self) -> Option<Feed>;                                      // the latest
@@ -179,10 +179,12 @@ pub mod steam { steam_root, libraries, app_library, install_dir, workshop_dir, p
 pub mod profile { Profile, Connector, FilesConfig, SocketConfig, MessageFormat, TestVoice, PathTemplate, PathSpec,
                   Place, safe_prefix, this_pc }                          // the profile format, validation, summary
 pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, parse_feed, find_feeds, text_prefab,
-                json_message, times_hex, id_prefab, id_json, FEED_VERSIONS = [5, 6], TRANSLATION_MAX }
+                json_message, json_secs, times_hex, id_prefab, FEED_VERSIONS = [5, 6], TRANSLATION_MAX }
                                                                         // the files connector
-pub mod socket { SocketGame, parse_socket_feed, translation_line, rules_state_line, PROTOCOL, MAX_LINE }
-                                                                        // the socket connector
+pub mod socket { SocketGame, parse_socket_feed, features, PROTOCOL, MAX_LINE }   // the socket connector
+pub mod lines { hello, message, voice, translation, translations_status }
+                                                                        // the JSON objects Koetama sends: the socket's
+                                                                        // lines and the files connector's json messages
 pub mod voices { make_in, for_profile }                                 // test voices (Windows SAPI)
 pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedReader, times_hex, text_prefab, Link,
                    make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown (= FilesGame), profile() }
@@ -265,10 +267,11 @@ Connectors:
   the mod copy that wrote it chooses the output folder), message files written next to the mod. Paths take
   placeholders: {documents} {localappdata} {home} {steam_app:ID} (install folder) {steam_workshop:ID}
   {proton_user:ID} {env:NAME}; an entry may be a list of candidates (the first that resolves and exists is used).
-  It deletes only the files it writes (`<prefix>on`, `<prefix>p<n>`, `<prefix>t<n>.<ext>`, `<prefix>w<n>.tmp`), the
+  It deletes only the files it writes (`<prefix>on`, `vc`, `vx`, `v<n>`, `p<n>`, `t<n>.<ext>`, `w<n>.tmp`), the
   prefix must be 3+ letters/digits/_ ending in `_`, and it writes only into folders that exist.
 - `socket`: a TCP server on 127.0.0.1 (the profile's port): newline-separated JSON both ways; the mod sends its
-  feed, Koetama sends what the player said (no acks or pings: the connection is the liveness).
+  feed, Koetama sends its hello (with the features the profile uses), what the player said, the voice room and the
+  voice chat's state, and translations (lines.rs; no acks or pings: the connection is the liveness).
 
 ```rust
 // kd-games (the interface the window and the runtime use)
@@ -297,7 +300,7 @@ games()/by_id()/bad_profiles() are cached until the folder's *.json files change
 resolves the placeholders: registry + Steam's .vdf files, a few ms). make() is cheap; Game::start() starts the
 connector's thread; Game::test_voices() blocks (PowerShell makes missing wavs, seconds each). A profile's "uses"
 lists "voices", "speech" and/or "translate" (default: voices and speech): a speech-only game's feed has no speakers,
-a voices-only game's feed never asks for the microphone, a game without "translate" has no rules or requests (the
+a voices-only game's feed never asks for the microphone, a game without "translate" has no translations or lines to translate (the
 connectors enforce all three). A translate-only game needs no microphone, no sound output and no relay.
 
 ## kd-translate (PROTOCOL.md "Translation (version 6)"; engine/mt.py is the engine's reference)
@@ -371,7 +374,7 @@ not know, into Cantonese) are "unavailable" without asking Mozilla's list.
 The program (runtime.rs): a game kind with `translate` gets a Translator::mozilla. Its Sink hands each feed's rules
 and requests to it as the feed is read (a new session in the feed: new_session first); the files connector runs the
 Link before the Sink, so a new session's files are set up before a reply can be written. Replies go to the game at
-once (Game::send_translation), the states on each Status event (Game::send_rules_state) and again in tick() when the
+once (Game::send_translation), the states on each Status event (Game::send_translations_state) and again in tick() when the
 game is in a session they were not told in (none told while there are no rules). Runtime::stop stops the translator
 before taking the game's lock (its thread may be waiting on that lock to send a reply). The window shows a
 "Translation" card (each rule: "Japanese → English" and its state); the command line's status line "translate: ja →

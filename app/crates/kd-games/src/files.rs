@@ -83,9 +83,9 @@ fn py_float(s: &str) -> Option<f64> {
 }
 
 // ---------------------------------------------------------------- the feed (game -> Koetama)
-/// '6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|rules|requests|id,src,talk,gain,az,el,muffle;...'
-/// (version 5: no rules or requests; 4, 3 and 2: no room either) -> a Feed, or None. A bad room, key or id: no room;
-/// bad ids in `to`: skipped (feed::voice_room, voice_to); malformed rules and requests: skipped (feed::parse_rules,
+/// '6|seq|volume|session|ack|ping|mic|lang|live|room|key|me|to|region|translations|requests|id,src,talk,gain,az,el,muffle;...'
+/// (version 5: no translations or requests; 4, 3 and 2: no room either) -> a Feed, or None. A bad room, key or id: no room;
+/// bad ids in `to`: skipped (feed::voice_room, voice_to); malformed translations and requests: skipped (feed::parse_translations,
 /// parse_requests)
 pub fn parse_feed(text: &str) -> Option<Feed> {
     let p: Vec<&str> = text.split('|').collect();
@@ -105,8 +105,8 @@ pub fn parse_feed(text: &str) -> Option<Feed> {
     } else {
         ((String::new(), String::new(), 0), Vec::new(), String::new())
     };
-    let (rules, translate) =
-        if p[0] == "6" { (feed::parse_rules(p[14]), feed::parse_requests(p[15])) } else { (Vec::new(), Vec::new()) };
+    let (translations, to_translate) =
+        if p[0] == "6" { (feed::parse_translations(p[14]), feed::parse_requests(p[15])) } else { (Vec::new(), Vec::new()) };
     let mut speakers = BTreeMap::new();
     for item in rest.split(';') {
         if item.is_empty() {
@@ -149,8 +149,8 @@ pub fn parse_feed(text: &str) -> Option<Feed> {
         me,
         to,
         region,
-        rules,
-        translate,
+        translations,
+        to_translate,
     })
 }
 
@@ -365,19 +365,13 @@ pub fn id_prefab(text: &str, kind: char, id: i64) -> String {
     format!("<prefab version=\"1.5.2\">\n\t<body tags=\"pcvx k={kind} u={id} t={hex}\"/>\n</prefab>\n")
 }
 
-/// id_prefab as the json format writes it: {"k": kind, "u": id, "t": the text}.
-pub fn id_json(text: &str, kind: char, id: i64) -> String {
-    let t = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
-    format!("{{\"k\":\"{kind}\",\"u\":{id},\"t\":{t}}}\n")
-}
-
 /// A translation as it is sent: stripped, at most TRANSLATION_MAX characters.
 pub(crate) fn cut_translation(text: &str) -> String {
     py_strip(text).chars().take(TRANSLATION_MAX).collect()
 }
 
 /// Seconds as JSON, to 1/100 s (never NaN or infinite: 0).
-pub(crate) fn json_secs(x: f64) -> String {
+pub fn json_secs(x: f64) -> String {
     let r = (x * 100.0).round() / 100.0;
     if r.is_finite() {
         format!("{r}")
@@ -386,18 +380,9 @@ pub(crate) fn json_secs(x: f64) -> String {
     }
 }
 
-/// A message as the json format writes it (one line): {"k": kind, "u": utterance, "t": the text, "w": [each unit's
-/// start, s after the line's audio began], "a": how long ago that was, s} - w and a both or neither.
+/// A message as the json format writes it: one line, the same object the socket connector sends (lines::message).
 pub fn json_message(text: &str, kind: char, utt: u32, times: Option<&[f64]>, ago: Option<f64>) -> String {
-    let t = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
-    let extra = match (times, ago) {
-        (Some(times), Some(ago)) => {
-            let w: Vec<String> = times.iter().map(|&x| json_secs(x)).collect();
-            format!(",\"w\":[{}],\"a\":{}", w.join(","), json_secs(ago.max(0.0)))
-        }
-        _ => String::new(),
-    };
-    format!("{{\"k\":\"{kind}\",\"u\":{utt},\"t\":{t}{extra}}}\n")
+    crate::lines::message(kind, utt, text, times, ago) + "\n"
 }
 
 /// A line as it is sent: stripped, at most TEXT_MAX characters, and its times cut with it (the first n units keep
@@ -692,22 +677,34 @@ impl Link {
         if kind == 'l' && text.is_empty() {
             return false;
         }
-        self.write_msg(kind, utt as i64, &text, times.as_deref(), t0)
+        self.write_msg(kind, utt as i64, &text, times.as_deref(), t0, None)
     }
 
     /// The translation of request `id` (PROTOCOL.md version 6, kind 'x'; "" = nothing to show). False if no game is
     /// listening.
     pub fn send_translation(&self, id: i64, text: &str) -> bool {
-        self.write_msg('x', id, &cut_translation(text), None, None)
+        let text = cut_translation(text);
+        self.write_msg('x', id, &text, None, None, Some(crate::lines::translation(id, &text)))
     }
 
-    /// The translation rules' states (kind 'd': feed::rules_wire). False if no game is listening.
-    pub fn send_rules_state(&self, rules: &[feed::RuleState]) -> bool {
-        self.write_msg('d', 0, &feed::rules_wire(rules), None, None)
+    /// The translations' states (kind 'd': feed::translations_wire; json: lines::translations_status). False if no game
+    /// is listening.
+    pub fn send_translations_state(&self, states: &[feed::RuleState]) -> bool {
+        let json = crate::lines::translations_status(states);
+        self.write_msg('d', 0, &feed::translations_wire(states), None, None, Some(json))
     }
 
-    /// One numbered message file (written whole: through <prefix>w<n>.tmp), kept until the game acks it.
-    fn write_msg(&self, kind: char, u: i64, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool {
+    /// One numbered message file (written whole: through <prefix>w<n>.tmp), kept until the game acks it. json: the
+    /// json format's object when it is not what the player said (that one is lines::message).
+    fn write_msg(
+        &self,
+        kind: char,
+        u: i64,
+        text: &str,
+        times: Option<&[f64]>,
+        t0: Option<Instant>,
+        json: Option<String>,
+    ) -> bool {
         let mut s = self.lock();
         let Some(dir) = s.dir.clone() else {
             return false;
@@ -721,11 +718,12 @@ impl Link {
         };
         let times = if ago.is_some() { times } else { None };
         // (a speech message's utterance is a u32; a translation's id is the game's: any positive number)
-        let written = match (self.rules.message, u32::try_from(u)) {
-            (MessageFormat::TeardownPrefab, Ok(utt)) => write_text(&tmp, &text_prefab(text, kind, utt, times, ago)),
-            (MessageFormat::Json, Ok(utt)) => fs::write(&tmp, json_message(text, kind, utt, times, ago)),
-            (MessageFormat::TeardownPrefab, Err(_)) => write_text(&tmp, &id_prefab(text, kind, u)),
-            (MessageFormat::Json, Err(_)) => fs::write(&tmp, id_json(text, kind, u)),
+        let written = match (self.rules.message, json, u32::try_from(u)) {
+            (MessageFormat::Json, Some(line), _) => fs::write(&tmp, line + "\n"),
+            (MessageFormat::Json, None, Ok(utt)) => fs::write(&tmp, json_message(text, kind, utt, times, ago)),
+            (MessageFormat::Json, None, Err(_)) => fs::write(&tmp, crate::lines::translation(u, text) + "\n"),
+            (MessageFormat::TeardownPrefab, _, Ok(utt)) => write_text(&tmp, &text_prefab(text, kind, utt, times, ago)),
+            (MessageFormat::TeardownPrefab, _, Err(_)) => write_text(&tmp, &id_prefab(text, kind, u)),
         };
         // (appears complete, never half-written)
         if let Err(e) = written.and_then(|_| fs::rename(&tmp, &path)) {
@@ -857,8 +855,8 @@ pub(crate) fn as_used(mut feed: Feed, p: &Profile) -> Feed {
         feed.speakers.clear();
     }
     if !p.translate {
-        feed.rules.clear();
-        feed.translate.clear();
+        feed.translations.clear();
+        feed.to_translate.clear();
     }
     feed
 }
@@ -916,8 +914,8 @@ impl Game for FilesGame {
         self.link.send_translation(id, text)
     }
 
-    fn send_rules_state(&self, rules: &[feed::RuleState]) -> bool {
-        self.link.send_rules_state(rules)
+    fn send_translations_state(&self, rules: &[feed::RuleState]) -> bool {
+        self.link.send_translations_state(rules)
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

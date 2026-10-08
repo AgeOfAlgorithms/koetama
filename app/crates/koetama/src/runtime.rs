@@ -147,8 +147,8 @@ fn tell_rules(game: &Mutex<Box<dyn Game>>, rules: &[RuleStatus], told: &Mutex<Op
     let g = game.lock().unwrap();
     let Some(sid) = g.feed().map(|f| f.sid) else { return false };
     let common: Vec<kd_common::feed::RuleState> = rules.iter().map(RuleStatus::common).collect();
-    let wire = kd_common::feed::rules_wire(&common);
-    if !g.send_rules_state(&common) {
+    let wire = kd_common::feed::translations_wire(&common);
+    if !g.send_translations_state(&common) {
         return false;
     }
     *told.lock().unwrap() = Some((sid, wire));
@@ -183,8 +183,8 @@ impl kd_common::feed::FeedSink for Sink {
                 }
                 *sid = Some(feed.sid);
             }
-            t.set_rules(&feed.rules);
-            for (id, text) in &feed.translate {
+            t.set_rules(&feed.translations);
+            for (id, text) in &feed.to_translate {
                 t.request(*id, text); // (ids already queued or answered: ignored)
             }
         }
