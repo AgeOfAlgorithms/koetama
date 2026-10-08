@@ -17,7 +17,7 @@
 
 <p align="center">
   <a href="https://github.com/AgeOfAlgorithms/kotodama/releases"><img src="https://img.shields.io/github/downloads/AgeOfAlgorithms/kotodama/total?label=downloads&color=f26d2a" alt="Downloads"></a>
-  <a href="https://github.com/AgeOfAlgorithms/kotodama/stargazers"><img src="https://img.shields.io/github/stars/AgeOfAlgorithms/kotodama?label=stars&color=f59e0b" alt="Stars"></a>
+  <a href="https://github.com/AgeOfAlgorithms/kotodama/stargazers"><img src="https://img.shields.io/github/stars/AgeOfAlgorithms/kotodama?label=stars&color=f59e0b&style=flat" alt="Stars"></a>
 </p>
 
 <p align="center">
