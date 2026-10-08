@@ -60,6 +60,8 @@ bytes it cannot listen to, and only to the players close enough to hear you.
   muffling. Only the players in range get your voice, and a whisper stays private.
 - **Push to talk or always on.** Hold the game's talk key, or let Koetama hear when you speak.
 - **Live words.** Your line appears while you talk and is finished when you stop. Words already shown never jump back.
+- **For deaf and hard-of-hearing players.** Everyone who talks with Koetama is captioned live, so players who can't
+  hear (or play without sound) can follow every voice, and players without a microphone can still talk with them.
 - **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line.
 - **Fair proximity.** Each word carries the time it was said, so a player who walks up mid-sentence sees only what
   they could have heard.
