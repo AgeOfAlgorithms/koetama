@@ -16,6 +16,10 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/AgeOfAlgorithms/kotodama/releases"><img src="https://img.shields.io/github/downloads/AgeOfAlgorithms/kotodama/total?label=downloads&color=f26d2a" alt="Downloads"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/AgeOfAlgorithms/kotodama/releases"><img src="https://img.shields.io/github/v/release/AgeOfAlgorithms/kotodama?include_prereleases&label=release&color=f26d2a" alt="Release"></a>
   <a href="https://github.com/AgeOfAlgorithms/kotodama/actions/workflows/build.yml"><img src="https://github.com/AgeOfAlgorithms/kotodama/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3a2c2b" alt="Windows | Linux">
