@@ -288,14 +288,15 @@ fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: boo
     p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
     let tile = Rect::from_min_size(rect.min + Vec2::new(8.0, (rect.height() - 30.0) / 2.0), Vec2::splat(30.0));
     gradient(p, tile, RED, AMBER, 8.0);
-    let letter = game.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    // (the mod is the title - it is what links to Kotodama; the game it runs in under it)
+    let letter = mod_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
     p.text(tile.center(), egui::Align2::CENTER_CENTER, letter, FontId::new(16.0, semibold()), Color32::WHITE);
     let x = tile.right() + 10.0;
-    p.text(Pos2::new(x, rect.center().y - 9.0), egui::Align2::LEFT_CENTER, game, FontId::new(14.5, semibold()), FG);
+    p.text(Pos2::new(x, rect.center().y - 9.0), egui::Align2::LEFT_CENTER, mod_name, FontId::new(14.5, semibold()), FG);
     let sub = p.text(
         Pos2::new(x, rect.center().y + 9.0),
         egui::Align2::LEFT_CENTER,
-        format!("{mod_name} mod"),
+        game,
         FontId::new(12.5, FontFamily::Proportional),
         MUTED,
     );

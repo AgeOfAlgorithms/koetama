@@ -5,7 +5,6 @@
   "mod": "Proximity Babble Chat",
   "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496",
   "author": "AgeOfAlgorithms",
-  "needs": "the Proximity Babble Chat mod (Steam Workshop)",
   "locate": {"steam_app": 1167630},
   "uses": ["voices", "speech"],
   "test_voices": [

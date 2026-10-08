@@ -416,7 +416,7 @@ impl Profile {
             _ => return Err(format!("\"format\": must be {FORMAT}")),
         }
         f.only(&[
-            "format", "id", "game", "mod", "url", "author", "needs", "locate", "uses", "test_voices", "speaker_names",
+            "format", "id", "game", "mod", "url", "author", "locate", "uses", "test_voices", "speaker_names",
             "connector",
         ])?;
         let id = f.opt_str("id")?.ok_or("\"id\" is missing")?.to_string();
@@ -430,10 +430,8 @@ impl Profile {
             return Err(format!("\"url\": must be a web page (https://...), got {url:?}"));
         }
         let author = f.text("author", 80)?;
-        let needs = match f.get("needs") {
-            Some(_) => f.text("needs", 200)?,
-            None => format!("the {mod_name} mod"),
-        };
+        // (what the player needs, shown while Kotodama waits: always from the mod's name - a field for it only repeated it)
+        let needs = format!("the {mod_name} mod");
         let steam_app = match f.get("locate") {
             None => None,
             Some(l) => {

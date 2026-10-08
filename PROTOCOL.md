@@ -177,7 +177,6 @@ A full example, using the files connector:
   "mod": "Talky",
   "url": "https://example.com/talky",
   "author": "Someone",
-  "needs": "the Talky mod (Workshop)",
   "locate": {"steam_app": 4242},
   "uses": ["voices", "speech"],
   "test_voices": [{"src": 1, "voice": "Microsoft Zira Desktop", "rate": 0, "text": "I am the test speaker."}],
@@ -211,7 +210,6 @@ A profile using the socket connector only changes `connector`: `{"type": "socket
 | `mod` | required | The mod's name (1 to 80 characters). |
 | `url` | required | The mod's page, `https://...` or `http://...` (the window opens it in the browser). |
 | `author` | required | Who made the mod and the profile. |
-| `needs` | optional | What players need, shown while Kotodama waits for the game: "Waiting for <game>: start it with <needs>". Default: `the <mod> mod`. |
 | `locate` | optional | `{"steam_app": N}`: the game's Steam app id. Kotodama shows where it's installed, or that it's missing. |
 | `uses` | optional | `["voices", "speech"]` (the default), or just one of them. `voices`: Kotodama plays the speakers in the feed (other players' voices). `speech`: Kotodama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Kotodama drops them). A voices-only mod's `mic` is ignored, so the microphone never opens. |
 | `test_voices` | optional | Up to 16 recorded voices for the mod's test speakers: `{"src": 1..999, "voice": "<Windows voice>", "rate": -10..10, "text": "..."}`. They're made once with the Windows speech voices (none on other systems), and a speaker with that `src` plays them. |

@@ -5,7 +5,6 @@
   "mod": "Example Mod",
   "url": "https://example.com/example-mod",
   "author": "An Example Modder",
-  "needs": "the Example Mod",
   "uses": ["voices", "speech"],
   "connector": {"type": "socket", "port": 47120}
 }

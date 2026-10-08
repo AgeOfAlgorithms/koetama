@@ -82,9 +82,13 @@ fn good_profiles() {
     let d = parse(&with(with(files_profile(), "/connector/feed/complete", None), "/connector/out/message", None)).unwrap();
     let Connector::Files(c) = &d.connector else { panic!() };
     assert_eq!((c.complete.as_str(), c.message), ("</registry>", MessageFormat::TeardownPrefab));
-    // (Notepad's byte order mark, a needs line, nulls as missing)
-    let t = format!("\u{FEFF}{}", with(with(socket_profile(), "/needs", Some(json!("the Example mod (Workshop)"))), "/locate", Some(Value::Null)));
-    assert_eq!(Profile::parse(&t).unwrap().needs, "the Example mod (Workshop)");
+    // (Notepad's byte order mark, nulls as missing; what the player needs comes from the mod's name)
+    let t = format!("\u{FEFF}{}", with(socket_profile(), "/locate", Some(Value::Null)));
+    let p = Profile::parse(&t).unwrap();
+    assert_eq!(p.needs, format!("the {} mod", p.mod_name));
+    // (there is no "needs" field: it only repeated the mod's name)
+    let e = Profile::parse(&with(socket_profile(), "/needs", Some(json!("the Example mod"))).to_string()).unwrap_err();
+    assert!(e.contains("unknown field \"needs\""), "{e}");
 }
 
 #[test]

@@ -25,7 +25,7 @@ pub const MODTAG: &str = r#"(?-u)<((?:local|steam)-[^\s/>]+)>"#;
 /// the game AND the mod: another Teardown mod made for Kotodama has its own id
 pub const ID: &str = "teardown-proximity-babble-chat";
 pub const NAME: &str = "Teardown";
-pub const NEEDS: &str = "the Proximity Babble Chat mod (Steam Workshop)";
+pub const NEEDS: &str = "the Proximity Babble Chat mod";
 pub const MOD_NAME: &str = "Proximity Babble Chat";
 /// the mod on the Steam Workshop (its id.txt)
 pub const MOD_URL: &str = "https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496";
