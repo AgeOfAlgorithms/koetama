@@ -71,6 +71,7 @@ through a small relay server, encrypted end to end.
   numbers. The host can choose the region the room lives in (Auto: near the first player to join).
 - **Status for the game.** Kotodama tells the game which feed versions it reads, so a mod can ask an outdated
   Kotodama to update, and whether the voice server can be reached.
+- **Uninstalling** asks whether to remove the downloaded speech models and your settings too (yes by default).
 - **Self-test** now also sends a packet through the voice relay.
 
 ### 0.2.0: the Rust app

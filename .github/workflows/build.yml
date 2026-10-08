@@ -44,6 +44,13 @@ jobs:
           tar -xjf "$A.tar.bz2"
           ls "$A/lib"
           echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/$A/lib" >> "$GITHUB_ENV"
+      - name: sherpa-onnx's DLLs next to the test programs (a restored build cache skips the build script that copies them; Windows would load System32's older onnxruntime.dll from PATH)
+        shell: bash
+        run: |
+          for d in app/target/debug/deps app/target/debug/examples app/target/debug app/target/release; do
+            mkdir -p "$d"
+            cp "$SHERPA_ONNX_LIB_DIR"/*.dll "$d"/
+          done
       - name: The language detector (SpeechBrain VoxLingua107 ECAPA as ONNX)
         run: |
           python -m pip install --upgrade pip
