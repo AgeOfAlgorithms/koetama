@@ -71,6 +71,65 @@ begin
   Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
 end;
 
+{ ---- Uninstalling: the downloaded speech models and the settings (%LOCALAPPDATA%\Kotodama, not the install folder)
+  go too unless the player says No - someone who uninstalls has no use for gigabytes of models (the user, 2026-10-08).
+  The question defaults to Yes; a silent uninstall (/SUPPRESSMSGBOXES) takes Yes. Updates install over the old copy
+  and never run this. }
+var
+  RemoveData: Boolean;
+
+function DataDir: String;
+begin
+  Result := ExpandConstant('{localappdata}\{#AppName}');
+end;
+
+{ the bytes in a folder and everything under it }
+function FolderBytes(const Dir: String): Int64;
+var
+  R: TFindRec;
+begin
+  Result := 0;
+  if FindFirst(Dir + '\*', R) then
+  begin
+    try
+      repeat
+        if (R.Name <> '.') and (R.Name <> '..') then
+        begin
+          if (R.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+            Result := Result + FolderBytes(Dir + '\' + R.Name)
+          else
+            Result := Result + Int64(R.SizeHigh) * 65536 * 65536 + R.SizeLow;
+        end;
+      until not FindNext(R);
+    finally
+      FindClose(R);
+    end;
+  end;
+end;
+
+function SizeText(Bytes: Int64): String;
+begin
+  if Bytes >= 1073741824 then
+    Result := Format('%.1f GB', [Bytes / 1073741824.0])
+  else
+    Result := Format('%d MB', [Bytes div 1048576]);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    RemoveData := False;
+    if DirExists(DataDir) then
+      RemoveData := SuppressibleMsgBox('Also remove the downloaded speech models and your Kotodama settings (' +
+        SizeText(FolderBytes(DataDir)) + ')?' + #13#10#13#10 +
+        'Choose No to keep them for a later reinstall.',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON1, IDYES) = IDYES;
+  end
+  else if (CurUninstallStep = usPostUninstall) and RemoveData then
+    DelTree(DataDir, True, True, True);
+end;
+
 [Messages]
 WelcomeLabel1=Welcome to [name]
 WelcomeLabel2=Kotodama plays the other players' voices where they stand in the game, and writes what you say as you say it.%n%nIt installs for you only (no administrator rights). The speech model for your language downloads the first time you speak.

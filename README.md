@@ -107,8 +107,10 @@ The first time you speak, Kotodama downloads the speech model for your language 
 | GigaAM v3 | Russian | 225 MB |
 | SenseVoice | Mandarin, Cantonese, Japanese, Korean | 240 MB |
 
-**Updates:** the window's **Check for updates** installs a new version and restarts Kotodama. Uninstalling keeps your
-settings and models in `%LOCALAPPDATA%\Kotodama`; delete that folder to remove them too.
+**Updates:** the window's **Check for updates** installs a new version and restarts Kotodama.
+
+**Uninstalling** asks whether to remove the downloaded speech models and your settings too (`%LOCALAPPDATA%\Kotodama`,
+with their size). The answer is Yes unless you choose No to keep them for a later reinstall.
 
 ## Game mods
 

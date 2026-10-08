@@ -62,7 +62,7 @@ jobs:
       - name: The build runs (the window, sound, ONNX, the detector, HTTPS)
         shell: bash
         run: ./dist/Kotodama/Kotodama.exe --selftest
-      - name: The installer installs, the installed app runs, the uninstaller removes it
+      - name: The installer installs, the installed app runs, the uninstaller removes it (and the models)
         shell: pwsh
         run: |
           $setup = (Get-ChildItem dist\Kotodama-Setup-*.exe).FullName
@@ -72,9 +72,14 @@ jobs:
           $p = Start-Process "$app\Kotodama.exe" -ArgumentList '--selftest' -Wait -PassThru -RedirectStandardOutput selftest.txt
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { throw "installed selftest exit code $($p.ExitCode)" }
+          # (the player's data: the uninstaller asks, Yes by default - a silent uninstall removes it)
+          $data = "$env:LOCALAPPDATA\Kotodama"
+          New-Item -ItemType Directory -Force "$data\models\some-model" | Out-Null
+          Set-Content "$data\models\some-model\model.onnx" 'pretend'
           $p = Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           Start-Sleep 5
           if (Test-Path "$app\Kotodama.exe") { throw 'the uninstaller left Kotodama.exe' }
+          if (Test-Path $data) { throw 'the uninstaller left the models and settings (%LOCALAPPDATA%\Kotodama)' }
       - uses: actions/upload-artifact@v4
         with:
           name: kotodama-windows
