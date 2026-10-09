@@ -742,12 +742,24 @@ fn dark_title_bar(frame: &eframe::Frame) {
     let _ = frame;
 }
 
-/// Opens a web page or a file with the system's program for it.
+/// Opens a web page (http / https) or a folder with the system's program for it - nothing else. Never through a shell:
+/// a profile's URL is someone else's text (`cmd /C start` ran `&calc` in one).
 fn open_url(target: &str) {
+    let web = target.starts_with("https://") || target.starts_with("http://");
+    if !web && !std::path::Path::new(target).is_dir() {
+        return;
+    }
     #[cfg(windows)]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", "", target])
-        .spawn();
+    {
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (verb, file) = (wide("open"), wide(target));
+        // SAFETY: both strings are NUL-terminated UTF-16 that outlive the call; the other pointers may be null
+        unsafe {
+            ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+        }
+    }
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(target).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]

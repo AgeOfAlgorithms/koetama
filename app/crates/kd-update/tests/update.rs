@@ -21,12 +21,15 @@ fn versions() {
     assert_eq!(api_url(), format!("https://api.github.com/repos/{}/releases/latest", kd_common::paths::REPO));
 }
 
+const DL: &str = "https://github.com/AgeOfAlgorithms/koetama/releases/download/v9.9.9/";
+const REL_PAGE: &str = "https://github.com/AgeOfAlgorithms/koetama/releases/tag/v9.9.9";
+
 fn rel(tag: &str, extra: &str) -> String {
     format!(
-        r#"{{"tag_name": "{tag}", "body": "notes", "html_url": "https://example/rel", {extra} "assets": [
-            {{"name": "Koetama-Setup-9.9.9.exe", "browser_download_url": "URL_EXE"}},
-            {{"name": "Koetama-9.9.9-linux.tar.gz", "browser_download_url": "URL_TGZ"}},
-            {{"name": "SHA256SUMS.txt", "browser_download_url": "URL_SUMS"}}]}}"#
+        r#"{{"tag_name": "{tag}", "body": "notes", "html_url": "{REL_PAGE}", {extra} "assets": [
+            {{"name": "Koetama-Setup-9.9.9.exe", "browser_download_url": "{DL}Koetama-Setup-9.9.9.exe"}},
+            {{"name": "Koetama-9.9.9-linux.tar.gz", "browser_download_url": "{DL}Koetama-9.9.9-linux.tar.gz"}},
+            {{"name": "SHA256SUMS.txt", "browser_download_url": "{DL}SHA256SUMS.txt"}}]}}"#
     )
 }
 
@@ -40,9 +43,9 @@ fn releases() {
             version: "9.9.9".into(),
             notes: "notes".into(),
             installer: Some("Koetama-Setup-9.9.9.exe".into()),
-            installer_url: Some("URL_EXE".into()),
-            sums_url: Some("URL_SUMS".into()),
-            page: "https://example/rel".into(),
+            installer_url: Some(format!("{DL}Koetama-Setup-9.9.9.exe")),
+            sums_url: Some(format!("{DL}SHA256SUMS.txt")),
+            page: REL_PAGE.into(),
         }
     );
     assert!(parse_release(&rel(&format!("v{cur}"), ""), cur).is_none(), "the same version: no update");
@@ -51,15 +54,32 @@ fn releases() {
     assert!(parse_release(&rel("v9.9.9", r#""draft": false, "prerelease": null,"#), cur).is_some());
     assert!(parse_release("not json", cur).is_none() && parse_release("[]", cur).is_none());
     assert!(parse_release(r#"{"message": "Not Found"}"#, cur).is_none());
-    // (no installer for this system; odd assets skipped; no page: the releases page)
+    // (odd assets skipped; the installer only under this version's own name (any case), only from this repo's
+    // releases; no page, or one elsewhere: the releases page)
     let r = parse_release(
-        r#"{"tag_name": "v9.9.9", "body": null, "assets": [{"name": 5}, {"name": "koetama-setup.zip",
-            "browser_download_url": "Z"}, {"name": "KOETAMA-SETUP-x.EXE", "browser_download_url": "E"}]}"#,
+        &format!(
+            r#"{{"tag_name": "v9.9.9", "body": null, "assets": [{{"name": 5}}, {{"name": "koetama-setup.zip",
+            "browser_download_url": "{DL}z"}}, {{"name": "KOETAMA-SETUP-9.9.9.EXE", "browser_download_url": "{DL}E"}}]}}"#
+        ),
         cur,
     )
     .unwrap();
-    assert_eq!((r.installer.as_deref(), r.installer_url.as_deref(), r.sums_url), (Some("KOETAMA-SETUP-x.EXE"), Some("E"), None));
+    assert_eq!((r.installer.as_deref(), r.installer_url.as_deref(), r.sums_url), (Some("KOETAMA-SETUP-9.9.9.EXE"), Some(format!("{DL}E").as_str()), None));
     assert_eq!((r.notes.as_str(), r.page.as_str()), ("", PAGE));
+    let r = parse_release(
+        r#"{"tag_name": "v9.9.9", "html_url": "https://evil.example/x", "assets": [
+            {"name": "Koetama-Setup-9.9.9.exe", "browser_download_url": "https://evil.example/Koetama-Setup-9.9.9.exe"},
+            {"name": "SHA256SUMS.txt", "browser_download_url": "https://evil.example/SHA256SUMS.txt"}]}"#,
+        cur,
+    )
+    .unwrap();
+    assert_eq!((r.installer, r.sums_url, r.page.as_str()), (None, None, PAGE), "files and pages elsewhere: ignored");
+    let r = parse_release(
+        &format!(r#"{{"tag_name": "v9.9.9", "assets": [{{"name": "Koetama-Setup-0.1.0.exe", "browser_download_url": "{DL}Koetama-Setup-0.1.0.exe"}}]}}"#),
+        cur,
+    )
+    .unwrap();
+    assert_eq!(r.installer, None, "an older installer under a new tag: not this release's");
 }
 
 #[test]

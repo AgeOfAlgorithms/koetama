@@ -250,3 +250,67 @@ fn whole_file_feeds() {
     g.stop();
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// (audit, 2026-10-09) A page reached by DNS rebinding names its own host: refused. Senders that trickle a byte at a
+/// time cannot hold the request slots: each is cut off, and the game's own requests still come through.
+#[test]
+fn other_hosts_and_slow_senders() {
+    let port = free_port();
+    let mut g = HttpGame::new(profile(port, json!({})), false, Arc::new(Sink::default()), kd_common::null_log());
+    g.start();
+    assert_eq!(request(port, "GET", &[], "").0, 200, "the server is up");
+    let raw = |host: &str| {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(format!("GET / HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes()).unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        out.split(' ').nth(1).unwrap_or("").to_string()
+    };
+    assert_eq!(raw("evil.example"), "421");
+    assert_eq!(raw("evil.example:80"), "421");
+    for ok in [format!("127.0.0.1:{port}"), format!("localhost:{port}"), "localhost".into(), format!("[::1]:{port}")] {
+        assert_eq!(raw(&ok), "200", "{ok}");
+    }
+    // sixteen slow senders (a byte every 2 s, never done), then the game
+    let slow: Vec<_> = (0..16)
+        .map(|_| {
+            std::thread::spawn(move || {
+                let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                let t0 = Instant::now();
+                for b in b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Slow: aaaaaaaaaaaaaaaa" {
+                    if s.write_all(&[*b]).is_err() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
+                    if t0.elapsed() > Duration::from_secs(12) {
+                        break;
+                    }
+                }
+                t0.elapsed()
+            })
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(500));
+    let t0 = Instant::now();
+    let mut served = false;
+    while t0.elapsed() < Duration::from_secs(8) {
+        // (busy while the slots are held: a 503, or the connection reset - tried again)
+        let status = (|| {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).ok()?;
+            s.write_all(b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 2\r\n\r\n{}").ok()?;
+            let mut out = String::new();
+            s.read_to_string(&mut out).ok()?;
+            out.split(' ').nth(1).map(str::to_string)
+        })();
+        if status.as_deref() == Some("200") {
+            served = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    assert!(served && t0.elapsed() < Duration::from_secs(7), "the game got in after {:?}", t0.elapsed());
+    for t in slow {
+        assert!(t.join().unwrap() < Duration::from_secs(10), "a slow sender was cut off");
+    }
+    g.stop();
+}

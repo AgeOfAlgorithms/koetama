@@ -34,6 +34,10 @@ const MAX_OPEN: usize = 16;
 const RETRY: Duration = Duration::from_secs(2);
 const TICK: Duration = Duration::from_millis(20);
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
+/// a whole request (head and body) must come within this (slow senders do not hold a slot)
+const REQUEST_TIME: Duration = Duration::from_secs(5);
+/// the largest ack a session's numbering starts after (a feed's near i64::MAX does not overflow it)
+const MAX_ACK: i64 = 1 << 52;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -219,6 +223,17 @@ struct Request {
 fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
+    // (the whole request within REQUEST_TIME: a sender that trickles a byte at a time cannot hold one of the
+    //  MAX_OPEN slots - the game's own requests would find them all taken)
+    let until = Instant::now() + REQUEST_TIME;
+    let read = |stream: &mut TcpStream, chunk: &mut [u8]| -> Result<usize, u16> {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(408);
+        }
+        let _ = stream.set_read_timeout(Some(left.min(IO_TIMEOUT)));
+        stream.read(chunk).map_err(|_| 400u16)
+    };
     let head_end = loop {
         if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
             break i;
@@ -226,7 +241,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
         if buf.len() > 16 * 1024 {
             return Err(431);
         }
-        let n = stream.read(&mut chunk).map_err(|_| 400u16)?;
+        let n = read(stream, &mut chunk)?;
         if n == 0 {
             return Err(400);
         }
@@ -254,7 +269,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
     }
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < len {
-        let n = stream.read(&mut chunk).map_err(|_| 400u16)?;
+        let n = read(stream, &mut chunk)?;
         if n == 0 {
             return Err(400);
         }
@@ -272,6 +287,8 @@ fn reason(status: u16) -> &'static str {
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        408 => "Request Timeout",
+        421 => "Misdirected Request",
         411 => "Length Required",
         413 => "Payload Too Large",
         431 => "Request Header Fields Too Large",
@@ -322,6 +339,15 @@ fn handle(mut stream: TcpStream, ctx: &Ctx) {
             return;
         }
     };
+    // (a page that got here by DNS rebinding names its own host: only this PC's names are answered)
+    if let Some(h) = headers.get("host") {
+        let name = h.rsplit_once(':').filter(|(n, p)| !n.is_empty() && !p.contains(']')).map_or(h.as_str(), |(n, _)| n);
+        if !["127.0.0.1", "localhost", "[::1]"].iter().any(|ok| name.eq_ignore_ascii_case(ok)) {
+            ctx.say(&format!("refused a request for the host {h:?} (only 127.0.0.1 / localhost)"));
+            let _ = reply(stream, 421, "{\"error\":\"not this host\"}", None);
+            return;
+        }
+    }
     // (a browser says where the page is from: only the profile's origins may use Koetama)
     let origin = match headers.get("origin") {
         None => None,
@@ -372,7 +398,7 @@ fn on_feed(body: &[u8], ctx: &Ctx) -> Result<String, String> {
             // (a new session - or Koetama started in the middle of one: numbers go on after what the game has)
             out.session = Some(feed.sid);
             out.objects.clear();
-            out.next = feed.ack.max(0) + 1;
+            out.next = feed.ack.clamp(0, MAX_ACK) + 1;
             let hello = api::hello(&api::features(&ctx.profile));
             let n = out.next;
             out.objects.push((n, hello));
@@ -401,7 +427,7 @@ fn on_feed(body: &[u8], ctx: &Ctx) -> Result<String, String> {
         }
         out = sh.arrived.wait_timeout(out, left).unwrap_or_else(|e| e.into_inner()).0;
     }
-    let first = out.objects.first().map_or(feed.ack + 1, |(n, _)| *n);
+    let first = out.objects.first().map_or(feed.ack.saturating_add(1), |(n, _)| *n);
     let last = out.objects.last().map_or(feed.ack, |(n, _)| *n);
     let objects: Vec<&str> = out.objects.iter().map(|(_, o)| o.as_str()).collect();
     Ok(format!("{{\"objects\":[{}],\"first\":{first},\"last\":{last}}}", objects.join(",")))

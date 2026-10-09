@@ -35,6 +35,16 @@ impl PlayerId {
 /// The most characters of a string id.
 pub const MAX_ID_CHARS: usize = 64;
 
+/// A character a player id may hold: no control characters, nothing invisible or direction-changing (an id that
+/// looks like another player's).
+pub fn id_char_ok(c: char) -> bool {
+    !c.is_control()
+        && !matches!(c,
+            '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}'
+            | '\u{180B}'..='\u{180F}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}'
+            | '\u{2800}' | '\u{3164}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}' | '\u{E0000}'..='\u{E0FFF}')
+}
+
 /// A player id's number in a voice room: the first two bytes of SHA-256("koetama id:" + room + ":" + id), 1..=MAX_ID
 /// (0 maps to MAX_ID) - every Koetama in the room names every player alike; another room, other numbers.
 pub fn relay_id(room: &str, id: &PlayerId) -> i64 {

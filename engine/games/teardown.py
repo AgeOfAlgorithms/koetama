@@ -184,11 +184,22 @@ def _list(o, k, most):
     return v
 
 
+INVISIBLE = ([0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFEFF, 0xFFA0]
+             + list(range(0x180B, 0x1810)) + list(range(0x200B, 0x2010)) + list(range(0x202A, 0x202F))
+             + list(range(0x2060, 0x2070)) + list(range(0xFE00, 0xFE10)) + list(range(0xE0000, 0xE1000)))
+INVISIBLE = frozenset(INVISIBLE)
+
+
+def id_char_ok(c):
+    """a character a player id may hold: no control characters, nothing invisible (Rust: feed::id_char_ok)"""
+    return unicodedata.category(c) != 'Cc' and ord(c) not in INVISIBLE
+
+
 def player_id(v):
     """a player id as JSON gives it: (text, is a number) - a whole number, or a string of 1 to 64 characters without
     control characters; None otherwise (Rust: api::player_id)"""
     if isinstance(v, str):
-        if 1 <= len(v) <= 64 and len(v.encode('utf-8')) <= 255 and not any(unicodedata.category(c) == 'Cc' for c in v):
+        if 1 <= len(v) <= 64 and len(v.encode('utf-8')) <= 255 and all(id_char_ok(c) for c in v):
             return (v, False)
         return None
     w = _whole(v)

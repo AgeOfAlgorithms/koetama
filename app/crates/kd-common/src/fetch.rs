@@ -92,7 +92,9 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, u64), tries: u32)
 
 fn try_once(url: &str, part: &Path, progress: &dyn Fn(u64, u64)) -> io::Result<()> {
     let mut have = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    // (https only - a redirect to plain http is refused - except from this PC itself: the tests' stand-in servers)
     let agent = ureq::Agent::config_builder()
+        .https_only(!on_this_pc(url))
         .timeout_global(None)
         .timeout_connect(Some(Duration::from_secs(30)))
         .timeout_recv_response(Some(Duration::from_secs(60)))
@@ -141,11 +143,16 @@ fn agent_name() -> String {
 
 /// A small text from the web (the updater's release list, SHA256SUMS.txt).
 pub fn get_text(url: &str, accept: Option<&str>, timeout: Duration) -> io::Result<String> {
-    let agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).build().new_agent();
+    let agent = ureq::Agent::config_builder().https_only(!on_this_pc(url)).timeout_global(Some(timeout)).build().new_agent();
     let mut req = agent.get(url).header("User-Agent", &agent_name());
     if let Some(a) = accept {
         req = req.header("Accept", a);
     }
     let resp = req.call().map_err(io::Error::other)?;
     resp.into_body().read_to_string().map_err(io::Error::other)
+}
+
+/// A URL on this PC (http://127.0.0.1 or localhost: the tests' stand-in servers), where plain http is allowed.
+fn on_this_pc(url: &str) -> bool {
+    ["http://127.0.0.1:", "http://127.0.0.1/", "http://localhost:", "http://localhost/"].iter().any(|p| url.starts_with(p))
 }

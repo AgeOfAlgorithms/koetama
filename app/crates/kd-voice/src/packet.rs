@@ -47,7 +47,7 @@ pub fn good_id(id: &PlayerId) -> bool {
         return !id.number;
     }
     let fits = id.text.len() <= MAX_ID_BYTES && id.text.chars().count() <= MAX_ID_CHARS;
-    let clean = !id.text.chars().any(char::is_control);
+    let clean = id.text.chars().all(kd_common::feed::id_char_ok);
     let number = !id.number || id.text.parse::<i64>().is_ok_and(|n| n.to_string() == id.text);
     fits && clean && number
 }

@@ -448,7 +448,9 @@ impl Profile {
         let game = f.text("game", 80)?;
         let mod_name = f.text("mod", 80)?;
         let url = f.text("url", 300)?;
-        if !(url.starts_with("https://") || url.starts_with("http://")) || url.contains(char::is_whitespace) {
+        // (a web page, in a URL's own characters only: nothing a shell or a quote would read)
+        let url_char = |c: char| c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(c);
+        if !(url.starts_with("https://") || url.starts_with("http://")) || !url.chars().all(url_char) {
             return Err(format!("\"url\": must be a web page (https://...), got {url:?}"));
         }
         let author = f.text("author", 80)?;

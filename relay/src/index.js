@@ -16,6 +16,9 @@ import { MAX_PAYLOAD, parseId, parseRegion, roomName, route } from "./frames.js"
 const ROOM_PATH = /^\/v1\/room\/([0-9a-f]{32})$/;
 const MAX_PEERS = 64;           // connections in one room
 const MAX_RATE = 60;            // frames a second from one connection (60 ms packets: ~17); more are dropped
+const CLOSE_RATE = 2 * MAX_RATE; // ... and a connection that sends this many in a second is closed (each message is
+                                 // billed even when dropped: a flood must not keep running up the bill)
+const FLOODED = 4008;           // its close code (policy)
 
 export default {
   async fetch(request, env) {
@@ -27,6 +30,11 @@ export default {
     if (!m) return new Response("not found\n", { status: 404 });
     if (request.headers.get("Upgrade") !== "websocket") return new Response("a WebSocket is expected\n", { status: 426 });
     if (parseId(url.searchParams.get("me")) === null) return new Response("?me= must be a player id 1..65535\n", { status: 400 });
+    // (new connections per address, before any room is touched: wrangler.toml's UPGRADES rate limit)
+    if (env.UPGRADES) {
+      const { success } = await env.UPGRADES.limit({ key: request.headers.get("CF-Connecting-IP") || "?" });
+      if (!success) return new Response("too many connections from this address: try again in a minute\n", { status: 429 });
+    }
     const region = parseRegion(url.searchParams.get("region"));
     const id = env.ROOMS.idFromName(roomName(m[1], region));
     const room = region ? env.ROOMS.get(id, { locationHint: region }) : env.ROOMS.get(id);
@@ -59,13 +67,22 @@ export class Room extends DurableObject {
 
   async webSocketMessage(ws, message) {
     if (typeof message === "string") return; // (no text messages but the auto-answered ping)
-    if (message.byteLength > MAX_PAYLOAD + 200) return;
+    if (message.byteLength > MAX_PAYLOAD + 200) {
+      try { ws.close(1009, "too big"); } catch { /* closing */ }
+      return;
+    }
     const { me } = ws.deserializeAttachment() || {};
     if (!me) return;
     const now = Math.floor(Date.now() / 1000);
     const r = this.rate.get(ws);
     if (!r || r.t !== now) this.rate.set(ws, { t: now, n: 1 });
-    else if (++r.n > MAX_RATE) return;
+    else if (++r.n > MAX_RATE) {
+      if (r.n > CLOSE_RATE) {
+        this.rate.delete(ws);
+        try { ws.close(FLOODED, "too fast"); } catch { /* closing */ }
+      }
+      return;
+    }
     const routed = route(message, me);
     if (!routed) return;
     for (const id of routed.to) {

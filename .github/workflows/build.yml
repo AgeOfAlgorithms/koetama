@@ -12,8 +12,10 @@ on:
     paths: ['app/**', 'engine/export_lid.py', 'build.py', 'installer/**', '.github/workflows/**', 'LICENSE', 'THIRD_PARTY_NOTICES.txt']
   workflow_dispatch:
 
+# (read only: the build jobs run third-party code - actions, pip and cargo packages. Only the release job, which runs
+#  none of that, may write - it drafts the release)
 permissions:
-  contents: write
+  contents: read
 
 concurrency:                       # (a newer push replaces a build still running)
   group: build-${{ github.ref }}
@@ -41,6 +43,8 @@ jobs:
           A=sherpa-onnx-v1.13.8-win-x64-shared-MT-Release-lib
           cd "$RUNNER_TEMP"
           curl -sSfL -o "$A.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$A.tar.bz2"
+          # (pinned: these libraries ship inside the app - a replaced release asset must not)
+          echo "b8eedf41bd6d3779218887b48367bb7a3ece5aaa7667f01f69ee823a12b0a9e7  $A.tar.bz2" | sha256sum -c -
           tar -xjf "$A.tar.bz2"
           ls "$A/lib"
           echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/$A/lib" >> "$GITHUB_ENV"
@@ -93,12 +97,6 @@ jobs:
           path: |
             dist/Koetama-Setup*.exe
             dist/SHA256SUMS.txt
-      - name: Draft release (a tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: dist/Koetama-Setup*.exe
 
   linux:
     runs-on: ubuntu-22.04
@@ -118,6 +116,8 @@ jobs:
           A=sherpa-onnx-v1.13.8-linux-x64-shared-lib
           cd "$RUNNER_TEMP"
           curl -sSfL -o "$A.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$A.tar.bz2"
+          # (pinned: these libraries ship inside the app - a replaced release asset must not)
+          echo "3892d184be41027e18165e67f549cd4e4cdd8dcd73ac5579e97afd55e14e30b6  $A.tar.bz2" | sha256sum -c -
           tar -xjf "$A.tar.bz2"
           ls "$A/lib"
           echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/$A/lib" >> "$GITHUB_ENV"
@@ -148,18 +148,14 @@ jobs:
           path: |
             dist/Koetama*linux.tar.gz
             dist/SHA256SUMS.txt
-      - name: Draft release (a tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: dist/Koetama*linux.tar.gz
 
-  sums:
-    # one SHA256SUMS.txt for the release, from both builds
+  release:
+    # a tag: the DRAFT release - both builds and one SHA256SUMS.txt for them. The only job that may write.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [windows, linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -172,4 +168,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: SHA256SUMS.txt
+          files: |
+            art/koetama-windows/Koetama-Setup*.exe
+            art/koetama-linux/Koetama*linux.tar.gz
+            SHA256SUMS.txt

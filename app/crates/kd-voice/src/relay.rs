@@ -21,6 +21,8 @@ pub const PING: &str = "ping";
 pub const REPLACED: u16 = 4000;
 /// the HTTP status of a relay that refuses a player id already in the room
 pub const TAKEN: u16 = 409;
+/// the largest message taken from the relay (bytes)
+pub const MAX_MESSAGE: usize = 16 * 1024;
 
 /// The room's address on the relay. room: "<32 hex>" or "<32 hex>@<region>" (where the room should live: the relay
 /// asks Cloudflare for it when the room is made; kd_common::feed::REGIONS).
@@ -95,7 +97,10 @@ impl Conn {
         tcp.set_read_timeout(Some(CONNECT_TIMEOUT)).map_err(|e| e.to_string())?;
         tcp.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(|e| e.to_string())?;
         let connector = if secure { Connector::Rustls(tls()?) } else { Connector::Plain };
-        let (ws, _) = tungstenite::client_tls_with_config(url.as_str(), tcp, None, Some(connector)).map_err(|e| match e {
+        // (the relay sends packets of ~4 KB at most: anything far bigger is refused before it is held in memory)
+        let limits =
+            tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE)).max_frame_size(Some(MAX_MESSAGE));
+        let (ws, _) = tungstenite::client_tls_with_config(url.as_str(), tcp, Some(limits), Some(connector)).map_err(|e| match e {
             tungstenite::HandshakeError::Failure(tungstenite::Error::Http(r)) if r.status().as_u16() == TAKEN => {
                 OpenError { text: "the relay refused this player id: another player in the room has it".into(), taken: true }
             }

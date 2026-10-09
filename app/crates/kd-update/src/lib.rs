@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 
 /// The releases page (the newest).
 pub const PAGE: &str = "https://github.com/AgeOfAlgorithms/koetama/releases/latest";
+/// where this repo's pages and its releases' files are (anything else a release names is ignored)
+pub const REPO_PAGES: &str = "https://github.com/AgeOfAlgorithms/koetama/";
+pub const RELEASE_FILES: &str = "https://github.com/AgeOfAlgorithms/koetama/releases/download/";
 /// What GitHub's API answers in.
 pub const ACCEPT: &str = "application/vnd.github+json";
 
@@ -96,18 +99,21 @@ fn release_from(rel: &Value, current: &str) -> Option<Release> {
             None => assets.push((name.to_string(), url.to_string())),
         }
     }
-    let prefix = format!("{}-setup", paths::APP_ID);
-    let inst = assets.iter().find(|(n, _)| {
-        let l = n.to_lowercase();
-        l.starts_with(&prefix) && l.ends_with(".exe")
-    });
+    // (only this release's own installer, from this repo's releases: not an older one under a new tag, nor a file
+    // somewhere else)
+    let version = tag.trim_start_matches('v').to_string();
+    let want = format!("{}-setup-{}.exe", paths::APP_ID, version).to_lowercase();
+    let ours = |u: &String| u.starts_with(RELEASE_FILES);
+    let assets: Vec<(String, String)> = assets.into_iter().filter(|(_, u)| ours(u)).collect();
+    let inst = assets.iter().find(|(n, _)| n.to_lowercase() == want);
+    let page = text_of(&rel["html_url"]).filter(|p| p.starts_with(REPO_PAGES)).unwrap_or(PAGE).to_string();
     Some(Release {
-        version: tag.trim_start_matches('v').to_string(),
+        version,
         notes: text_of(&rel["body"]).unwrap_or("").to_string(),
         installer: inst.map(|(n, _)| n.clone()),
         installer_url: inst.map(|(_, u)| u.clone()),
         sums_url: assets.iter().find(|(n, _)| n == "SHA256SUMS.txt").map(|(_, u)| u.clone()),
-        page: text_of(&rel["html_url"]).unwrap_or(PAGE).to_string(),
+        page,
     })
 }
 
@@ -191,7 +197,7 @@ pub fn signer(path: &Path) -> (Option<String>, Option<String>) {
          Write-Output $s.SignerCertificate.Subject",
         path.display().to_string().replace('\'', "''")
     );
-    let mut cmd = Command::new("powershell");
+    let mut cmd = Command::new(paths::powershell());
     cmd.args(["-NoProfile", "-Command", &ps]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     // (Windows PowerShell with its own modules: a PSModulePath inherited from PowerShell 7 - Koetama started from
     //  a pwsh window, or GitHub's runners - points it at modules it cannot load, and Get-AuthenticodeSignature fails)

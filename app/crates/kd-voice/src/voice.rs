@@ -495,10 +495,9 @@ fn run(sh: Arc<Shared>, rx: Receiver<Block>, relay: String, log: Log) {
             };
             let mut to = c.to.clone();
             if c.to_all {
-                // (into a device for everyone: every player in the room now)
-                let now = sh.now();
-                for (&r, s) in lock(&sh.seen).iter() {
-                    if now - s.t <= PRESENT && r != c.me && !to.contains(&r) && to.len() < frames::MAX_TO {
+                // (into a device for everyone: every player the game lists - not whoever else is in the room)
+                for &r in c.ids.keys() {
+                    if r != c.me && !to.contains(&r) && to.len() < frames::MAX_TO {
                         to.push(r);
                     }
                 }

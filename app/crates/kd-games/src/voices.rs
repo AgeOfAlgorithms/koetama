@@ -24,7 +24,7 @@ pub fn make_in(work: &Path, voices: &[TestVoice], name: &dyn Fn(&TestVoice) -> S
                  $s.Speak($env:KD_SAID); $s.Dispose()",
                 v.rate.clamp(-10, 10)
             );
-            let mut cmd = std::process::Command::new("powershell");
+            let mut cmd = std::process::Command::new(kd_common::paths::powershell());
             cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps]).stdin(std::process::Stdio::null());
             cmd.env("KD_VOICE", &v.voice).env("KD_WAV", &path).env("KD_SAID", &v.text);
             cmd.env_remove("PSModulePath"); // (PowerShell 7's module path breaks Windows PowerShell's own modules)

@@ -61,7 +61,8 @@ impl Hub {
                 }
             };
             let Some(link) = Channel::start(self.relay.clone(), &code, HUB, self.log.clone()) else { continue };
-            (self.log)(&format!("hub: player {} gets the join code {code}", id.text));
+            // (not the code itself: a log gets shared, and the code is the key to that player's link)
+            (self.log)(&format!("hub: player {} has a join code (shown to them by the game)", id.text));
             self.peers.insert(
                 id.text.clone(),
                 Peer {

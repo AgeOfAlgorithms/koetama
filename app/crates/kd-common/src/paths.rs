@@ -60,3 +60,15 @@ pub fn repo_root() -> Option<PathBuf> {
     }
     None
 }
+
+/// Windows PowerShell by its full path (%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe): a bare
+/// "powershell" is looked for in the program's own folder first, where a planted powershell.exe would run instead.
+pub fn powershell() -> PathBuf {
+    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let full = root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    if full.is_file() {
+        full
+    } else {
+        PathBuf::from("powershell")
+    }
+}

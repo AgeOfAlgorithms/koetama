@@ -2,6 +2,7 @@
 //! transports - the feed (game -> Koetama: parse_feed) and what Koetama sends (hello, speech, room, voice, translation,
 //! translations_status: one line each, "type" first). The socket connector sends them as lines, the files connector
 //! as numbered files (json, or a Teardown prefab whose tag holds the object's hex: object_prefab).
+use crate::files;
 use crate::profile::Profile;
 use kd_common::feed::{self, Device, Effects, Feed, Out, PlayerId, RuleState, Speaker, Via};
 use kd_common::paths;
@@ -123,12 +124,92 @@ pub fn player(player: &PlayerId, joined: bool) -> String {
     format!("{{\"type\":\"player\",\"player\":{},\"joined\":{joined}}}", player.json())
 }
 
-/// An object one of a hub's players' Koetama sent, as the hub tells its game: "player" added after "type".
+/// the longest object a hub takes from one of its players (bytes)
+pub const MAX_PLAYER_OBJECT: usize = 16 * 1024;
+
+/// An object one of a hub's players' Koetama sent, as the hub tells its game, with "player" after "type" - or None.
+/// That Koetama is someone else's program (or anyone with the join code): the object is read as JSON, only the kinds
+/// a player's Koetama sends are taken (speech, talking, translation, translations_status, status, voice), and each is
+/// made again here from its checked fields, so nothing else reaches the game (no room, no join code, no second
+/// object, no other player's name).
 pub fn from_player(object: &str, player: &PlayerId) -> Option<String> {
-    let rest = object.strip_prefix("{\"type\":")?;
+    if object.len() > MAX_PLAYER_OBJECT {
+        return None;
+    }
+    let v: Value = serde_json::from_str(object).ok()?;
+    let s = |k: &str| v.get(k).and_then(Value::as_str);
+    let one_of = |k: &str, allowed: &[&'static str]| -> Option<&'static str> {
+        let x = s(k)?;
+        allowed.iter().find(|a| **a == x).copied()
+    };
+    let lang = |x: Option<&Value>| x.and_then(Value::as_str).filter(|l| LANG.is_match(l)).map(str::to_string);
+    let text = |k: &str, most: usize| s(k).map(|t| t.chars().filter(|c| !c.is_control() || *c == '\n').take(most).collect::<String>());
+    let clean = match s("type")? {
+        "speech" => {
+            let utt = u32::try_from(whole(v.get("utt")?)?).ok()?;
+            let kind = match one_of("kind", &["start", "live", "final"])? {
+                "start" => 's',
+                "live" => 'l',
+                _ => 'f',
+            };
+            let words = text("text", files::TEXT_MAX).unwrap_or_default();
+            let times: Option<Vec<f64>> = v.get("times").and_then(Value::as_array).map(|a| {
+                a.iter().take(files::TEXT_MAX).filter_map(Value::as_f64).filter(|x| x.is_finite()).collect()
+            });
+            let ago = v.get("ago").and_then(Value::as_f64).filter(|x| x.is_finite());
+            match (times, ago) {
+                (Some(t), Some(a)) => speech(kind, utt, &words, Some(&t), Some(a)),
+                _ => speech(kind, utt, &words, None, None),
+            }
+        }
+        "talking" => talking(&player_id(v.get("id")?)?, v.get("talking")?.as_bool()?),
+        "translation" => {
+            let id = whole(v.get("id")?)?;
+            let t = text("text", files::TRANSLATION_MAX)?;
+            match (lang(v.get("from")), lang(v.get("to"))) {
+                (Some(f), Some(to)) => translation(id, &t, Some((&f, &to))),
+                _ => translation(id, &t, None),
+            }
+        }
+        "translations_status" => {
+            let mut states = Vec::new();
+            for r in v.get("translations")?.as_array()?.iter().take(feed::MAX_TRANSLATIONS) {
+                states.push(RuleState {
+                    from: lang(r.get("from"))?,
+                    to: lang(r.get("to"))?,
+                    state: ["ready", "downloading", "loading", "unavailable", "error"]
+                        .iter()
+                        .find(|a| r.get("state").and_then(Value::as_str) == Some(**a))?
+                        .to_string(),
+                    progress: r.get("progress").and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(0.0),
+                });
+            }
+            translations_status(&states)
+        }
+        "status" => status(
+            one_of("speech", &["off", "loading", "ready", "error"])?,
+            one_of("microphone", &["closed", "open", "none"])?,
+        ),
+        "voice" => {
+            let state = one_of("state", &["off", "connecting", "connected", "unreachable", "id_taken"])?;
+            let players: Vec<PlayerId> = v
+                .get("players")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().take(MAX_PLAYERS * 2).filter_map(player_id).collect())
+                .unwrap_or_default();
+            voice(state, &players)
+        }
+        _ => return None,
+    };
+    // (made here: it starts {"type":"<kind>", - the player goes after that)
+    let rest = clean.strip_prefix("{\"type\":")?;
     let end = rest.find(',').unwrap_or(rest.len().saturating_sub(1));
     Some(format!("{{\"type\":{},\"player\":{}{}", &rest[..end], player.json(), &rest[end..]))
 }
+
+/// a language code as Koetama writes them: "en", "zh-Hant", "yue"
+static LANG: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$").expect("a valid regex"));
 
 /// {"type":"translations_status","translations":[{"from":..,"to":..,"state":..[,"progress":0..1]}]}: each
 /// translation's state; "progress" (to 1/100) only while downloading.
@@ -255,7 +336,7 @@ fn player_feed(p: &Value, host: &Feed, id: Option<&PlayerId>) -> String {
 pub fn player_id(v: &Value) -> Option<PlayerId> {
     match v {
         Value::String(s)
-            if (1..=feed::MAX_ID_CHARS).contains(&s.chars().count()) && s.len() <= 255 && !s.chars().any(char::is_control) =>
+            if (1..=feed::MAX_ID_CHARS).contains(&s.chars().count()) && s.len() <= 255 && s.chars().all(feed::id_char_ok) =>
         {
             Some(PlayerId::string(s))
         }
