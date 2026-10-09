@@ -49,6 +49,9 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 2
 .wave { display: inline-flex; align-items: center; gap: 2px; height: 18px; }
 .wave i { display: block; width: 3px; border-radius: 2px; background: var(--audio); }
 .bubble { display: inline-block; justify-self: start; background: #fff; color: #17202b; border: 1.5px solid #17202b; border-radius: 14px; padding: 5px 12px; font-family: var(--font-bubble); font-size: 18px; line-height: 1.25; }
+.got { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.got > .verb { font-size: 15px; color: var(--muted); }
+.bubble.translated { color: #8d2a5c; }
 .bubble .tr { display: block; border-top: 1px solid #c9a3b6; margin-top: 4px; padding-top: 3px; color: #8d2a5c; font-size: 16px; }
 .channel { display: grid; justify-items: center; gap: 8px; }
 .wire { position: relative; width: 100%%; height: 4px; border-radius: 2px; }
@@ -142,6 +145,11 @@ def bubble(t, tr=None):
     return '<span class="bubble">%s%s</span>' % (t, '<span class="tr">%s</span>' % tr if tr else '')
 
 
+def receives(b):
+    """what a receiver gets as text: "receives" and the bubble"""
+    return '<span class="got"><span class="verb">receives</span>%s</span>' % b
+
+
 def channel(kind, label):
     return '<div class="channel c-%s"><div class="wire"></div><span class="chip">%s</span></div>' % (kind, label)
 
@@ -155,21 +163,21 @@ CARDS = [
     ('2-captions', 'Voice to text', 'Player 1 talks; a deaf player reads it.',
      who(avatar(ANA, 'mic'), 'Player 1, on mic', spoken('"How is your mother?"')),
      channel('text', 'text'),
-     who(avatar(CHLOE, 'deaf'), 'Deaf player, nearby', bubble('How is your mother?')),
+     who(avatar(CHLOE, 'deaf'), 'Deaf player, nearby', receives(bubble('How is your mother?'))),
      "Speech to text runs on Player 1's PC; the words appear as they are said, in a bubble over Player 1's head."),
     ('3-typed', 'Text to text, in proximity', 'A player without a microphone types; the players near them read it.',
      who(avatar(DEV, 'keys'), 'No mic, types', bubble('How is your mother?')),
      channel('text', 'text'),
      '<div class="stack">%s%s<div class="far">%s</div></div>' % (
-         who(avatar(EMI, 'keys'), 'No mic, 6 m away', bubble('How is your mother?')),
-         who(avatar(CHLOE, 'keys'), 'No mic, 18 m away', bubble('How is your mother?')),
+         who(avatar(EMI, 'keys'), 'No mic, 6 m away', receives(bubble('How is your mother?'))),
+         who(avatar(CHLOE, 'keys'), 'No mic, 18 m away', receives(bubble('How is your mother?'))),
          who(avatar(FAR, 'keys'), 'No mic, 60 m away', '<span class="nothing">out of range: nothing</span>')),
      'Everyone within the Speak range (25 m by default) gets the line; players farther away do not.'),
     ('4-translation', 'Voice with translation', 'Player 1 talks in Russian; Player 2 hears them and reads it in English.',
      who(avatar(IVAN, 'mic'), 'Player 1, on mic, in Russian', spoken('"Как твоя мама?"')),
      channel('both', 'audio + text'),
      who(avatar(BEN, 'ear'), 'Player 2, nearby',
-         spoken('hears "Как твоя мама?"') + bubble('Как твоя мама?', 'How is your mother?')),
+         spoken('hears "Как твоя мама?"') + receives('<span class="bubble translated">How is your mother?</span>')),
      "The translation is made on Player 2's PC, into the language Player 2 reads."),
     ('5-command', 'Voice command', 'Player 1 says a password; the game opens a door.',
      who(avatar(ANA, 'mic'), 'Player 1, on mic', spoken('"Open sesame"')),

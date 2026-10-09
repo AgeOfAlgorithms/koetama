@@ -60,7 +60,7 @@ game can show your words in text to other players. By extension, your game or mo
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/4-translation-dark.png">
-  <img src="docs/comms/4-translation-light.png" width="760" alt="Voice with translation: Player 1 says &quot;Как твоя мама?&quot; in Russian; Player 2 hears it and reads it with the translation &quot;How is your mother?&quot;">
+  <img src="docs/comms/4-translation-light.png" width="760" alt="Voice with translation: Player 1 says &quot;Как твоя мама?&quot; in Russian; Player 2 hears it and receives the text in English, &quot;How is your mother?&quot;">
 </picture>
 
 <picture>
