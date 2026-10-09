@@ -176,3 +176,22 @@ fn mixed_lines() {
         assert_eq!(got, want, "{line}");
     }
 }
+
+/// Short chat lines are where trigrams fail ("Vamos a jugar otra vez" read as Hungarian): told among the languages
+/// the player translates first; a line in none of them stays out of them.
+#[test]
+fn short_lines_prefer_the_translations_languages() {
+    let lang = |line: &str, prefer: &[&str]| {
+        let s = kd_translate::detect::stretches_preferring(line, prefer);
+        assert_eq!(s.len(), 1, "{line}: {s:?}");
+        s[0].lang
+    };
+    for line in ["Vamos a jugar otra vez", "Tengo dos ovejas", "Me voy a dormir", "Ven aquí rápido", "Tengo hambre"] {
+        assert_eq!(lang(line, &["es", "en"]), Some("es"), "{line}");
+    }
+    assert_eq!(lang("Attenti al drago.", &["it", "en"]), Some("it"));
+    assert_ne!(lang("Je suis là, derrière toi", &["es", "en"]), Some("es"), "French is not made Spanish");
+    assert_eq!(lang("ok let's go then", &["es", "en"]), Some("en"));
+    // (a long, sure line keeps its own language)
+    assert_eq!(lang("Ich habe den Schlüssel im Keller gefunden, aber die Tür ist immer noch zu.", &["es", "en"]), Some("de"));
+}

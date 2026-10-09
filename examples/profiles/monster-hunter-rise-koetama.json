@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "id": "monster-hunter-rise-koetama",
+  "game": "Monster Hunter Rise",
+  "mod": "Koetama Hunter Talk",
+  "url": "https://github.com/AgeOfAlgorithms/koetama/tree/main/examples/mods/monster-hunter-rise",
+  "author": "AgeOfAlgorithms",
+  "locate": {"steam_app": 1446780},
+  "uses": ["speech", "translate"],
+  "connector": {
+    "type": "files",
+    "feed": {
+      "file": "{steam_app:1446780}/reframework/data/koetama/feed.json",
+      "pattern": "",
+      "tag_pattern": "",
+      "complete": ""
+    },
+    "out": {
+      "dirs": ["{steam_app:1446780}/reframework/data/koetama"],
+      "prefix": "kt_",
+      "message": "json"
+    }
+  }
+}

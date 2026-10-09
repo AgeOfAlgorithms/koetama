@@ -1,4 +1,4 @@
-//! Koetama on the command line, for Teardown (engine/teardown_helper.py: the same flags): the same runtime, a status
+//! Koetama on the command line, for Teardown or any profile (--game; engine/teardown_helper.py: the same flags): the same runtime, a status
 //! line, and the test modes that need no microphone.
 //!
 //!     koetama --cli               start it, then play (a level with Proximity Babble Chat)
@@ -68,6 +68,10 @@ struct Args {
     /// them (their words live first)
     #[arg(long)]
     auto: bool,
+    /// the game mod to link with: a profile's id (the built-in Teardown one by default; a profile file in Koetama's
+    /// games folder - KOETAMA_PROFILES_DIR for tests - for any other)
+    #[arg(long, default_value = "teardown-proximity-babble-chat")]
+    game: String,
 }
 
 /// A device given as a name or as its number in --list.
@@ -399,7 +403,11 @@ pub fn main(argv: Vec<String>) -> i32 {
         io_dir: args.io_dir.clone().map(Into::into),
     };
     println!("preparing...");
-    let mut rt = Runtime::start(kd_games::by_id("teardown-proximity-babble-chat"), log.clone(), opts, mic_source);
+    let kind = kd_games::by_id(&args.game);
+    if kind.id != args.game {
+        log(&format!("no game mod {:?} (see Koetama's games folder): {} instead", args.game, kind.id));
+    }
+    let mut rt = Runtime::start(kind, log.clone(), opts, mic_source);
     let game = rt.game.clone();
     if args.type_ {
         // (lines piped in: a test)

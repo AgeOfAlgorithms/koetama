@@ -1,0 +1,5 @@
+; (only so the headless test can load res://koetama.gd)
+config_version=5
+
+[application]
+config/name="Koetama Godot client"

@@ -113,8 +113,8 @@ def parse_requests(items):
     of more than MAX_REQUEST_BYTES keeps its id with ''; each id once (the first), the first MAX_REQUESTS"""
     out = []
     for r in items:
-        rid = r.get('id')
-        if isinstance(rid, bool) or not isinstance(rid, int) or not 1 <= rid <= 999999999999999:
+        rid = _whole(r.get('id'))
+        if rid is None or not 1 <= rid <= 999999999999999:
             continue
         if len(out) == MAX_REQUESTS:
             break
@@ -122,6 +122,18 @@ def parse_requests(items):
             continue
         out.append((rid, request_text(r['text'].encode('utf-8'))))
     return out
+
+
+def _whole(v):
+    """a whole number as JSON gives it - also as a decimal (1.0, 1.7e12: Lua JSON libraries write floats) when it is
+    whole and fits; None otherwise (Rust: api::whole)"""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and v == v and abs(v) < 9.0e15 and v == int(v):
+        return int(v)
+    return None
 
 
 def _num(o, k, default):
@@ -137,9 +149,9 @@ def _int(o, k):
     v = o.get(k)
     if v is None:
         return 0
-    if isinstance(v, bool) or not isinstance(v, int):
+    if _whole(v) is None:
         raise ValueError(k)
-    return v
+    return _whole(v)
 
 
 def _flag(o, k, default):
@@ -162,7 +174,7 @@ def _str(o, k):
 
 def _list(o, k, most):
     v = o.get(k)
-    if v is None:
+    if v is None or v == {}:                 # ({}: a Lua JSON library's empty table)
         return []
     if not isinstance(v, list) or len(v) > most:
         raise ValueError(k)
@@ -186,17 +198,17 @@ def parse_feed(text):
             return None
         speakers = {}
         for sp in _list(v, 'speakers', 256):
-            if not isinstance(sp, dict) or isinstance(sp.get('id'), bool) or not isinstance(sp.get('id'), int):
+            if not isinstance(sp, dict) or _whole(sp.get('id')) is None:
                 return None
             tv = sp.get('test_voice')
-            if tv is not None and (isinstance(tv, bool) or not isinstance(tv, int) or tv < 1):
+            if tv is not None and (_whole(tv) is None or _whole(tv) < 1):
                 return None
-            speakers[sp['id']] = dict(src=tv or 0, talk=_flag(sp, 'talking', False),
+            speakers[_whole(sp['id'])] = dict(src=_whole(tv) if tv is not None else 0, talk=_flag(sp, 'talking', False),
                                       gain=min(1.0, max(0.0, _num(sp, 'gain', 1.0))), az=_num(sp, 'azimuth', 0.0),
                                       el=_num(sp, 'elevation', 0.0), muffle=min(1.0, max(0.0, _num(sp, 'muffle', 0.0))))
         # the voice room: the room, its key and my id all good, or no room
-        room, key, me = _str(v, 'room'), _str(v, 'key'), v.get('me')
-        me = me if isinstance(me, int) and not isinstance(me, bool) and 1 <= me <= 65535 else None
+        room, key, me = _str(v, 'room'), _str(v, 'key'), _whole(v.get('me'))
+        me = me if me is not None and 1 <= me <= 65535 else None
         if not (re.fullmatch(r'[0-9a-f]{32}', room) and re.fullmatch(r'[0-9a-f]{64}', key) and me):
             room, key, me = '', '', 0
         region = _str(v, 'region')
@@ -204,7 +216,8 @@ def parse_feed(text):
             region = ''
         ids = []
         for i in _list(v, 'to', 256):
-            if isinstance(i, bool) or not isinstance(i, int):
+            i = _whole(i)
+            if i is None:
                 return None
             if 1 <= i <= 65535 and i not in ids and len(ids) < 64:
                 ids.append(i)

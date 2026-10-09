@@ -316,7 +316,37 @@ fn detect_alphabetic_with(text: &str, g: Group, function_words: bool) -> (Option
         }
         c => c,
     };
+    // (a short or unsure text whose language is not one the player translates from or into: those first - a chat
+    //  line of four Spanish words reads as Hungarian or Slovene to the trigrams, but the player said Spanish is
+    //  likely; the letters still rule a language out)
+    let preferred = PREFERRED.with(|p| p.borrow().clone());
+    if !preferred.is_empty()
+        && code.is_none_or(|c| !preferred.contains(&c))
+        && (words(text) < PREFER_WORDS || info.confidence() < PREFER_BELOW)
+    {
+        let likely: Vec<&(&'static str, Lang, &str)> = allowed.iter().copied().filter(|t| preferred.contains(&t.0)).collect();
+        match likely.len() {
+            0 => {}
+            1 => return (Some(likely[0].0), info.confidence()),
+            _ => {
+                if let Some(again) = detect_among(text, likely.iter().map(|t| t.1).collect()) {
+                    return (table.iter().find(|t| t.1 == again.lang()).map(|t| t.0), again.confidence());
+                }
+            }
+        }
+    }
     (code, info.confidence())
+}
+
+/// a Latin / Cyrillic text shorter than this (words), or detected less surely than PREFER_BELOW, is detected again
+/// among the PREFERRED languages when its language is not one of them (stretches_preferring)
+pub const PREFER_WORDS: usize = 6;
+pub const PREFER_BELOW: f64 = 0.5;
+
+thread_local! {
+    /// the languages a line is most likely in (the translations' languages and English; empty: none) - set by
+    /// stretches_preferring for the time of one line
+    static PREFERRED: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// below this confidence of the trigrams, the function words get a say
@@ -505,6 +535,16 @@ fn split_run(text: &str, g: Group, main: Option<&'static str>) -> Vec<(usize, us
             _ => out.push((a, b, lang)),
         }
     }
+    out
+}
+
+/// stretches(), with the languages the line is most likely in (the player's translations' languages, English): a
+/// short or unsure stretch is told among those first (PREFER_WORDS, PREFER_BELOW).
+pub fn stretches_preferring(line: &str, likely: &[&str]) -> Vec<Stretch> {
+    let codes: Vec<&'static str> = LANGS.iter().copied().filter(|l| likely.contains(l)).collect();
+    PREFERRED.with(|p| *p.borrow_mut() = codes);
+    let out = stretches(line);
+    PREFERRED.with(|p| p.borrow_mut().clear());
     out
 }
 

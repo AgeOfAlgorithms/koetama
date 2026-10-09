@@ -8,6 +8,7 @@
 //! as the connector reads it, is a FEED (kd_common::feed::Feed), handed to the mixer (a FeedSink) and kept by the game.
 pub mod api;
 pub mod files;
+pub mod http;
 pub mod profile;
 pub mod socket;
 pub mod steam;
@@ -203,6 +204,7 @@ impl GameKind {
                 io_dir.map(|d| vec![d]),
             )),
             Connector::Socket(_) => Box::new(socket::SocketGame::new(self.profile.clone(), self.builtin, sink, log)),
+            Connector::Http(_) => Box::new(http::HttpGame::new(self.profile.clone(), self.builtin, sink, log)),
         }
     }
 }

@@ -129,7 +129,15 @@ pub struct FeedScan {
     pub updates: u64,
     /// how the feed is found (default: Teardown's)
     pub rules: FeedRules,
+    /// a feed that does not read: (its text, since when, why) - told once it has stayed so for BAD_FOR (a
+    /// half-written file is only briefly "not JSON")
+    bad: Option<(String, Instant, String)>,
+    /// why the game's feed cannot be read, once it is sure (None: it reads)
+    pub problem: Option<String>,
 }
+
+/// how long a feed must stay unreadable before it is a problem worth telling
+const BAD_FOR: Duration = Duration::from_millis(500);
 
 impl FeedScan {
     pub fn with_rules(rules: FeedRules) -> FeedScan {
@@ -148,15 +156,28 @@ impl FeedScan {
         for (tag, text) in self.rules.find(&data) {
             if self.last.get(&tag) != Some(&text) {
                 let first = !self.last.contains_key(&tag);
-                let feed = parse_feed(&text);
+                let feed = crate::api::feed_from_text(&text);
+                match &feed {
+                    Ok(_) => {
+                        self.bad = None;
+                        self.problem = None;
+                    }
+                    Err(why) => self.bad = Some((text.clone(), Instant::now(), why.clone())),
+                }
                 self.last.insert(tag.clone(), text);
-                if let Some(feed) = feed {
+                if let Ok(feed) = feed {
                     if !first {
                         // (what was in the file before we started is not live)
                         self.updates += 1;
                         on_feed(feed, &tag);
                     }
                 }
+            }
+        }
+        if let Some((text, since, why)) = &self.bad {
+            let still = self.last.values().any(|t| t == text);
+            if still && since.elapsed() >= BAD_FOR && self.problem.is_none() {
+                self.problem = Some(why.clone());
             }
         }
     }
@@ -179,11 +200,17 @@ impl FeedReader {
     }
 
     /// Starts the thread with these rules.
-    pub fn start_with(
+    pub fn start_with(path: PathBuf, poll: Duration, rules: FeedRules, on_feed: impl FnMut(Feed, &str) + Send + 'static) -> FeedReader {
+        FeedReader::start_logged(path, poll, rules, on_feed, kd_common::null_log())
+    }
+
+    /// start_with, telling the log when the game's feed cannot be read (once per problem).
+    pub fn start_logged(
         path: PathBuf,
         poll: Duration,
         rules: FeedRules,
         mut on_feed: impl FnMut(Feed, &str) + Send + 'static,
+        log: Log,
     ) -> FeedReader {
         let running = Arc::new(AtomicBool::new(true));
         let updates = Arc::new(AtomicU64::new(0));
@@ -192,9 +219,16 @@ impl FeedReader {
             .name("game feed".into())
             .spawn(move || {
                 let mut scan = FeedScan::with_rules(rules);
+                let mut told: Option<String> = None;
                 while run.load(Ordering::SeqCst) {
                     scan.once(&path, &mut on_feed);
                     ups.store(scan.updates, Ordering::SeqCst);
+                    if scan.problem != told {
+                        if let Some(p) = &scan.problem {
+                            log(&format!("the game's feed cannot be read: {p}"));
+                        }
+                        told = scan.problem.clone();
+                    }
                     std::thread::sleep(poll);
                 }
             })
@@ -280,10 +314,9 @@ struct LinkState {
 /// Koetama's files for the game: <prefix>on, the answer to each ping, numbered message files. Shared by the feed's
 /// thread (on_feed) and the speech's (send_msg): Send + Sync.
 pub struct Link {
-    /// a folder per profile entry (None: not on this PC) - tag_dirs index these
-    slots: Vec<Option<PathBuf>>,
-    /// the folders there are
-    dirs: Vec<PathBuf>,
+    /// a folder per profile entry (None: not on this PC) - tag_dirs index these; and the folders there are. A folder
+    /// made after Koetama started (a mod that makes its own on first run) is found later: refresh()
+    places: std::sync::RwLock<(Vec<Option<PathBuf>>, Vec<PathBuf>)>,
     rules: LinkRules,
     log: Log,
     state: Mutex<LinkState>,
@@ -328,8 +361,7 @@ impl Link {
     fn build(slots: Vec<Option<PathBuf>>, rules: LinkRules, log: Log) -> Link {
         let dirs = slots.iter().flatten().cloned().collect();
         Link {
-            slots,
-            dirs,
+            places: std::sync::RwLock::new((slots, dirs)),
             rules,
             log,
             state: Mutex::new(LinkState {
@@ -391,8 +423,25 @@ impl Link {
     }
 
     /// The folders the game's copies of the mod look in (those on this PC).
-    pub fn dirs(&self) -> &[PathBuf] {
-        &self.dirs
+    pub fn dirs(&self) -> Vec<PathBuf> {
+        self.places.read().unwrap_or_else(|e| e.into_inner()).1.clone()
+    }
+
+    /// The folders again (the profile's resolved anew): a folder that is there now and was not is taken, and gets
+    /// <prefix>on. Called while a game's feed comes and its folder is not known.
+    pub fn refresh(&self, slots: Vec<Option<PathBuf>>) {
+        let old = self.dirs();
+        let dirs: Vec<PathBuf> = slots.iter().flatten().cloned().collect();
+        if dirs == old {
+            return;
+        }
+        for d in dirs.iter().filter(|d| !old.contains(d) && d.is_dir()) {
+            let f = self.path(d, "on");
+            if let Err(e) = fs::write(&f, "1") {
+                (self.log)(&format!("could not write {}: {e}", f.display()));
+            }
+        }
+        *self.places.write().unwrap_or_else(|e| e.into_inner()) = (slots, dirs);
     }
 
     pub fn rules(&self) -> &LinkRules {
@@ -423,7 +472,7 @@ impl Link {
 
     /// Old files of mine swept (an older Koetama's too), <prefix>on written in every folder there is.
     pub fn start(&self) {
-        for d in &self.dirs {
+        for d in &self.dirs() {
             if d.is_dir() {
                 self.sweep(d);
                 let f = self.path(d, "on");
@@ -449,7 +498,7 @@ impl Link {
 
     /// All my files gone.
     pub fn stop(&self) {
-        for d in &self.dirs {
+        for d in &self.dirs() {
             if d.is_dir() {
                 self.sweep(d);
             }
@@ -460,7 +509,8 @@ impl Link {
     /// else the first.
     pub fn dir_for(&self, tag: &str) -> Option<PathBuf> {
         let i = self.rules.tag_dirs.iter().find(|(p, _)| tag.starts_with(p.as_str())).map_or(0, |(_, i)| *i);
-        self.slots.get(i).cloned().flatten().or_else(|| self.slots.first().cloned().flatten())
+        let places = self.places.read().unwrap_or_else(|e| e.into_inner());
+        places.0.get(i).cloned().flatten().or_else(|| places.0.first().cloned().flatten())
     }
 
     /// A feed from the game (its copy of the mod: tag): answer its ping, drop what it has read, remember what it wants.
@@ -610,6 +660,8 @@ pub struct FilesGame {
     link: Arc<Link>,
     reader: Option<FeedReader>,
     feed: Arc<Mutex<Option<Feed>>>,
+    /// the profile's folders are looked for again while the game's is not known (none given by the caller)
+    refresh: bool,
 }
 
 impl FilesGame {
@@ -623,13 +675,16 @@ impl FilesGame {
         save: Option<PathBuf>,
         dirs: Option<Vec<PathBuf>>,
     ) -> FilesGame {
+        let mut refresh = false;
         let (rules, save, link) = match &profile.connector {
             profile::Connector::Files(c) => {
                 let save = save.filter(|s| !s.as_os_str().is_empty()).unwrap_or_else(|| feed_file(c));
+                let given = dirs.as_ref().is_some_and(|d| !d.is_empty());
                 let slots = match dirs.filter(|d| !d.is_empty()) {
                     Some(d) => d.into_iter().map(Some).collect(),
                     None => out_slots(c),
                 };
+                refresh = !given;
                 let rules = LinkRules { prefix: c.prefix.clone(), message: c.message, tag_dirs: c.tag_dirs.clone() };
                 let link = Link::with_rules(slots, rules.clone(), log.clone()).unwrap_or_else(|e| {
                     log(&format!("{}: {e}", profile.id));
@@ -638,7 +693,7 @@ impl FilesGame {
                 link.set_features(crate::api::features(&profile));
                 (FeedRules::from_config(c), save, link)
             }
-            profile::Connector::Socket(_) => {
+            profile::Connector::Socket(_) | profile::Connector::Http(_) => {
                 log(&format!("{}: not a files profile", profile.id));
                 (FeedRules::default(), PathBuf::new(), Link::build(Vec::new(), LinkRules::default(), log.clone()))
             }
@@ -653,6 +708,7 @@ impl FilesGame {
             link: Arc::new(link),
             reader: None,
             feed: Arc::new(Mutex::new(None)),
+            refresh,
         }
     }
 
@@ -718,15 +774,23 @@ impl Game for FilesGame {
         self.stop_reader();
         self.link.start();
         let (sink, link, keep, p) = (self.sink.clone(), self.link.clone(), self.feed.clone(), self.profile.clone());
+        let refresh = self.refresh;
         let on_feed = move |feed: Feed, tag: &str| {
             let feed = as_used(feed, &p);
+            if refresh && link.dir_for(tag).is_none() {
+                // (the mod's folder was not there when Koetama started - a mod that makes its own on first run)
+                if let profile::Connector::Files(c) = &p.connector {
+                    link.refresh(out_slots(c));
+                }
+            }
             *keep.lock().unwrap_or_else(|e| e.into_inner()) = Some(feed.clone());
             // (the link first: a new session's files are set up before anything the sink starts - a translation
             // of this feed's lines - can answer into it)
             link.on_feed(&feed, tag);
             sink.set_feed(feed);
         };
-        self.reader = Some(FeedReader::start_with(self.save.clone(), FeedReader::POLL, self.rules.clone(), on_feed));
+        self.reader =
+            Some(FeedReader::start_logged(self.save.clone(), FeedReader::POLL, self.rules.clone(), on_feed, self.log.clone()));
     }
 
     fn set_voice_state(&self, state: &str) {

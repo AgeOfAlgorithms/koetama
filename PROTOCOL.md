@@ -3,13 +3,15 @@
 How a game mod talks to Koetama, the companion app that runs on the same PC (one per player): the player's speech
 as text, other players' voices, and chat translation.
 
-**One API, two transports.** The game and Koetama exchange a small set of JSON objects. How they travel depends on
+**One API, three transports.** The game and Koetama exchange a small set of JSON objects. How they travel depends on
 what the game's mod can do, and a **profile** (a JSON file per game mod, "Adding a game mod: profiles" below) says
 which:
 
 - **socket**: the mod opens a TCP connection to Koetama (127.0.0.1); one object per line, both ways.
-- **files**: for a mod that cannot open sockets (Teardown): the mod writes its feed into a file the game saves, and
-  reads Koetama's objects from small numbered files next to itself.
+- **http**: the mod can only make HTTP requests (Tabletop Simulator, Garry's Mod, a browser game): it POSTs its feed
+  and the answer holds Koetama's objects.
+- **files**: for a mod that can only write files (or data its game saves) and read files next to itself (Teardown,
+  Lua sandboxes): its feed in a file, Koetama's objects in small numbered files.
 
 The objects are the same either way. Proximity Babble Chat (a Teardown mod, `voice.lua`) is the reference game side.
 
@@ -54,7 +56,7 @@ Each object has a `"type"` first.
 | `{"type":"speech","kind":"final","utt":4,"text":"hello there everyone","times":[0.1,0.55,0.9],"ago":2.4}` | the finished line (`text` may be `""`: nothing made out; the live words go) |
 | `{"type":"room","room":"<32 hex>","key":"<64 hex>"}` | a new voice room, once per session: "Real voices" |
 | `{"type":"voice","state":"connected"}` | the voice chat's link changed: `off`, `connecting`, `connected` or `unreachable` (the last tries failed; it keeps trying) |
-| `{"type":"translation","id":7,"text":"Hello"}` | the translation of line `id`, exactly one per id. `""`: nothing to show (nothing in a source language, the same as the line, a bad line, or the models are not ready - see `translations_status`). At most 1000 characters |
+| `{"type":"translation","id":7,"text":"Hello"}` | the translation of line `id`, exactly one per id. `""`: nothing to show (nothing in a source language, the same as the line, or a bad line). A line that comes while a translation's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
 | `{"type":"translations_status","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}` | each translation's state, when one changes (at most every 0.5 s while downloading): `ready`, `downloading` (with `progress` 0..1), `loading`, `unavailable` (no model for it) or `error` (tried again after a minute) |
 
 **Speech.** `utt` numbers a line (its `start`, `live` and `final` share it). **Live words only grow**: about once a
@@ -123,16 +125,46 @@ there. Koetama skips a line that is not JSON or a feed it cannot read (logging t
 unknown `type`, and drops a connection whose line is longer than 64 KB. A busy port is tried again every 2 s.
 `examples/socket_client.py` is a working client (Python 3, no packages) and a manual test.
 
+## Transport: HTTP
+
+`{"type": "http", "port": 47140}` in the profile. Koetama answers HTTP/1.1 on `127.0.0.1:<port>` only. The mod POSTs
+its feed object (`Content-Length`, no chunked bodies; at most 64 KB) to `/`, and the answer is what Koetama has for it:
+
+    {"objects": [{"type":"hello",...}, {"type":"speech",...}], "first": 1, "last": 2}
+
+- **Numbers.** Koetama numbers its objects per session (`session` in the feed; 1 is the `hello`); `first` and `last`
+  are the numbers of the first and last ones in the answer (none: `first` is `last` + 1). The next feed's `ack` says
+  the last one the mod has: Koetama keeps every object until it is acked, so an answer that gets lost loses nothing
+  (the next answer repeats it). A mod with two requests out at once may get an object twice: skip numbers up to the
+  last it has.
+- **`wait`** (in the feed, seconds, at most 1): with nothing to send, the answer waits that long for an object. A mod
+  that sends its next feed as soon as an answer arrives (one request at a time) then gets each object the moment it
+  exists, without a busy loop; with `wait` 0 it polls (each poll is a feed). A newer feed ends a waiting answer at
+  once, so a mod can send a change (the talk key) right away without waiting for its poll to come back. Either way, a feed at least once a second
+  (Koetama counts a game as gone after 1.5 s without one).
+- `session`, `ack` and `wait` are this transport's own fields; the rest of the feed is as above.
+- `GET /` answers `{"app":"Koetama","version":..,"protocol":2,"game":"<profile id>"}`: is Koetama there?
+- Errors: 400 (not JSON, or a feed it cannot read: `{"error": ".."}`), 403, 404, 405, 411, 413, 503 (16 requests
+  open at once).
+- **Browsers.** A request with an `Origin` header (a web page) is refused (403) unless the profile lists that origin:
+  `"allow_origins": ["https://my-game.example"]`; for those, Koetama sends the CORS and Private Network Access headers
+  (`Access-Control-Allow-Origin`, `Access-Control-Allow-Private-Network`) and answers preflights. A game's own HTTP
+  client sends no `Origin` and needs nothing. So no web page the player happens to open can read what they say.
+
+`examples/http_client.py` is a working client (Python 3, no packages).
+
 ## Transport: files
 
 For a mod that can only write data its game saves to a file, and see files next to itself (Teardown: a mod's Lua
 cannot open sockets, write files or reach the network; it can write `savegame.mod.*` registry keys, which the game
 saves to `savegame.xml` within a frame, ask whether a file exists, `HasFile`, and load a prefab file, `Spawn`).
 
-**Game -> Koetama.** The mod writes its feed as one string into the save file: the JSON object, or its hex (lower or
-upper case) when the save file cannot hold quotes - Teardown's registry string is hex. Koetama reads the file every
-10 ms (only when it is complete: it ends with the profile's `complete` text), finds each copy of the mod's feed with
-the profile's `pattern`, and reads the newest. Four fields carry the link itself, only here:
+**Game -> Koetama.** The mod writes its feed as one string into a file: the JSON object, or its hex (lower or upper
+case) when the file cannot hold quotes - Teardown's registry string is hex. Koetama reads the file every 10 ms (only
+when it is complete: it ends with the profile's `complete` text), finds each copy of the mod's feed with the
+profile's `pattern`, and reads the newest. A mod that writes its feed object as a file of its own (a Lua `json.dump`,
+`io.open(...):write`) gives `"pattern": ""` (the whole file is the feed) and `"complete": ""` (a half-written file is
+simply not JSON yet, and skipped). Four fields carry the link itself, only here:
 
 | field | meaning |
 |---|---|
@@ -171,8 +203,9 @@ a small JSON file that names one of Koetama's built-in **connectors** and gives 
 code, so anyone can write one for their game's mod without changing Koetama. A connector only does what this
 section describes. Teardown's link is a profile too, built into Koetama (`app/crates/kd-games/src/profiles/teardown.json`).
 
-Two connectors, the two transports above: **socket** (the mod opens a TCP connection) and **files** (the mod writes
-its feed into a file its game saves, and reads Koetama's objects from files next to itself).
+Three connectors, the transports above: **socket** (the mod opens a TCP connection), **http** (the mod makes HTTP
+requests) and **files** (the mod writes its feed into a file, and reads Koetama's objects from files next to
+itself).
 
 ### Installing a profile (players)
 
@@ -234,7 +267,7 @@ A profile using the socket connector only changes `connector`: `{"type": "socket
 | `uses` | optional | Any of `"voices"`, `"speech"`, `"translate"`; the default is `["voices", "speech"]`. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `listen` is ignored, so the microphone never opens. `translate`: Koetama translates the chat lines the game sends ("Translation"); without it the feed's `translations` and `to_translate` are ignored. The `hello`'s `features` tell the mod which. |
 | `test_voices` | optional | Up to 16 recorded voices for the mod's test speakers: `{"id": 1..999, "voice": "<Windows voice>", "rate": -10..10, "text": "..."}`. They're made once with the Windows speech voices (none on other systems), and a speaker with `"test_voice": <id>` plays one. |
 | `speaker_names` | optional | Names for the test voices in Koetama's window, by their `id`, e.g. `{"1": "the whisperer"}`. Real players need nothing: they show as "player <id>". |
-| `connector` | required | `{"type": "files", ...}` or `{"type": "socket", ...}`, described below. |
+| `connector` | required | `{"type": "files", ...}`, `{"type": "socket", ...}` or `{"type": "http", ...}`, described below. |
 
 Unknown fields are errors, so a typo doesn't get silently ignored. Text may not contain control characters. A profile
 file can be at most 64 KB.
@@ -263,7 +296,7 @@ Teardown's does.
 | field | | meaning |
 |---|---|---|
 | `feed.file` | required | The file the game writes and Koetama reads (a path or candidates). It must end in a file name. |
-| `feed.pattern` | default: Teardown's | A regex with exactly one group, which captures the feed string. Each match is one copy of the mod. It runs over the file's bytes, and `(?-u)` lets it match any bytes. |
+| `feed.pattern` | default: Teardown's | A regex with exactly one group, which captures the feed string. Each match is one copy of the mod. It runs over the file's bytes, and `(?-u)` lets it match any bytes. `""`: the whole file is the feed. |
 | `feed.tag_pattern` | default: Teardown's | A regex with one group: the tag of the mod copy that wrote a feed (the last match before it). `""` means no tags. |
 | `feed.complete` | default `</registry>` | The file is read only when it ends with this text, ignoring trailing white space, so a half-written file is skipped. `""` reads it every time. |
 | `out.dirs` | required | 1 to 8 folders the mod looks in (each a path or candidates). Folders not on this PC are skipped. |
@@ -280,6 +313,12 @@ count as live until it changes.
 from: `examples/socket_client.py` (Python 3, no packages); install `examples/profiles/example-socket.json`, pick
 "Example Game" in Koetama, run the script and talk.
 
+### The HTTP connector
+
+`{"type": "http", "port": 47140, "allow_origins": ["https://my-game.example"]}`: the port is 1024 to 65535;
+`allow_origins` (optional, at most 16) lists the web pages that may use it from a browser, each exactly
+`http(s)://host[:port]` (no path, no `*`). Everything else is in "Transport: HTTP".
+
 ### What a profile can and cannot make Koetama do
 
 - It never runs code. A test voice's text and voice name reach the Windows speech voice as data, never inside a
@@ -289,7 +328,8 @@ from: `examples/socket_client.py` (Python 3, no packages); install `examples/pro
   only files whose whole names are exactly `<prefix>on`, `<prefix>p<digits>`, `<prefix>t<digits>.<xml or json>` or
   `<prefix>w<digits>.tmp` (and the `<prefix>v<digits>`, `<prefix>vc`, `<prefix>vx` an older Koetama left), and
   nothing else, not even another file starting with the prefix.
-- The socket connector listens only on 127.0.0.1, on the profile's port (1024 to 65535). Both connectors read only
-  the feed and send only the objects above: the hello, what the player said, the voice room and the voice chat's
+- The socket and HTTP connectors listen only on 127.0.0.1, on the profile's port (1024 to 65535); the HTTP one
+  refuses web pages unless the profile names them. Every connector reads only the feed and sends only the objects
+  above: the hello, what the player said, the voice room and the voice chat's
   state, and translations of the lines the game sent.
 - The window shows players all of this, with real paths, before a profile is installed.

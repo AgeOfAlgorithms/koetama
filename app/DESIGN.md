@@ -188,6 +188,9 @@ pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, par
                                                                         // the files connector (object n of a session
                                                                         // in <prefix>t<n>: json or a prefab; 1 = hello)
 pub mod socket { SocketGame, parse_socket_feed, PROTOCOL, MAX_LINE }    // the socket connector
+pub mod http { HttpGame, MAX_WAIT = 1 s, MAX_BODY = 64 KB }            // the HTTP connector: POST / the feed, the answer
+                                                                        // {"objects":[..],"last":n}; objects kept until
+                                                                        // acked; "wait" holds the answer; Origin allowlist
 pub mod voices { make_in, for_profile }                                 // test voices (Windows SAPI)
 pub mod teardown { APPID, TEXT_MAX, parse_feed, find_feeds, read_shared, FeedReader, Link,
                    make_voices, VOICES, NAMES, savegame_path, io_dirs, Teardown (= FilesGame), profile() }
@@ -272,6 +275,11 @@ Connectors:
   {proton_user:ID} {env:NAME}; an entry may be a list of candidates (the first that resolves and exists is used).
   It deletes only the files it writes (`<prefix>on`, `vc`, `vx`, `v<n>`, `p<n>`, `t<n>.<ext>`, `w<n>.tmp`), the
   prefix must be 3+ letters/digits/_ ending in `_`, and it writes only into folders that exist.
+- `http`: an HTTP/1.1 server on 127.0.0.1 (the profile's port; std only, Content-Length bodies, Connection: close, a
+  thread per request, at most 16 at once): POST / takes the feed and answers the session's objects not yet acked
+  (numbered per session, the hello first; a new session - or Koetama started mid-session - numbers after the game's
+  ack), waiting up to `wait` (<= 1 s) on a Condvar; GET / says what listens. A request with an Origin header is
+  refused unless the profile's allow_origins lists it (then CORS + Private Network Access headers).
 - `socket`: a TCP server on 127.0.0.1 (the profile's port): newline-separated JSON both ways; the mod sends its
   feed, Koetama sends its hello (with the features the profile uses), what the player said, the voice room and the
   voice chat's state, and translations (lines.rs; no acks or pings: the connection is the liveness).
@@ -368,8 +376,9 @@ list, the downloads - one rule at a time), then loaded on the translator's threa
 direction, let go when no rule uses them). A request: detect::stretches; a stretch in a ready rule's source language
 (the first rule from it; Chinese / Cantonese stand in for each other when only one has a rule) goes through the rule's
 model(s); the rest are kept; pieces are joined again (two kept pieces as they were; next to a translated one a space,
-unless either side is Chinese or Japanese). "" when nothing was translated or the result is the line itself. Exactly
-one reply per id; a new session forgets the ids and drops (never answers) what is still queued from the old one, even
+unless either side is Chinese or Japanese). "" when nothing was translated or the result is the line itself. A line
+that comes while a rule's models are downloading or loading is held (in order) until none is, or HOLD_MAX (120 s) -
+an early "" would lose it: a game asks once per line. Exactly one reply per id; a new session forgets the ids and drops (never answers) what is still queued from the old one, even
 a line being translated when it changed. States are told on each change, a download's progress at most every 0.5 s;
 a failed rule is tried again after RETRY_AFTER; rules Koetama can never have (the same language twice, a code it does
 not know, into Cantonese) are "unavailable" without asking Mozilla's list.

@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "id": "godot-example",
+  "game": "A Godot Game",
+  "mod": "Koetama for Godot",
+  "url": "https://github.com/AgeOfAlgorithms/koetama/tree/main/examples/mods/godot",
+  "author": "AgeOfAlgorithms",
+  "uses": ["speech", "translate"],
+  "connector": {"type": "socket", "port": 47150}
+}

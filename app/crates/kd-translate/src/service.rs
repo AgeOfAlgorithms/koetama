@@ -287,6 +287,7 @@ impl Translator {
                     told: Vec::new(),
                     told_at: None,
                     last_error: String::new(),
+                    held: VecDeque::new(),
                 };
                 w.run(rx);
             })
@@ -390,7 +391,12 @@ struct Worker {
     told_at: Option<Instant>,
     /// the last translation error logged (each new one once)
     last_error: String,
+    /// lines that came while a translation's models were getting ready: answered once they are (or after HOLD_MAX)
+    held: VecDeque<(u64, i64, String, Instant)>,
 }
+
+/// the longest a line waits for its translation's models (a first download on a slow connection)
+pub const HOLD_MAX: Duration = Duration::from_secs(120);
 
 /// A rule Koetama can never have a model for (no need to ask Mozilla's list).
 fn never(from: &str, to: &str) -> bool {
@@ -404,17 +410,8 @@ impl Worker {
                 Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                 Ok(Msg::Rules(r)) => self.set_rules(r),
                 Ok(Msg::Request { session, id, text }) => {
-                    let Some(inner) = self.inner.upgrade() else {
-                        break;
-                    };
-                    // (a line from a session gone: its id may be a new line's now - never answered)
-                    if session == inner.session.load(Ordering::SeqCst) {
-                        let text = self.translate_line(&text);
-                        // (the session may have ended while it was translated)
-                        if session == inner.session.load(Ordering::SeqCst) {
-                            (self.on_event)(Event::Reply { id, text });
-                        }
-                    }
+                    // (models on their way: the line waits for them rather than getting "" now)
+                    self.held.push_back((session, id, text, Instant::now()));
                 }
                 Ok(Msg::Progress { job, frac }) => {
                     if let Some(s) =
@@ -428,7 +425,38 @@ impl Worker {
             }
             self.retry_failed();
             self.tell();
+            if !self.answer_held() {
+                break;
+            }
         }
+    }
+
+    /// Is a translation still getting its models (downloading, loading)?
+    fn getting_ready(&self) -> bool {
+        self.slots.iter().any(|s| matches!(s.state, State::Downloading(_) | State::Loading))
+    }
+
+    /// The held lines answered, in order, unless models are still on their way (a line held HOLD_MAX is answered
+    /// anyway). False: the translator is gone.
+    fn answer_held(&mut self) -> bool {
+        while let Some((_, _, _, since)) = self.held.front() {
+            if self.getting_ready() && since.elapsed() < HOLD_MAX {
+                break;
+            }
+            let Some(inner) = self.inner.upgrade() else {
+                return false;
+            };
+            let (session, id, text, _) = self.held.pop_front().unwrap();
+            // (a line from a session gone: its id may be a new line's now - never answered)
+            if session == inner.session.load(Ordering::SeqCst) {
+                let text = self.translate_line(&text);
+                // (the session may have ended while it was translated)
+                if session == inner.session.load(Ordering::SeqCst) {
+                    (self.on_event)(Event::Reply { id, text });
+                }
+            }
+        }
+        true
     }
 
     /// Starts a helper getting a rule's models ready.
@@ -602,7 +630,13 @@ impl Worker {
     fn translate_line(&mut self, line: &str) -> String {
         // (piece, translated)
         let mut pieces: Vec<(String, bool)> = Vec::new();
-        for st in detect::stretches(line) {
+        // (the line is most likely in a translation's language, or English: short lines are told among those first)
+        let mut likely: Vec<&str> = vec!["en"];
+        for s in &self.slots {
+            likely.push(&s.from);
+            likely.push(&s.to);
+        }
+        for st in detect::stretches_preferring(line, &likely) {
             let text = st.text(line);
             let done = match st.lang.and_then(|l| self.rule_for(l)) {
                 Some(s) if !text.trim().is_empty() => match self.through(s, text.trim()) {

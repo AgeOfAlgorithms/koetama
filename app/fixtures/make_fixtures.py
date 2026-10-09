@@ -185,6 +185,12 @@ def feed_cases():
         dict(to_translate=[dict(id=i, text='line %d' % i) for i in range(1, 20)]),
         dict(translations=[['ja', 'en']]), dict(translations=[{'from': 'ja'}]), dict(to_translate=[dict(id=1)]),
         dict(to_translate=[dict(id=1, text=5)]),
+        # (as Lua JSON libraries write them: whole numbers as decimals, an empty list as {})
+        dict(seq=3.0, session=1.728e12, ack=2.0, ping=1.0, listen='always', speakers={}, to={}, translations={},
+             to_translate={}),
+        dict(room=room, key=key, me=7.0, to=[2.0, 3.0], speakers=[dict(id=2.0, test_voice=1.0, talking=True)],
+             to_translate=[dict(id=5.0, text='hola')]),
+        dict(seq=1.5), dict(me=7.5, room=room, key=key), dict(speakers={'id': 1}), dict(to_translate=[dict(id=2.5, text='x')]),
     ]
     feeds = [hx(o) for o in objs]
     feeds += [json.dumps(objs[0]), ' ' + hx(objs[2]).upper() + ' ', '', 'garbage', '7b', hx([1, 2]), 'zz' + hx(objs[1])]

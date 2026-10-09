@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "id": "valheim-koetama",
+  "game": "Valheim",
+  "mod": "Koetama for Valheim",
+  "url": "https://github.com/AgeOfAlgorithms/koetama/tree/main/examples/mods/valheim",
+  "author": "AgeOfAlgorithms",
+  "locate": {"steam_app": 892970},
+  "uses": ["voices", "speech", "translate"],
+  "connector": {"type": "socket", "port": 47131}
+}

@@ -26,7 +26,7 @@ fn same_f64(want: &Value, got: f64) -> bool {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 41);
+    assert_eq!(cases.len(), 47);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);

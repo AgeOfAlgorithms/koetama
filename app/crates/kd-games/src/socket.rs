@@ -255,7 +255,7 @@ impl SocketGame {
     pub fn new(profile: Arc<Profile>, builtin: bool, sink: Arc<dyn FeedSink>, log: Log) -> SocketGame {
         let port = match &profile.connector {
             Connector::Socket(s) => s.port,
-            Connector::Files(_) => 0,
+            Connector::Files(_) | Connector::Http(_) => 0,
         };
         let shared = Arc::new(Shared {
             running: AtomicBool::new(false),

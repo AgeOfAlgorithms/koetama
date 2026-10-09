@@ -126,7 +126,7 @@ fn bad_profiles_say_why() {
         (with(s(), "/author", Some(json!(3))), "\"author\": must be a string"),
         (with(s(), "/colour", Some(json!("red"))), "unknown field \"colour\""),
         (with(s(), "/connector", None), "\"connector\" is missing"),
-        (with(s(), "/connector/type", Some(json!("pipe"))), "\"connector.type\": \"pipe\" is not a connector (known: \"files\", \"socket\")"),
+        (with(s(), "/connector/type", Some(json!("pipe"))), "\"connector.type\": \"pipe\" is not a connector (known: \"files\", \"socket\", \"http\")"),
         (with(s(), "/connector/type", None), "\"connector.type\" is missing"),
         (with(s(), "/connector/port", Some(json!(80))), "\"connector.port\": must be a port from 1024 to 65535 (got 80)"),
         (with(s(), "/connector/port", Some(json!(70000))), "(got 70000)"),

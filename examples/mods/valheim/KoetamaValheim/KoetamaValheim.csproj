@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The BepInEx 5 plugin. References the game's own assemblies and BepInEx's from the Valheim folder (BepInExPack_Valheim
+    installed there). Build:   dotnet build -c Release                       (ValheimDir=... for another install)
+    Install into the game:     dotnet build -c Release -p:InstallToGame=true (copies to BepInEx/plugins/KoetamaValheim)
+  -->
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>KoetamaValheim</AssemblyName>
+    <RootNamespace>KoetamaValheim</RootNamespace>
+    <Version>0.1.0</Version>
+    <Nullable>disable</Nullable>
+    <ValheimDir Condition="'$(ValheimDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Valheim</ValheimDir>
+    <Managed>$(ValheimDir)\valheim_Data\Managed</Managed>
+    <BepInExCore>$(ValheimDir)\BepInEx\core</BepInExCore>
+    <!-- (Unity's own modules reference netstandard 2.1, the game's scripts and this plugin mscorlib 4: the game ships
+         both, so the "conflict" is only at build time) -->
+    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- (net462 reference assemblies, so no .NET Framework install is needed to build) -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KoetamaClient\KoetamaClient.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="assembly_valheim"><HintPath>$(Managed)\assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_utils"><HintPath>$(Managed)\assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Splatform"><HintPath>$(Managed)\Splatform.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(Managed)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(Managed)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(Managed)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(Managed)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(Managed)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="InstallToGame" AfterTargets="Build" Condition="'$(InstallToGame)' == 'true'">
+    <MakeDir Directories="$(ValheimDir)\BepInEx\plugins\KoetamaValheim" />
+    <Copy SourceFiles="$(TargetDir)KoetamaValheim.dll;$(TargetDir)KoetamaClient.dll"
+          DestinationFolder="$(ValheimDir)\BepInEx\plugins\KoetamaValheim" />
+  </Target>
+</Project>

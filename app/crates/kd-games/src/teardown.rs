@@ -66,7 +66,7 @@ pub fn profile() -> Arc<Profile> {
 fn files_config() -> &'static profile::FilesConfig {
     match &PROFILE.connector {
         Connector::Files(c) => c,
-        Connector::Socket(_) => unreachable!("the built-in Teardown profile uses the files connector"),
+        Connector::Socket(_) | Connector::Http(_) => unreachable!("the built-in Teardown profile uses the files connector"),
     }
 }
 

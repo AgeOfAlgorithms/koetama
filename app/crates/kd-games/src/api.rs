@@ -116,6 +116,22 @@ pub fn object_prefab(object: &str) -> String {
 }
 
 // ---------------------------------------------------------------- game -> Koetama
+/// A whole number as JSON gives it - also written as a decimal (1.0, 1.7e12: a Lua JSON library's numbers are all
+/// floats), when it is whole and fits.
+pub fn whole(v: &Value) -> Option<i64> {
+    v.as_i64().or_else(|| v.as_f64().filter(|f| f.is_finite() && f.fract() == 0.0 && f.abs() < 9.0e15).map(|f| f as i64))
+}
+
+/// A list as JSON gives it - an empty object {} too (Lua has one table type: its JSON libraries write an empty one as
+/// {}); None for anything else.
+fn list(v: &Value) -> Option<&[Value]> {
+    match v {
+        Value::Array(a) => Some(a),
+        Value::Object(o) if o.is_empty() => Some(&[]),
+        _ => None,
+    }
+}
+
 /// Hex (either case, even length) -> bytes.
 fn unhex(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
@@ -155,7 +171,7 @@ pub fn parse_feed(v: &Value) -> Result<Feed, String> {
     let int = |k: &str| -> Result<i64, String> {
         match v.get(k) {
             None | Some(Value::Null) => Ok(0),
-            Some(x) => x.as_i64().ok_or(format!("\"{k}\" must be a whole number")),
+            Some(x) => whole(x).ok_or(format!("\"{k}\" must be a whole number")),
         }
     };
     let flag = |o: &Value, k: &str, def: bool| -> Result<bool, String> {
@@ -185,15 +201,16 @@ pub fn parse_feed(v: &Value) -> Result<Feed, String> {
     let mut speakers = BTreeMap::new();
     match v.get("speakers") {
         None | Some(Value::Null) => {}
-        Some(Value::Array(a)) if a.len() <= 256 => {
+        Some(x) if list(x).is_some_and(|a| a.len() <= 256) => {
+            let a = list(x).unwrap_or_default();
             for s in a {
                 if !s.is_object() {
                     return Err("each speaker must be an object".into());
                 }
-                let id = s.get("id").and_then(Value::as_i64).ok_or("a speaker's \"id\" must be a whole number")?;
+                let id = s.get("id").and_then(whole).ok_or("a speaker's \"id\" must be a whole number")?;
                 let test_voice = match s.get("test_voice") {
                     None | Some(Value::Null) => 0,
-                    Some(x) => x.as_i64().filter(|n| *n > 0).ok_or("a speaker's \"test_voice\" must be a number from 1")?,
+                    Some(x) => whole(x).filter(|n| *n > 0).ok_or("a speaker's \"test_voice\" must be a number from 1")?,
                 };
                 speakers.insert(
                     id,
@@ -210,20 +227,21 @@ pub fn parse_feed(v: &Value) -> Result<Feed, String> {
         }
         Some(_) => return Err("\"speakers\" must be a list of at most 256 speakers".into()),
     }
-    let me = v.get("me").and_then(Value::as_i64); // (not a whole number: no room, as a bad one)
+    let me = v.get("me").and_then(whole); // (not a whole number: no room, as a bad one)
     let (room, key, me) = feed::voice_room(&text("room")?, &text("key")?, me);
     let region = feed::voice_region(&text("region")?, &room);
     let to = match v.get("to") {
         None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 256 => {
-            let ids: Option<Vec<i64>> = a.iter().map(Value::as_i64).collect();
+        Some(x) if list(x).is_some_and(|a| a.len() <= 256) => {
+            let ids: Option<Vec<i64>> = list(x).unwrap_or_default().iter().map(whole).collect();
             feed::voice_to(ids.ok_or("\"to\" must be a list of player ids")?.into_iter().map(Some))
         }
         Some(_) => return Err("\"to\" must be a list of at most 256 player ids".into()),
     };
     let translations = match v.get("translations") {
         None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 16 => {
+        Some(x) if list(x).is_some_and(|a| a.len() <= 16) => {
+            let a = list(x).unwrap_or_default();
             let mut pairs = Vec::new();
             for t in a {
                 match (t.get("from"), t.get("to")) {
@@ -237,10 +255,11 @@ pub fn parse_feed(v: &Value) -> Result<Feed, String> {
     };
     let to_translate = match v.get("to_translate") {
         None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 64 => {
+        Some(x) if list(x).is_some_and(|a| a.len() <= 64) => {
+            let a = list(x).unwrap_or_default();
             let mut items = Vec::new();
             for r in a {
-                let id = r.get("id").and_then(Value::as_i64);
+                let id = r.get("id").and_then(whole);
                 let text = match r.get("text") {
                     Some(Value::String(t)) => feed::request_text(t.as_bytes()),
                     _ => return Err("each of \"to_translate\" must be {\"id\": a whole number, \"text\": a string}".into()),

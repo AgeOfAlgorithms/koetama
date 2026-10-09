@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "id": "example-web-game-example-mod",
+  "game": "Example Web Game",
+  "mod": "Example Mod",
+  "url": "https://example.com/example-mod",
+  "author": "An Example Modder",
+  "uses": ["speech", "translate"],
+  "connector": {"type": "http", "port": 47140}
+}

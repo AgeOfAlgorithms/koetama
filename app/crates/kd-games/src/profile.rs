@@ -258,10 +258,21 @@ pub struct SocketConfig {
     pub port: u16,
 }
 
+/// The HTTP connector's settings.
+#[derive(Clone, Debug)]
+pub struct HttpConfig {
+    /// on 127.0.0.1 only
+    pub port: u16,
+    /// the web pages (origins, "https://example.com") allowed to call it from a browser; none: no browser at all (a
+    /// request with an Origin header is refused - so no web page can read what the player says)
+    pub allow_origins: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub enum Connector {
     Files(Box<FilesConfig>),
     Socket(SocketConfig),
+    Http(HttpConfig),
 }
 
 /// A test speaker's recorded voice (a Windows SAPI voice reading a text), as teardown::VOICES.
@@ -378,6 +389,15 @@ fn check_text(s: &str, max: usize) -> Result<(), String> {
         return Err("may not hold control characters (line breaks, tabs, ...)".into());
     }
     Ok(())
+}
+
+/// a feed pattern of "" (the whole file is the feed)
+const WHOLE_FILE: &str = r"(?s-u)\A(.*)\z";
+
+/// An origin a browser sends: http(s)://host[:port], nothing more.
+fn origin_ok(o: &str) -> bool {
+    let Some(rest) = o.strip_prefix("https://").or_else(|| o.strip_prefix("http://")) else { return false };
+    !rest.is_empty() && o.len() <= 200 && rest.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b':'))
 }
 
 fn compile(pattern: &str, at: &str) -> Result<regex::bytes::Regex, String> {
@@ -557,6 +577,12 @@ impl Profile {
                 ));
             }
             Connector::Socket(s) => out.push(format!("listens on 127.0.0.1:{} (this computer only)", s.port)),
+            Connector::Http(h) => {
+                out.push(format!("answers HTTP on 127.0.0.1:{} (this computer only)", h.port));
+                if !h.allow_origins.is_empty() {
+                    out.push(format!("lets these web pages use it from a browser: {}", h.allow_origins.join(", ")));
+                }
+            }
         }
         if self.voices {
             out.push("plays other players' voices".into());
@@ -590,7 +616,8 @@ fn parse_connector(v: &Value) -> Result<Connector, String> {
                 return Err("\"connector.feed.file\": must end in the file's name, as {localappdata}/Game/save.xml".into());
             }
             let pattern = feed.opt_str("pattern")?.unwrap_or(crate::teardown::FEED).to_string();
-            let feed_re = compile(&pattern, "connector.feed.pattern")?;
+            // ("": the whole file is the feed - a game that writes its feed object as a file of its own)
+            let feed_re = compile(if pattern.is_empty() { WHOLE_FILE } else { &pattern }, "connector.feed.pattern")?;
             let tag_pattern = feed.opt_str("tag_pattern")?.unwrap_or(crate::teardown::MODTAG).to_string();
             let tag_re = match tag_pattern.as_str() {
                 "" => None,
@@ -657,7 +684,30 @@ fn parse_connector(v: &Value) -> Result<Connector, String> {
             let port = f.int("port", 1024, 65535, "a port from 1024 to 65535")?.ok_or("\"connector.port\" is missing")?;
             Ok(Connector::Socket(SocketConfig { port: port as u16 }))
         }
-        Some(t) => Err(format!("\"connector.type\": {t:?} is not a connector (known: \"files\", \"socket\")")),
-        None => Err("\"connector.type\" is missing (\"files\" or \"socket\")".into()),
+        Some("http") => {
+            f.only(&["type", "port", "allow_origins"])?;
+            let port = f.int("port", 1024, 65535, "a port from 1024 to 65535")?.ok_or("\"connector.port\" is missing")?;
+            let allow_origins = match f.get("allow_origins") {
+                None => Vec::new(),
+                Some(Value::Array(a)) if a.len() <= 16 => {
+                    let mut out = Vec::new();
+                    for o in a {
+                        match o.as_str() {
+                            Some(o) if origin_ok(o) => out.push(o.to_string()),
+                            _ => {
+                                return Err(format!(
+                                    "\"connector.allow_origins\": {o} is not an origin like \"https://example.com\" (no path, no *)"
+                                ))
+                            }
+                        }
+                    }
+                    out
+                }
+                Some(_) => return Err("\"connector.allow_origins\": must be a list of at most 16 origins".into()),
+            };
+            Ok(Connector::Http(HttpConfig { port: port as u16, allow_origins }))
+        }
+        Some(t) => Err(format!("\"connector.type\": {t:?} is not a connector (known: \"files\", \"socket\", \"http\")")),
+        None => Err("\"connector.type\" is missing (\"files\", \"socket\" or \"http\")".into()),
     }
 }

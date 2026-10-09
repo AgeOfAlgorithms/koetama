@@ -296,10 +296,17 @@ fn states_downloading_loading_ready() {
     let r = rig_with(src);
     r.t.set_rules(&rules(&[("ja", "en")]));
     r.status_is("ja>en=downloading 100");
-    // (not ready: an empty reply at once, not a wait)
-    assert_eq!(r.ask(1, "こんにちは"), "");
+    // (not ready: the line waits for the models - no "" that would lose it)
+    assert!(r.t.request(1, "こんにちは"));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(r.replies(1).is_empty(), "held while the models come");
     r.src.release("ja>en");
     r.status_is("ja>en=ready");
+    let t0 = std::time::Instant::now();
+    while r.replies(1).is_empty() && t0.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(r.replies(1), vec!["en(こんにちは)".to_string()], "answered once they are ready");
     assert_eq!(r.ask(2, "こんにちは"), "en(こんにちは)");
     let seen: Vec<String> = r.statuses().iter().map(|s| kd_translate::service::status_text(s)).collect();
     assert_eq!(seen.first().map(String::as_str), Some("ja>en=downloading 0"));
