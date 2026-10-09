@@ -72,6 +72,9 @@ struct Args {
     /// games folder - KOETAMA_PROFILES_DIR for tests - for any other)
     #[arg(long, default_value = "teardown-proximity-babble-chat")]
     game: String,
+    /// join a game hosted on another PC with the code its game showed you (PROTOCOL.md "Hub")
+    #[arg(long, value_name = "CODE")]
+    join: Option<String>,
 }
 
 /// A device given as a name or as its number in --list.
@@ -320,6 +323,7 @@ fn demo(args: &Args) -> i32 {
                 az,
                 el: 0.0,
                 muffle: 0.0,
+                ..Default::default()
             },
         );
         kd_audio::lock(&mixer).set_feed(f);
@@ -372,7 +376,7 @@ pub fn main(argv: Vec<String>) -> i32 {
                 return 1;
             }
         };
-        mic_source = Some(Box::new(move |l: Listener, log: Log| {
+        mic_source = Some(Box::new(move |l: Listener, log: Log, _voice: Option<kd_voice::Voice>| {
             Box::new(PlaylistMicrophone::new(l, items, 2.5, log)) as Box<dyn Mic>
         }));
     } else if let Some(p) = &args.mic_wav {
@@ -385,8 +389,15 @@ pub fn main(argv: Vec<String>) -> i32 {
             }
         };
         let audio = kd_audio::resample(&audio, sr, kd_speech::RATE);
-        mic_source = Some(Box::new(move |l: Listener, log: Log| {
-            Box::new(WavMicrophone::new(l, audio, log)) as Box<dyn Mic>
+        mic_source = Some(Box::new(move |l: Listener, log: Log, voice: Option<kd_voice::Voice>| {
+            let mic = WavMicrophone::new(l.clone(), audio, log);
+            match voice {
+                // (the recording is heard by the other players too, as the microphone would be: at the voice chat's rate)
+                Some(v) => Box::new(mic.with_tap(Arc::new(move |x: &[f32]| {
+                    v.push_mic(&kd_audio::resample(x, kd_speech::RATE, kd_voice::RATE), l.talking());
+                }))) as Box<dyn Mic>,
+                None => Box::new(mic) as Box<dyn Mic>,
+            }
         }));
     }
     let opts = Options {
@@ -403,8 +414,11 @@ pub fn main(argv: Vec<String>) -> i32 {
         io_dir: args.io_dir.clone().map(Into::into),
     };
     println!("preparing...");
-    let kind = kd_games::by_id(&args.game);
-    if kind.id != args.game {
+    let kind = match &args.join {
+        Some(code) => kd_games::GameKind::joined(code),
+        None => kd_games::by_id(&args.game),
+    };
+    if args.join.is_none() && kind.id != args.game {
         log(&format!("no game mod {:?} (see Koetama's games folder): {} instead", args.game, kind.id));
     }
     let mut rt = Runtime::start(kind, log.clone(), opts, mic_source);

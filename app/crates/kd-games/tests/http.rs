@@ -136,16 +136,16 @@ fn feeds_and_objects() {
     // the voice chat's state, translations
     {
         let g = gref.lock().unwrap();
-        g.set_voice_state("connected");
-        g.set_voice_state("connected");
-        assert!(g.send_translation(9, " Hi "));
+        g.set_standing("voice", kd_games::api::voice("connected", &[]));
+        g.set_standing("voice", kd_games::api::voice("connected", &[]));
+        assert!(g.send_translation(9, " Hi ", None));
     }
     let r = post(port, json!({"session": 7, "ack": 2}));
-    assert_eq!(r["objects"], json!([{"type": "voice", "state": "connected"}, {"type": "translation", "id": 9, "text": "Hi"}]));
+    assert_eq!(r["objects"], json!([{"type": "voice", "state": "connected", "players": []}, {"type": "translation", "id": 9, "text": "Hi"}]));
     // a new session: its hello, then the voice state, numbered after what the game has
     let r = post(port, json!({"session": 8, "ack": 0}));
     assert_eq!(r["objects"][0]["type"], "hello");
-    assert_eq!(r["objects"][1], json!({"type": "voice", "state": "connected"}));
+    assert_eq!(r["objects"][1], json!({"type": "voice", "state": "connected", "players": []}));
     assert_eq!(r["last"], 2);
     // bad requests
     let (s, _, _) = request(port, "POST", &[], "not json");

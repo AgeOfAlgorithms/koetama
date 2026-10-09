@@ -165,9 +165,14 @@ pub trait Game: Send {
     fn send(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool;
                                                                          // api::speech: 's' 'l' 'f', 'r' the room
     fn send_text(&self, text: &str) -> bool;                             // a typed line (--type, --auto)
-    fn send_translation(&self, id: i64, text: &str) -> bool;             // api::translation (one per line id)
+    fn send_translation(&self, id: i64, text: &str, rule: Option<(&str, &str)>) -> bool;
+                                                                         // api::translation (one per line id; from / to)
     fn send_translations_state(&self, states: &[RuleState]) -> bool;     // api::translations_status (on each change)
-    fn set_voice_state(&self, state: &str);                              // api::voice (on each change)
+    fn set_standing(&self, kind: &'static str, object: String);          // a "standing" object (voice, status): sent now
+                                                                         // and again after every hello (new session /
+                                                                         // connection / hub link)
+    fn send_object(&self, object: String) -> bool;                       // any other object (talking, join_code, player,
+                                                                         // a player's objects from the hub)
     fn test_voices(&self) -> HashMap<i64, PathBuf>;                      // wav files (the program loads them)
     fn speaker_name(&self, src: i64) -> String;
     fn feed(&self) -> Option<Feed>;                                      // the latest
@@ -181,13 +186,18 @@ pub mod steam { steam_root, libraries, app_library, install_dir, workshop_dir, p
 pub mod profile { Profile, Connector, FilesConfig, SocketConfig, MessageFormat, TestVoice, PathTemplate, PathSpec,
                   Place, safe_prefix, this_pc }                          // the profile format, validation, summary
 pub mod api { PROTOCOL = 2, parse_feed(&Value) -> Feed, feed_from_text(object or its hex), features(profile),
-              hello, speech, room, voice, translation, translations_status, object_prefab, json_secs }
+              player_id(&Value) -> Option<PlayerId>, whole, MAX_PLAYERS = 32,
+              hello, speech, room, voice(state, players), talking(id, on), status(speech, microphone),
+              translation(id, text, from/to), translations_status, join_code, player, from_player(object, id),
+              object_prefab, json_secs }
                                                                         // the game API (PROTOCOL.md "The objects"): one
                                                                         // parser and the objects, for both connectors
 pub mod files { FilesGame, Link, LinkRules, FeedReader, FeedScan, FeedRules, parse_feed, find_feeds, TRANSLATION_MAX }
                                                                         // the files connector (object n of a session
                                                                         // in <prefix>t<n>: json or a prefab; 1 = hello)
 pub mod socket { SocketGame, parse_socket_feed, PROTOCOL, MAX_LINE }    // the socket connector
+pub mod joined { JoinedGame, profile() }                                // a game hosted on another PC: the "game" is
+                                                                        // the host's Koetama, through the relay (Hub)
 pub mod http { HttpGame, MAX_WAIT = 1 s, MAX_BODY = 64 KB }            // the HTTP connector: POST / the feed, the answer
                                                                         // {"objects":[..],"last":n}; objects kept until
                                                                         // acked; "wait" holds the answer; Origin allowlist
@@ -240,10 +250,39 @@ pub struct Sender;  Sender::new()?.push(x_48k, Mode) -> Vec<Packet>;   // gate +
     pub fn set_feed(&self, &Feed);                  // the room, to, whom it hears (src 0, gain > 0), mic / ptt
     pub fn push_mic(&self, x_48k: &[f32], talking: bool);   // the microphone's callback: queued, never waits
     pub fn playback(&self) -> Playback;             // impl kd_audio::Streams: the mixer pulls each sender
-    pub fn status(&self) -> VoiceStatus { state: "off" | "connecting" | "connected", heard };
+    pub fn status(&self) -> VoiceStatus { state: "off" | "connecting" | "connected" | "id_taken", heard, players };
+    pub fn players(&self) -> Vec<PlayerId>;         // heard from (voice or presence) within PRESENT = 15 s
+    pub fn range_of(&self, rid: i64) -> Option<(f64, f64)>;   // the range a player's packets announce
+    pub fn take_events(&self) -> Vec<VoiceEvent>;   // VoiceEvent::Talking { id, talking } (remote and this player)
     pub fn stop(&self);
 }
+pub mod hub { HUB = 1, PLAYER = 2, MESSAGE = 3, PART = 3500, ALPHABET, new_code, normalize_code, pairing_room,
+              parts, Assembler, Channel::start(relay, code, me, log) -> Option<Channel>: send(&Value), received(),
+              other_there(), connected() }
 ```
+Ids: a player id is a number or a string (`kd_common::feed::PlayerId`, at most 64 characters / 255 bytes); its
+relay id is `feed::relay_id(room, id)` (the first 2 bytes of SHA-256("koetama id:" room ":" id), 0 -> 65535). Two
+players with the same relay id: the relay keeps the newer connection and closes the older with 4000 (`replaced()`),
+which stays out (`id_taken`). `room_seed` makes room and key (`feed::room_from_seed`: HMAC-SHA256). Packet v2:
+`[2][seq][flags: 1 last, 2 presence, 4 the id is a number][near f32][far f32][n][id][k][frames]` - every packet
+says who sent it and their range; a presence packet (no frames) goes every PRESENCE_EVERY = 5 s to the speakers and
+`to`, so `players()` knows who is in the room before they talk. Talking events: a remote player starts with their
+first audio and stops on the last flag (or 0.5 s without audio); this player with sending.
+
+Positions (`api::place`): with `listener` and a speaker's `position`, Koetama computes azimuth / elevation (from the
+listener's right / up / forward) and the gain (`feed::falloff`: 1 within near, ((far - d) / (far - near))^2 out to
+far), the range being the one the player's packets announce, else the speaker's `range`, else the feed's, else
+DEFAULT_RANGE (10, 30); a `gain` the game gives wins. With no `to`, it is every speaker within far x 1.1.
+
+Hub (`koetama::hub::Hub`, the host's side; `kd_games::joined::JoinedGame`, a player's): the host's feed lists
+`players` (each a feed; api::parse_feed keeps them in `Feed::players`, each with `raw` - its JSON merged with the
+host's room / key / region when it has none). For each, the hub makes a join code and a `Channel` (HUB) in the room
+the code makes; it tells the game the code (`join_code`, once per session), sends `{"feed": ..}` on each change and
+every 0.5 s, and hands the game each `{"objects": [..]}` the player's Koetama sends with `"player"` added
+(api::from_player), plus `player` joined / left (other_there: heard within 5 s; the player's Koetama sends an empty
+`objects` every 2 s). The player's JoinedGame is a Game like any other: its feed comes from the hub, its objects go
+there, its standing objects are sent again when the link comes up. Messages are cut into parts of 3500 bytes
+(`[3][msg u32][part][parts][bytes]`, encrypted like voice packets, relay ids 1 and 2).
 Threads: the voice thread connects while the feed names a room and the game is feeding (again after a drop: 1, 2, 4
 ... 30 s), reads the relay (5 ms read timeouts), pings every 20 s, and turns the microphone's queued blocks into
 packets (sent only to the feed's `to`). Received packets go into a jitter buffer per sender under one short lock;
@@ -282,7 +321,8 @@ Connectors:
   refused unless the profile's allow_origins lists it (then CORS + Private Network Access headers).
 - `socket`: a TCP server on 127.0.0.1 (the profile's port): newline-separated JSON both ways; the mod sends its
   feed, Koetama sends its hello (with the features the profile uses), what the player said, the voice room and the
-  voice chat's state, and translations (lines.rs; no acks or pings: the connection is the liveness).
+  voice chat's state, and translations (api.rs; no acks or pings: the connection is the liveness).
+- (no profile) a JOINED game (`GameKind::joined(code)`, the window's "Join a hosted game", `--join CODE`): see Hub.
 
 ```rust
 // kd-games (the interface the window and the runtime use)

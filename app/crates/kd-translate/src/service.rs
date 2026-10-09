@@ -204,7 +204,7 @@ pub fn status_text(rules: &[RuleStatus]) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// the reply to request `id` ("" = nothing to show)
-    Reply { id: i64, text: String },
+    Reply { id: i64, text: String, rule: Option<(String, String)> },
     /// the rules' states changed
     Status(Vec<RuleStatus>),
 }
@@ -449,10 +449,10 @@ impl Worker {
             let (session, id, text, _) = self.held.pop_front().unwrap();
             // (a line from a session gone: its id may be a new line's now - never answered)
             if session == inner.session.load(Ordering::SeqCst) {
-                let text = self.translate_line(&text);
+                let (text, rule) = self.translate_line(&text);
                 // (the session may have ended while it was translated)
                 if session == inner.session.load(Ordering::SeqCst) {
-                    (self.on_event)(Event::Reply { id, text });
+                    (self.on_event)(Event::Reply { id, text, rule });
                 }
             }
         }
@@ -626,8 +626,10 @@ impl Worker {
         Ok(t)
     }
 
-    /// A line's translation ("" when nothing in it was translated).
-    fn translate_line(&mut self, line: &str) -> String {
+    /// A line's translation ("" when nothing in it was translated), and the rule used (the first, for a line with
+    /// stretches in two source languages).
+    fn translate_line(&mut self, line: &str) -> (String, Option<(String, String)>) {
+        let mut rule: Option<(String, String)> = None;
         // (piece, translated)
         let mut pieces: Vec<(String, bool)> = Vec::new();
         // (the line is most likely in a translation's language, or English: short lines are told among those first)
@@ -640,7 +642,10 @@ impl Worker {
             let text = st.text(line);
             let done = match st.lang.and_then(|l| self.rule_for(l)) {
                 Some(s) if !text.trim().is_empty() => match self.through(s, text.trim()) {
-                    Ok(t) => Some(t),
+                    Ok(t) => {
+                        rule.get_or_insert_with(|| (s.from.clone(), s.to.clone()));
+                        Some(t)
+                    }
                     Err(e) => {
                         let msg = format!("translation: {} > {}: {e}", s.from, s.to);
                         if msg != self.last_error {
@@ -658,13 +663,13 @@ impl Worker {
             }
         }
         if !pieces.iter().any(|p| p.1) {
-            return String::new();
+            return (String::new(), None);
         }
         let out = join_pieces(&pieces);
         if out == line.trim() {
-            String::new() // (nothing changed: nothing to show)
+            (String::new(), None) // (nothing changed: nothing to show)
         } else {
-            out
+            (out, rule)
         }
     }
 }

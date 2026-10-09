@@ -26,6 +26,7 @@ import numpy as np                                                   # noqa: E40
 import paths                                                         # noqa: E402
 from audio import RATE, STALE, Mixer, read_wav, load_wav, resample, open_output   # noqa: E402,F401
 from games.teardown import (Teardown, FeedReader, Link, parse_feed, find_feeds, object_prefab, speech,   # noqa: E402,F401
+                            relay_id, room_from_seed,
                             make_voices, io_dirs, savegame_path, VOICES, NAMES, WORK, TEXT_MAX)
 from runtime import Runtime                                          # noqa: E402
 

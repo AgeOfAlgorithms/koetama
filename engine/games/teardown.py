@@ -6,6 +6,8 @@
 Teardown runs on Windows; on Linux (Steam Deck) through Proton - its files are then inside its Proton prefix.
 """
 import glob
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -14,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 
 import paths
 import steam
@@ -181,58 +184,202 @@ def _list(o, k, most):
     return v
 
 
+def player_id(v):
+    """a player id as JSON gives it: (text, is a number) - a whole number, or a string of 1 to 64 characters without
+    control characters; None otherwise (Rust: api::player_id)"""
+    if isinstance(v, str):
+        if 1 <= len(v) <= 64 and len(v.encode('utf-8')) <= 255 and not any(unicodedata.category(c) == 'Cc' for c in v):
+            return (v, False)
+        return None
+    w = _whole(v)
+    return None if w is None else (str(w), True)
+
+
+def relay_id(room, pid):
+    """a player id's 16-bit number in a voice room (Rust: kd_common::feed::relay_id)"""
+    h = hashlib.sha256(('koetama id:%s:%s' % (room, pid[0])).encode('utf-8')).digest()
+    n = int.from_bytes(h[:2], 'big')
+    return 65535 if n == 0 else n
+
+
+def room_from_seed(seed):
+    """the room and key every Koetama makes from a room_seed (Rust: kd_common::feed::room_from_seed)"""
+    room = hmac.new(seed.encode('utf-8'), b'koetama room', hashlib.sha256).hexdigest()[:32]
+    return room, hmac.new(seed.encode('utf-8'), b'koetama key', hashlib.sha256).hexdigest()
+
+
+def falloff(d, rng):
+    near, far = rng
+    if d != d or d >= far:
+        return 0.0
+    if d <= near or far <= near:
+        return 1.0
+    left = (far - d) / (far - near)
+    return left * left
+
+
+DEFAULT_RANGE = (10.0, 30.0)
+
+
+def _vec3(v):
+    if v is None:
+        return None
+    a = [] if v == {} else v
+    if not isinstance(a, list) or len(a) != 3:
+        return None
+    n = [x for x in a if not isinstance(x, bool) and isinstance(x, (int, float)) and math.isfinite(x)]
+    return [float(x) for x in n] if len(n) == 3 else None
+
+
+def _unit(a):
+    n = math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+    return [a[0] / n, a[1] / n, a[2] / n] if n > 1e-9 else None
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _ears(v):
+    """(position, forward, right, up) of a listener object, or None"""
+    if not isinstance(v, dict):
+        return None
+    p = _vec3(v.get('position'))
+    parts = [_vec3(v.get(k)) for k in ('forward', 'right', 'up')]
+    if p is None or any(x is None for x in parts):
+        return None
+    units = [_unit(x) for x in parts]
+    return None if any(u is None for u in units) else (p, units[0], units[1], units[2])
+
+
+def _place(ears, p):
+    pos, fwd, right, up = ears
+    d = [p[0] - pos[0], p[1] - pos[1], p[2] - pos[2]]
+    x, y, z = _dot(d, right), _dot(d, up), _dot(d, fwd)
+    return math.degrees(math.atan2(x, z)), math.degrees(math.atan2(y, math.sqrt(x * x + z * z))), math.sqrt(_dot(d, d))
+
+
+def _range(v):
+    if v is None or v == {} or not isinstance(v, list) or len(v) != 2:
+        return None
+    n, f = v
+    ok = all(not isinstance(x, bool) and isinstance(x, (int, float)) and math.isfinite(x) for x in (n, f))
+    return (float(n), float(f)) if ok and 0 <= n < f else None
+
+
+def _short(v):
+    return ''.join(c for c in v if unicodedata.category(c) != 'Cc')[:64] if isinstance(v, str) else ''
+
+
+def _parse_one(v, inherit=None):
+    """one feed (the top one, or a hub's player's: inherit = the host's (room, key, region)) -> a dict; raises
+    ValueError for a value of the wrong kind"""
+    if not isinstance(v, dict):
+        raise ValueError('not an object')
+    listen = _str(v, 'listen')
+    if listen not in ('', 'off', 'always', 'push_to_talk'):
+        raise ValueError('listen')
+    lang = _str(v, 'lang') or 'en'
+    if not LANG_CODE.fullmatch(lang):
+        raise ValueError('lang')
+    seed = _str(v, 'room_seed')
+    if seed and len(seed) <= 256:
+        room, key = room_from_seed(seed)
+    elif 'room' in v or 'key' in v or inherit is None:
+        room, key = _str(v, 'room'), _str(v, 'key')
+    else:
+        room, key = inherit[0], inherit[1]
+    region = _str(v, 'region') if 'region' in v else (inherit[2] if inherit else '')
+    raw_me = v.get('me') if v.get('me') is not None else (v.get('id') if inherit is not None else None)
+    me_id = player_id(raw_me) if raw_me is not None else None
+    if not (re.fullmatch(r'[0-9a-f]{32}', room) and re.fullmatch(r'[0-9a-f]{64}', key) and me_id):
+        room, key, me, me_id = '', '', 0, None
+    else:
+        me = relay_id(room, me_id)
+    if not room or region not in REGIONS:            # (a room's region: one of the relay's, else wherever)
+        region = ''
+    ears = None
+    if v.get('listener') is not None:
+        ears = _ears(v['listener'])
+        if ears is None:
+            raise ValueError('listener')
+    my_range = _range(v.get('range'))
+    speakers, clashes = {}, []
+    for sp in _list(v, 'speakers', 256):
+        if not isinstance(sp, dict):
+            raise ValueError('speaker')
+        pid = player_id(sp.get('id')) if sp.get('id') is not None else None
+        if pid is None:
+            raise ValueError('speaker id')
+        tv = sp.get('test_voice')
+        if tv is not None and (_whole(tv) is None or _whole(tv) < 1):
+            raise ValueError('test_voice')
+        rid = relay_id(room, pid)
+        if (rid in speakers and speakers[rid]['id'] != pid) or (me and rid == me and me_id != pid):
+            clashes.append(pid)
+            continue
+        placed = _place(ears, _vec3(sp['position'])) if ears and _vec3(sp.get('position')) else None
+        own = _range(sp.get('range'))
+        given = sp.get('gain') is not None
+        if given:
+            gain = min(1.0, max(0.0, _num(sp, 'gain', 1.0)))
+        elif placed:
+            gain = falloff(placed[2], own or my_range or DEFAULT_RANGE)
+        else:
+            gain = 1.0
+        az, el = (placed[0], placed[1]) if placed else (_num(sp, 'azimuth', 0.0), _num(sp, 'elevation', 0.0))
+        speakers[rid] = dict(src=_whole(tv) if tv is not None else 0, talk=_flag(sp, 'talking', False), gain=gain,
+                             az=az, el=el, muffle=min(1.0, max(0.0, _num(sp, 'muffle', 0.0))), id=pid,
+                             name=_short(sp.get('name')), distance=placed[2] if placed else None, gain_given=given,
+                             range=own)
+    ids = []
+    if v.get('to') is None:
+        if my_range and ears:
+            for rid, s in sorted(speakers.items()):
+                if s['src'] == 0 and s['distance'] is not None and s['distance'] <= my_range[1] * 1.1 and rid != me \
+                        and rid not in ids and len(ids) < 64:
+                    ids.append(rid)
+    else:
+        for i in _list(v, 'to', 256):
+            pid = player_id(i)
+            if pid is None:
+                raise ValueError('to')
+            r = relay_id(room, pid)
+            if r != me and r not in ids and len(ids) < 64:
+                ids.append(r)
+    pairs = _list(v, 'translations', 16)
+    if not all(isinstance(t, dict) and isinstance(t.get('from'), str) and isinstance(t.get('to'), str) for t in pairs):
+        raise ValueError('translations')
+    lines = _list(v, 'to_translate', 64)
+    if not all(isinstance(r, dict) and isinstance(r.get('text'), str) for r in lines):
+        raise ValueError('to_translate')
+    return dict(seq=_int(v, 'seq'), vol=min(1.0, max(0.0, _num(v, 'volume', 1.0))), sid=_int(v, 'session'),
+                ack=_int(v, 'ack'), ping=_int(v, 'ping'), mic=listen in ('always', 'push_to_talk'),
+                ptt=_flag(v, 'talk_key', False) if listen == 'push_to_talk' else None, lang=lang,
+                live=_flag(v, 'live', True), speakers=speakers, room=room, key=key, me=me, to=ids, region=region,
+                translations=parse_translations(pairs), to_translate=parse_requests(lines), me_id=me_id,
+                name=_short(v.get('name')), range=my_range, clashes=clashes, players=[])
+
+
 def parse_feed(text):
     """the feed (PROTOCOL.md "Game -> Koetama: the feed"): the JSON object, or its hex (Teardown's registry string)
     -> a dict, or None. Missing fields: their defaults; a value of the wrong kind: None; a bad room, key or me: no
-    room ('', '', 0); bad ids in `to` skipped (each once, at most 64); bad translations and lines skipped"""
+    room ('', '', 0); bad ids in `to` skipped; bad translations and lines skipped; a hub's players: a dict each"""
     try:
         t = text.strip()
         v = json.loads(t if t.startswith('{') else bytes.fromhex(t).decode('utf-8'))
-        if not isinstance(v, dict):
-            return None
-        listen = _str(v, 'listen')
-        if listen not in ('', 'off', 'always', 'push_to_talk'):
-            return None
-        lang = _str(v, 'lang') or 'en'
-        if not LANG_CODE.fullmatch(lang):
-            return None
-        speakers = {}
-        for sp in _list(v, 'speakers', 256):
-            if not isinstance(sp, dict) or _whole(sp.get('id')) is None:
+        top = _parse_one(v)
+        for p in _list(v, 'players', 32):
+            if not isinstance(p, dict):
                 return None
-            tv = sp.get('test_voice')
-            if tv is not None and (_whole(tv) is None or _whole(tv) < 1):
-                return None
-            speakers[_whole(sp['id'])] = dict(src=_whole(tv) if tv is not None else 0, talk=_flag(sp, 'talking', False),
-                                      gain=min(1.0, max(0.0, _num(sp, 'gain', 1.0))), az=_num(sp, 'azimuth', 0.0),
-                                      el=_num(sp, 'elevation', 0.0), muffle=min(1.0, max(0.0, _num(sp, 'muffle', 0.0))))
-        # the voice room: the room, its key and my id all good, or no room
-        room, key, me = _str(v, 'room'), _str(v, 'key'), _whole(v.get('me'))
-        me = me if me is not None and 1 <= me <= 65535 else None
-        if not (re.fullmatch(r'[0-9a-f]{32}', room) and re.fullmatch(r'[0-9a-f]{64}', key) and me):
-            room, key, me = '', '', 0
-        region = _str(v, 'region')
-        if not room or region not in REGIONS:            # (a room's region: one of the relay's, else wherever)
-            region = ''
-        ids = []
-        for i in _list(v, 'to', 256):
-            i = _whole(i)
-            if i is None:
-                return None
-            if 1 <= i <= 65535 and i not in ids and len(ids) < 64:
-                ids.append(i)
-        pairs = _list(v, 'translations', 16)
-        if not all(isinstance(t, dict) and isinstance(t.get('from'), str) and isinstance(t.get('to'), str) for t in pairs):
-            return None
-        lines = _list(v, 'to_translate', 64)
-        if not all(isinstance(r, dict) and isinstance(r.get('text'), str) for r in lines):
-            return None
-        return dict(seq=_int(v, 'seq'), vol=min(1.0, max(0.0, _num(v, 'volume', 1.0))), sid=_int(v, 'session'),
-                    ack=_int(v, 'ack'), ping=_int(v, 'ping'), mic=listen in ('always', 'push_to_talk'),
-                    ptt=_flag(v, 'talk_key', False) if listen == 'push_to_talk' else None, lang=lang,
-                    live=_flag(v, 'live', True), speakers=speakers, room=room, key=key, me=me, to=ids, region=region,
-                    translations=parse_translations(pairs), to_translate=parse_requests(lines))
-    except (ValueError, UnicodeDecodeError):
+            sub = _parse_one(p, (top['room'], top['key'], top['region']))
+            pid = player_id(p['id']) if p.get('id') is not None else None
+            if pid:
+                sub['me'], sub['me_id'] = (relay_id(sub['room'], pid) if sub['room'] else 0), pid
+            if sub['me_id'] and not any(q['me_id'] == sub['me_id'] for q in top['players']):
+                top['players'].append(sub)
+        return top
+    except (ValueError, UnicodeDecodeError, AttributeError):
         return None
 
 
@@ -341,12 +488,35 @@ def room(r, k):
     return '{"type":"room","room":%s,"key":%s}' % (_js(r), _js(k))
 
 
-def voice(state):
-    return '{"type":"voice","state":%s}' % _js(state)
+def _pid(p):
+    """a player id (text, is a number) as JSON: as the game gave it"""
+    return p[0] if p[1] else _js(p[0])
 
 
-def translation(rid, text):
+def voice(state, players=()):
+    return '{"type":"voice","state":%s,"players":[%s]}' % (_js(state), ','.join(_pid(p) for p in players))
+
+
+def talking(pid, on):
+    return '{"type":"talking","id":%s,"talking":%s}' % (_pid(pid), 'true' if on else 'false')
+
+
+def status(speech, microphone):
+    return '{"type":"status","speech":%s,"microphone":%s}' % (_js(speech), _js(microphone))
+
+
+def translation(rid, text, rule=None):
+    if rule and text:
+        return '{"type":"translation","id":%d,"text":%s,"from":%s,"to":%s}' % (rid, _js(text), _js(rule[0]), _js(rule[1]))
     return '{"type":"translation","id":%d,"text":%s}' % (rid, _js(text))
+
+
+def join_code(pid, code):
+    return '{"type":"join_code","player":%s,"code":%s}' % (_pid(pid), _js(code))
+
+
+def player(pid, joined):
+    return '{"type":"player","player":%s,"joined":%s}' % (_pid(pid), 'true' if joined else 'false')
 
 
 def translations_status(states):

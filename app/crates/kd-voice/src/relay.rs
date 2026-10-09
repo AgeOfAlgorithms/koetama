@@ -1,4 +1,4 @@
-//! A connection to the relay's room (PROTOCOL.md "Sending and receiving"): a WebSocket to
+//! A connection to the relay's room (PROTOCOL.md "Real voices"): a WebSocket to
 //! `<relay>/v1/room/<room>?me=<me>` (wss: TLS by rustls with the Mozilla roots; ws: plain, for a local relay and the
 //! tests), blocking with short read timeouts, used by one thread (the voice thread). Binary frames both ways
 //! (frames.rs); the text "ping" keeps it alive (answered "pong").
@@ -17,6 +17,10 @@ pub const POLL: Duration = Duration::from_millis(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// the keep-alive's text
 pub const PING: &str = "ping";
+/// the close code of a connection replaced by another with the same player id (relay/src/index.js)
+pub const REPLACED: u16 = 4000;
+/// the HTTP status of a relay that refuses a player id already in the room
+pub const TAKEN: u16 = 409;
 
 /// The room's address on the relay. room: "<32 hex>" or "<32 hex>@<region>" (where the room should live: the relay
 /// asks Cloudflare for it when the room is made; kd_common::feed::REGIONS).
@@ -39,17 +43,38 @@ fn tls() -> Result<Arc<rustls::ClientConfig>, String> {
 
 pub struct Conn {
     ws: WebSocket<MaybeTlsStream<TcpStream>>,
+    /// the code the relay closed it with (None: open, or closed without one)
+    code: Option<u16>,
+}
+
+/// Why a connection could not be made: a message a player can read, and whether the relay refused the player id
+/// (TAKEN: another connection in the room has it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpenError {
+    pub text: String,
+    pub taken: bool,
+}
+
+impl From<String> for OpenError {
+    fn from(text: String) -> OpenError {
+        OpenError { text, taken: false }
+    }
 }
 
 impl Conn {
     /// Connects to the room (blocking, at most ~CONNECT_TIMEOUT per address). Err: a message a player can read.
     pub fn open(relay: &str, room: &str, me: u16) -> Result<Conn, String> {
+        Conn::join(relay, room, me).map_err(|e| e.text)
+    }
+
+    /// open, telling a refused player id apart.
+    pub fn join(relay: &str, room: &str, me: u16) -> Result<Conn, OpenError> {
         let url = room_url(relay, room, me);
         let uri: tungstenite::http::Uri = url.parse().map_err(|_| format!("not a relay address: {relay}"))?;
         let secure = match uri.scheme_str() {
             Some("wss") => true,
             Some("ws") => false,
-            _ => return Err(format!("the relay address must start with wss:// (or ws://): {relay}")),
+            _ => return Err(format!("the relay address must start with wss:// (or ws://): {relay}").into()),
         };
         let host = uri.host().ok_or_else(|| format!("no host in {relay}"))?.trim_matches(['[', ']']).to_string();
         let port = uri.port_u16().unwrap_or(if secure { 443 } else { 80 });
@@ -71,16 +96,19 @@ impl Conn {
         tcp.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(|e| e.to_string())?;
         let connector = if secure { Connector::Rustls(tls()?) } else { Connector::Plain };
         let (ws, _) = tungstenite::client_tls_with_config(url.as_str(), tcp, None, Some(connector)).map_err(|e| match e {
-            tungstenite::HandshakeError::Failure(e) => e.to_string(),
-            tungstenite::HandshakeError::Interrupted(_) => "the relay did not answer in time".into(),
+            tungstenite::HandshakeError::Failure(tungstenite::Error::Http(r)) if r.status().as_u16() == TAKEN => {
+                OpenError { text: "the relay refused this player id: another player in the room has it".into(), taken: true }
+            }
+            tungstenite::HandshakeError::Failure(e) => e.to_string().into(),
+            tungstenite::HandshakeError::Interrupted(_) => String::from("the relay did not answer in time").into(),
         })?;
         let sock = match ws.get_ref() {
             MaybeTlsStream::Plain(s) => s,
             MaybeTlsStream::Rustls(s) => &s.sock,
-            _ => return Err("an unexpected connection type".into()),
+            _ => return Err(String::from("an unexpected connection type").into()),
         };
         sock.set_read_timeout(Some(POLL)).map_err(|e| e.to_string())?;
-        Ok(Conn { ws })
+        Ok(Conn { ws, code: None })
     }
 
     /// One binary frame (frames::voice_frame) to the relay.
@@ -99,8 +127,9 @@ impl Conn {
             match self.ws.read() {
                 Ok(Message::Binary(b)) => out.push(b.to_vec()),
                 Ok(Message::Close(f)) => {
+                    self.code = f.as_ref().map(|f| u16::from(f.code));
                     return Err(match f {
-                        Some(f) if f.code == tungstenite::protocol::frame::coding::CloseCode::Library(4000) => {
+                        Some(f) if u16::from(f.code) == REPLACED => {
                             "replaced by another connection with the same player id".into()
                         }
                         Some(f) => format!("closed by the relay ({}: {})", u16::from(f.code), f.reason),
@@ -114,6 +143,11 @@ impl Conn {
                 Err(e) => return Err(e.to_string()),
             }
         }
+    }
+
+    /// The relay closed it because another connection with the same player id came (REPLACED).
+    pub fn replaced(&self) -> bool {
+        self.code == Some(REPLACED)
     }
 
     /// Says goodbye (best effort, never waits long).

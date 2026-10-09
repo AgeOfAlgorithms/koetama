@@ -55,13 +55,13 @@ fn prefab_messages() {
     let d = tmp("prefab");
     let link = Link::new(vec![d.clone()], kd_common::null_log());
     link.start();
-    assert!(!link.send_translation(1, "too early") && !link.send_translations_state(&states()), "no game yet: nothing written");
+    assert!(!link.send_translation(1, "too early", None) && !link.send_translations_state(&states()), "no game yet: nothing written");
     link.on_feed(&feed(3, 0, 1), "local-proximity-chat");
     assert_eq!(object(&d.join("pcvx_t1.xml"))["type"], "hello");
-    assert!(link.send_translation(7, "  Hello, how are you?  "));
-    assert_eq!(read(&d.join("pcvx_t2.xml")), api::object_prefab(&api::translation(7, "Hello, how are you?")), "stripped");
+    assert!(link.send_translation(7, "  Hello, how are you?  ", None));
+    assert_eq!(read(&d.join("pcvx_t2.xml")), api::object_prefab(&api::translation(7, "Hello, how are you?", None)), "stripped");
     assert_eq!(object(&d.join("pcvx_t2.xml")), json!({"type": "translation", "id": 7, "text": "Hello, how are you?"}));
-    assert!(link.send_translation(8, ""), "an empty reply is a reply");
+    assert!(link.send_translation(8, "", None), "an empty reply is a reply");
     assert_eq!(object(&d.join("pcvx_t3.xml"))["text"], "");
     assert!(link.send_translations_state(&states()));
     assert_eq!(
@@ -70,10 +70,10 @@ fn prefab_messages() {
                                                               {"from": "ko", "to": "en", "state": "downloading", "progress": 0.43}]})
     );
     // (an id past a u32: written as it is)
-    assert!(link.send_translation(123456789012345, "x"));
+    assert!(link.send_translation(123456789012345, "x", None));
     assert_eq!(object(&d.join("pcvx_t5.xml"))["id"], 123456789012345i64);
     // (a long translation: cut at TRANSLATION_MAX characters)
-    assert!(link.send_translation(9, &"é".repeat(TRANSLATION_MAX + 50)));
+    assert!(link.send_translation(9, &"é".repeat(TRANSLATION_MAX + 50), None));
     assert_eq!(object(&d.join("pcvx_t6.xml"))["text"], "é".repeat(TRANSLATION_MAX));
     // (acked: gone, like every object)
     link.on_feed(&feed(3, 4, 1), "local-proximity-chat");
@@ -90,7 +90,7 @@ fn json_messages() {
     link.start();
     link.on_feed(&feed(1, 0, 1), "");
     assert!(std::fs::read_to_string(d.join("talky_t1.json")).unwrap().starts_with("{\"type\":\"hello\""));
-    assert!(link.send_translation(7, "Hi \"there\""));
+    assert!(link.send_translation(7, "Hi \"there\"", None));
     assert_eq!(
         std::fs::read_to_string(d.join("talky_t2.json")).unwrap(),
         "{\"type\":\"translation\",\"id\":7,\"text\":\"Hi \\\"there\\\"\"}\n"
@@ -101,7 +101,7 @@ fn json_messages() {
         "{\"type\":\"translations_status\",\"translations\":[{\"from\":\"ja\",\"to\":\"en\",\"state\":\"ready\"},\
          {\"from\":\"ko\",\"to\":\"en\",\"state\":\"downloading\",\"progress\":0.43}]}\n"
     );
-    assert!(link.send_translation(5_000_000_000, "x"));
+    assert!(link.send_translation(5_000_000_000, "x", None));
     assert_eq!(
         std::fs::read_to_string(d.join("talky_t4.json")).unwrap(),
         "{\"type\":\"translation\",\"id\":5000000000,\"text\":\"x\"}\n"
@@ -167,7 +167,7 @@ fn run_files(uses: Value) -> (Feed, Vec<String>) {
     let f = g.feed().unwrap();
     let mut names: Vec<String> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     names.sort();
-    assert!(g.send_translation(7, "Hello"));
+    assert!(g.send_translation(7, "Hello", None));
     assert!(g.send_translations_state(&states()));
     g.stop();
     let _ = std::fs::remove_dir_all(&d);
@@ -237,7 +237,7 @@ fn socket_feed_fields() {
 
 #[test]
 fn socket_messages() {
-    assert_eq!(api::translation(7, "Hello"), r#"{"type":"translation","id":7,"text":"Hello"}"#, "\"type\" first");
+    assert_eq!(api::translation(7, "Hello", None), r#"{"type":"translation","id":7,"text":"Hello"}"#, "\"type\" first");
     assert_eq!(
         serde_json::from_str::<Value>(&api::translations_status(&states())).unwrap(),
         json!({"type": "translations_status", "translations": [{"from": "ja", "to": "en", "state": "ready"},
@@ -256,7 +256,7 @@ fn socket_messages() {
     )
     .unwrap();
     let mut g = SocketGame::new(Arc::new(profile), false, Arc::new(Sink::default()), kd_common::null_log());
-    assert!(!g.send_translation(1, "x"), "no client: false");
+    assert!(!g.send_translation(1, "x", None), "no client: false");
     g.start();
     let t0 = Instant::now();
     let s = loop {
@@ -281,7 +281,7 @@ fn socket_messages() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(g.feed().unwrap().to_translate, [(4, "はい".to_string())]);
-    assert!(g.send_translation(4, " Yes "));
+    assert!(g.send_translation(4, " Yes ", None));
     assert!(g.send_translations_state(&states()[..1]));
     let mut got = Vec::new();
     for _ in 0..2 {

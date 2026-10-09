@@ -138,6 +138,9 @@ struct App {
     /// a community game mod to remove, once the player confirms
     removing: Option<kd_games::GameKind>,
     profile_msg: String,
+    /// a code typed to join a hosted game, and the one joined (PROTOCOL.md "Hub"; not kept between runs)
+    join_input: String,
+    joined: Option<String>,
 }
 
 impl App {
@@ -187,6 +190,8 @@ impl App {
             preview: None,
             removing: None,
             profile_msg: String::new(),
+            join_input: String::new(),
+            joined: None,
         };
         app.kinds = kd_games::games();
         app.langs = app
@@ -217,7 +222,10 @@ impl App {
 
     // ---- the runtime
     fn start_game(&mut self) {
-        let kind = kd_games::by_id(&self.game_id);
+        let kind = match &self.joined {
+            Some(code) => kd_games::GameKind::joined(code),
+            None => kd_games::by_id(&self.game_id),
+        };
         let opts = Options {
             out_device: Self::device(&self.out),
             mic_device: Self::device(&self.mic),
@@ -228,9 +236,11 @@ impl App {
         let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
         let (found, where_) = rt.game.lock().unwrap().locate();
         self.where_text = if found { format!("{}: {where_}", kind.name) } else { where_ };
-        self.game_id = kind.id.clone();
-        self.settings.set("game", kind.id.clone());
-        self.settings.save();
+        if self.joined.is_none() {
+            self.game_id = kind.id.clone();
+            self.settings.set("game", kind.id.clone());
+            self.settings.save();
+        }
         self.kind = kind;
         self.rt = Some(rt);
     }
@@ -493,6 +503,7 @@ impl App {
         let mut switch = None;
         let mut remove = None;
         let mut add = false;
+        let mut join = None;
         ui.horizontal(|ui| {
             let resp = theme::game_button(ui, &kind.name, &kind.mod_name, 330.0);
             egui::Popup::from_toggle_button_response(&resp).width(360.0).show(|ui| {
@@ -527,6 +538,20 @@ impl App {
                     }
                 });
                 ui.label(RichText::new("A game mod made for Koetama comes with a profile file (.json): add it here.").size(12.0).color(theme::MUTED));
+                ui.separator();
+                ui.label(RichText::new("JOIN A HOSTED GAME").size(11.5).family(theme::semibold()).color(theme::MUTED));
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut self.join_input).hint_text("K7QF-4MXA").desired_width(130.0));
+                    let ok = kd_voice::hub::normalize_code(&self.join_input).is_some();
+                    if ui.add_enabled(ok, egui::Button::new("Join")).clicked() {
+                        join = Some(self.join_input.trim().to_uppercase());
+                    }
+                });
+                ui.label(
+                    RichText::new("For a game whose mod runs only on the host's PC (Tabletop Simulator): its game shows you a code.")
+                        .size(12.0)
+                        .color(theme::MUTED),
+                );
             });
             let (text, colour) = match &self.status {
                 Some(st) if !st.error.is_empty() => (st.error.clone(), theme::BAD),
@@ -540,6 +565,13 @@ impl App {
         });
         if let Some(id) = switch {
             self.switch_game(&id);
+        }
+        if let Some(code) = join {
+            if let Some(mut rt) = self.rt.take() {
+                rt.stop();
+            }
+            self.joined = Some(code);
+            self.start_game();
         }
         if let Some(k) = remove {
             self.removing = Some(k);
@@ -564,6 +596,7 @@ impl App {
         if let Some(mut rt) = self.rt.take() {
             rt.stop();
         }
+        self.joined = None;
         self.game_id = id.to_string();
         self.start_game();
     }

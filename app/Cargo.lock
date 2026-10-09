@@ -2177,6 +2177,7 @@ version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "ureq 3.4.2",
 ]
 
@@ -2185,6 +2186,7 @@ name = "kd-games"
 version = "0.3.1"
 dependencies = [
  "kd-common",
+ "kd-voice",
  "regex",
  "serde_json",
  "windows-sys 0.61.2",
@@ -2234,6 +2236,7 @@ dependencies = [
  "kd-common",
  "opus-rs",
  "rustls",
+ "serde_json",
  "tungstenite",
  "webpki-roots 0.26.11",
 ]

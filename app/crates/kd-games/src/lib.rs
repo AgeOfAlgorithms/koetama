@@ -9,6 +9,7 @@
 pub mod api;
 pub mod files;
 pub mod http;
+pub mod joined;
 pub mod profile;
 pub mod socket;
 pub mod steam;
@@ -59,7 +60,8 @@ pub trait Game: Send + Sync {
 
     /// the translation of the feed's line `id` (PROTOCOL.md "Translation"; "" = nothing to show - exactly one per
     /// id). False if no game is listening
-    fn send_translation(&self, _id: i64, _text: &str) -> bool {
+    /// rule: the translation used (from, to), with a text
+    fn send_translation(&self, _id: i64, _text: &str, _rule: Option<(&str, &str)>) -> bool {
         false
     }
 
@@ -68,9 +70,15 @@ pub trait Game: Send + Sync {
         false
     }
 
-    /// the voice chat's link to the relay, for the game to show: "off" (no room), "connecting", "connected",
-    /// "unreachable" (the last tries failed: still trying). Called with each change.
-    fn set_voice_state(&self, _state: &str) {}
+    /// A STANDING object (api::voice, api::status: kind "voice", "status"): sent now when it changed, and again after
+    /// each new session's hello (the game always knows the latest). Called with each change.
+    fn set_standing(&self, _kind: &'static str, _object: String) {}
+
+    /// Any other object for the game (api::talking, a hub's join_code / player, a hub's player's objects). False if no
+    /// game is listening
+    fn send_object(&self, _object: String) -> bool {
+        false
+    }
 
     /// {test voice id: its wav file}: the recorded voices the game's test speakers play (the program loads
     /// them with kd_audio::load_wav). Blocking: the first call makes them (PowerShell, a few seconds each)
@@ -158,6 +166,8 @@ pub struct GameKind {
     pub translate: bool,
     /// the profile itself
     pub profile: Arc<Profile>,
+    /// a game hosted on another PC, joined with this code (PROTOCOL.md "Hub": GameKind::joined)
+    pub join_code: Option<String>,
 }
 
 impl std::fmt::Debug for GameKind {
@@ -188,12 +198,24 @@ impl GameKind {
             speech: profile.speech,
             translate: profile.translate,
             profile: Arc::new(profile),
+            join_code: None,
         }
+    }
+
+    /// A game hosted on another PC, whose host's game showed this player `code` (PROTOCOL.md "Hub").
+    pub fn joined(code: &str) -> GameKind {
+        let mut k = GameKind::from_profile(joined::profile(), true, None);
+        k.summary = vec![format!("joins the game hosted with the code {code}, through the relay")];
+        k.join_code = Some(code.to_string());
+        k
     }
 
     /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
     /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
     pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game> {
+        if let Some(code) = &self.join_code {
+            return Box::new(joined::JoinedGame::new(self.profile.clone(), code.clone(), sink, log));
+        }
         match &self.profile.connector {
             Connector::Files(_) => Box::new(files::FilesGame::with_paths(
                 self.profile.clone(),

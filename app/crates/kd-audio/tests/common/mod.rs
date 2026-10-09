@@ -58,7 +58,7 @@ pub fn ones() -> HashMap<i64, Clip> {
 
 /// A speaker's settings: (src, talk, gain, az, el, muffle) start as test_helper.py's feed() and are changed by `f`.
 pub fn feed_with(vol: f64, f: impl FnOnce(&mut Speaker)) -> Feed {
-    let mut s = Speaker { src: 1, talk: true, gain: 1.0, az: 0.0, el: 0.0, muffle: 0.0 };
+    let mut s = Speaker { src: 1, talk: true, gain: 1.0, az: 0.0, el: 0.0, muffle: 0.0, ..Default::default() };
     f(&mut s);
     Feed { seq: 1, vol, sid: 1, ack: 0, ping: 1, speakers: [(7, s)].into_iter().collect(), ..Default::default() }
 }

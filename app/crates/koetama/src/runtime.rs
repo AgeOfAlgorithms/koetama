@@ -26,7 +26,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Makes the microphone-like the listener hears instead of the real microphone (--mic-wav, --auto-speech).
-pub type MicSource = Box<dyn FnOnce(Listener, Log) -> Box<dyn Mic>>;
+/// (the voice chat too, when the game plays voices: a recording can be heard by the other players as the microphone is)
+pub type MicSource = Box<dyn FnOnce(Listener, Log, Option<kd_voice::Voice>) -> Box<dyn Mic>>;
 
 pub struct Options {
     pub threads: usize,
@@ -128,11 +129,14 @@ pub struct Runtime {
     said: Arc<Mutex<Said>>,
     /// the voice chat (a game that plays voices)
     voice: Option<kd_voice::Voice>,
+    /// the hub, for a host whose feed lists other players (PROTOCOL.md "Hub"; not when this player joined one)
+    hub: Option<Arc<Mutex<crate::hub::Hub>>>,
     /// the game session the last voice room was sent for
     room_sid: Option<i64>,
     /// the voice chat's state as last told to the game (and whether the game was connected then)
-    voice_told: Option<&'static str>,
-    voice_told_to: bool,
+    voice_told: String,
+    /// the status object as last told
+    status_told: String,
     /// the translator (a game that uses translation)
     translator: Option<Translator>,
     /// the rules' states as last told to the game: (its session then, what was told)
@@ -161,13 +165,32 @@ struct Sink {
     mixer: MixerSink,
     listener: Arc<Mutex<Option<Listener>>>,
     voice: Option<kd_voice::Voice>,
+    hub: Option<Arc<Mutex<crate::hub::Hub>>>,
     /// the translator, and the session its ids belong to
     translator: Option<Translator>,
     sid: Mutex<Option<i64>>,
 }
 
 impl kd_common::feed::FeedSink for Sink {
-    fn set_feed(&self, feed: kd_common::feed::Feed) {
+    fn set_feed(&self, mut feed: kd_common::feed::Feed) {
+        if let Some(v) = &self.voice {
+            // (positions: a player's loudness by the distance and the range their own Koetama announces - PROTOCOL.md
+            //  "Positions and ranges"; a gain the game gave wins)
+            let mine = feed.range;
+            for (rid, sp) in feed.speakers.iter_mut() {
+                if let (Some(d), false) = (sp.distance, sp.gain_given) {
+                    let range = v.range_of(*rid).or(sp.range).or(mine).unwrap_or(kd_common::feed::DEFAULT_RANGE);
+                    sp.gain = kd_common::feed::falloff(d, range);
+                }
+            }
+        }
+        if let Some(h) = &self.hub {
+            // (a host listing other players: a link and a code for each - PROTOCOL.md "Hub")
+            let mut h = h.lock().unwrap();
+            if !feed.players.is_empty() || !h.players().is_empty() {
+                h.set_players(&feed.players);
+            }
+        }
         if let Some(l) = self.listener.lock().unwrap().as_ref() {
             l.set_push_to_talk(if feed.mic { feed.ptt } else { None });
         }
@@ -208,6 +231,7 @@ impl Runtime {
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
         // (real voices: for a game that plays voices; the relay is KOETAMA_RELAY or Koetama's own)
         let voice = kind.voices.then(|| kd_voice::Voice::start(kd_voice::relay_url(), log.clone()));
+        let hub = kind.join_code.is_none().then(|| Arc::new(Mutex::new(crate::hub::Hub::new(kd_voice::relay_url(), log.clone()))));
         if let Some(v) = &voice {
             mixer.lock().unwrap().streams = Some(Box::new(v.playback()));
         }
@@ -221,8 +245,9 @@ impl Runtime {
                 Arc::new(move |e| {
                     let Some(game) = slot.lock().unwrap().clone() else { return };
                     match e {
-                        Event::Reply { id, text } => {
-                            game.lock().unwrap().send_translation(id, &text);
+                        Event::Reply { id, text, rule } => {
+                            let rule = rule.as_ref().map(|(f, t)| (f.as_str(), t.as_str()));
+                            game.lock().unwrap().send_translation(id, &text, rule);
                         }
                         Event::Status(rules) => {
                             tell_rules(&game, &rules, &told);
@@ -236,6 +261,7 @@ impl Runtime {
             mixer: MixerSink(mixer.clone()),
             listener: ptt_to.clone(),
             voice: voice.clone(),
+            hub: hub.clone(),
             translator: translator.clone(),
             sid: Mutex::new(None),
         });
@@ -273,9 +299,10 @@ impl Runtime {
             said: Arc::new(Mutex::new(Said::default())),
             voice,
             room_sid: None,
-            voice_told: None,
-            voice_told_to: false,
+            voice_told: String::new(),
+            status_told: String::new(),
             translator,
+            hub,
             rules_told,
         };
         if rt.kind.voices {
@@ -341,7 +368,7 @@ impl Runtime {
         match Listener::new(cb, models, true) {
             Ok(l) => {
                 self.mic = Some(match mic_source {
-                    Some(make) => make(l.clone(), self.log.clone()),
+                    Some(make) => make(l.clone(), self.log.clone(), self.voice.clone()),
                     None => Box::new(
                         Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone())
                             .with_voice(self.voice.clone()),
@@ -502,18 +529,56 @@ impl Runtime {
         }
     }
 
+    /// The voice chat for the game (PROTOCOL.md "Koetama -> game"): its state and the players in the room (a standing
+    /// object: on each change, again after each hello), and who starts or stops talking.
+    fn tell_voice(&mut self) {
+        let Some(v) = &self.voice else { return };
+        let object = kd_games::api::voice(v.status().state, &v.players());
+        let events = v.take_events();
+        let g = self.game.lock().unwrap();
+        if object != self.voice_told {
+            g.set_standing("voice", object.clone());
+            self.voice_told = object;
+        }
+        for e in events {
+            let kd_voice::VoiceEvent::Talking { id, talking } = e;
+            g.send_object(kd_games::api::talking(&id, talking));
+        }
+    }
+
+    /// Whether Koetama can hear the player yet (a standing object): the speech models, the microphone.
+    fn tell_status(&mut self) {
+        let speech = if self.listener.is_none() {
+            "off"
+        } else {
+            match *self.ready.lock().unwrap() {
+                Ready::Loading => "loading",
+                Ready::Loaded => "ready",
+                Ready::NotAsked if !self.said.lock().unwrap().error.is_empty() => "error",
+                Ready::NotAsked => "off",
+            }
+        };
+        let microphone = match self.mic.as_ref() {
+            None => "none",
+            Some(m) if m.is_open() => "open",
+            Some(_) => "closed",
+        };
+        let object = kd_games::api::status(speech, microphone);
+        if object != self.status_told {
+            self.game.lock().unwrap().set_standing("status", object.clone());
+            self.status_told = object;
+        }
+    }
+
     pub fn tick(&mut self) {
         self.send_room();
         self.tell_rules_again();
-        if let Some(v) = &self.voice {
-            // (the voice chat's link, for the game to show: each change, and again when the game reconnects)
-            let state = v.status().state;
-            let connected = self.game.lock().unwrap().connected();
-            if Some(state) != self.voice_told || connected != self.voice_told_to {
-                self.game.lock().unwrap().set_voice_state(state);
-                self.voice_told = Some(state);
-                self.voice_told_to = connected;
-            }
+        self.tell_voice();
+        self.tell_status();
+        if let Some(h) = &self.hub {
+            let g = self.game.lock().unwrap();
+            let sid = g.feed().map(|f| f.sid);
+            h.lock().unwrap().pump(&**g, sid);
         }
         let Some(l) = self.listener.clone() else {
             return;
@@ -596,7 +661,13 @@ impl Runtime {
             for (id, sp) in &f.speakers {
                 speakers.push(SpeakerStatus {
                     // (a real player: src 0, their player id)
-                    name: if sp.src == 0 { format!("player {id}") } else { g.speaker_name(sp.src) },
+                    name: if sp.src != 0 {
+                        g.speaker_name(sp.src)
+                    } else if !sp.name.is_empty() {
+                        sp.name.clone()
+                    } else {
+                        format!("player {}", if sp.id.text.is_empty() { id.to_string() } else { sp.id.text.clone() })
+                    },
                     talk: sp.talk,
                     gain: sp.gain,
                     az: sp.az,

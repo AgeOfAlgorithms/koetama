@@ -84,22 +84,24 @@ f = H.parse_feed(hexfeed(seq=42, volume=0.5, session=7, ack=3, ping=12, listen='
     dict(id=2001, test_voice=2, talking=True, gain=1.0, elevation=-3.5, muffle=0.25)]))
 check(f and f['seq'] == 42 and f['vol'] == 0.5 and f['sid'] == 7 and f['ack'] == 3 and f['ping'] == 12 and f['mic'] is True
       and f['ptt'] is None and len(f['speakers']) == 2
-      and f['speakers'][2001] == dict(src=2, talk=True, gain=1.0, az=0.0, el=-3.5, muffle=0.25)
-      and f['speakers'][2000]['talk'] is False,
+      and {k: v for k, v in f['speakers'][H.relay_id('', ('2001', True))].items() if k in ('src', 'talk', 'gain', 'az', 'el', 'muffle')}
+      == dict(src=2, talk=True, gain=1.0, az=0.0, el=-3.5, muffle=0.25)
+      and f['speakers'][H.relay_id('', ('2000', True))]['talk'] is False,
       'a feed (hex of the JSON) parses: sequence, volume, session, ack, ping, listen, each speaker (test voices)')
 f = H.parse_feed('{"type":"feed"}')
 check(f and f['speakers'] == {} and f['mic'] is False and f['lang'] == 'en' and f['live'] is True and f['vol'] == 1.0,
       'plain JSON too; every field missing: its default (listen off, en, live, volume 1)')
 f = H.parse_feed(hexfeed(listen='push_to_talk', talk_key=True, lang='zh', live=False, speakers=[dict(id=3, gain=0.5)]))
 check(f and f['mic'] is True and f['ptt'] is True and f['lang'] == 'zh' and f['live'] is False
-      and f['speakers'][3]['src'] == 0, 'push to talk with the key held; the language; no live words; a real player (no test voice)')
+      and f['speakers'][H.relay_id('', ('3', True))]['src'] == 0, 'push to talk with the key held; the language; no live words; a real player (no test voice)')
 check(H.parse_feed('garbage') is None and H.parse_feed(hexfeed(listen='sometimes')) is None
       and H.parse_feed(hexfeed(volume='loud')) is None and H.parse_feed('[1,2]') is None and H.parse_feed('7b') is None,
       'not hex or JSON, an unknown listen, a value of the wrong kind, not an object: refused')
 room, key = 'ab' * 16, 'cd' * 32
-f = H.parse_feed(hexfeed(room=room, key=key, me=7, to=[2, 2, 0, 70000, 3], region='weur'))
-check(f and f['room'] == room and f['me'] == 7 and f['to'] == [2, 3] and f['region'] == 'weur',
-      'the voice room; to: good ids, each once')
+f = H.parse_feed(hexfeed(room=room, key=key, me=7, to=[2, 2, 'ann', 7, 3], region='weur'))
+rid = lambda i: H.relay_id(room, (str(i), True) if isinstance(i, int) else (i, False))  # noqa: E731
+check(f and f['room'] == room and f['me'] == rid(7) and f['to'] == [rid(2), rid('ann'), rid(3)] and f['region'] == 'weur',
+      'the voice room; ids as the room numbers them; to: each once, not me')
 f = H.parse_feed(hexfeed(room=room, key='zz', me=7, region='weur'))
 check(f and f['room'] == '' and f['me'] == 0 and f['region'] == '', 'a bad key: no room (and no region)')
 f6 = H.parse_feed(hexfeed(translations=[dict(to='en', **{'from': 'ja'}), dict(to='en', **{'from': 'ko'}), dict(to='en', **{'from': 'zh'})],
@@ -110,6 +112,19 @@ A, B = hexfeed(seq=5, session=7, speakers=[dict(id=2000, test_voice=1, talking=T
 xml = ('<registry version="2.1.0">\n<savegame><mod>\n<local-proximity-chat>\n<pcmode value="s"/>\n<pcvx>\n\t<f value="%s"/>\n</pcvx>\n'
        '</local-proximity-chat>\n<steam-123>\n<pcvx>\n<f value="%s"/>\n</pcvx>\n</steam-123>\n</mod></savegame>\n</registry>\n' % (A, B)).encode()
 check(H.find_feeds(xml) == [('local-proximity-chat', A), ('steam-123', B)], 'both feeds in a savegame.xml are found, each with its copy of the mod (local, Workshop)')
+# string ids, room seeds, positions, ranges, a hub's players (PROTOCOL.md "Real voices", "Positions and ranges", "Hub")
+f = H.parse_feed(hexfeed(me='7656119800001', room_seed='lobby 42 + pw', range=[2, 10],
+                         listener=dict(position=[0, 0, 0], forward=[0, 0, 1], right=[1, 0, 0], up=[0, 1, 0]),
+                         speakers=[dict(id='7656119800002', position=[5, 0, 5], name='Ana'), dict(id='far', position=[0, 0, 50])]))
+room, key = H.room_from_seed('lobby 42 + pw')
+ana = f and f['speakers'][H.relay_id(room, ('7656119800002', False))]
+check(f and f['room'] == room and len(room) == 32 and len(key) == 64 and f['me'] == H.relay_id(room, ('7656119800001', False))
+      and abs(ana['az'] - 45) < 1e-9 and abs(ana['distance'] - 50 ** 0.5) < 1e-9 and ana['name'] == 'Ana'
+      and abs(ana['gain'] - ((10 - 50 ** 0.5) / 8) ** 2) < 1e-9 and f['to'] == [H.relay_id(room, ('7656119800002', False))],
+      'a seed makes the room; string ids; positions give the direction, distance and loudness; "to": who is within reach')
+hub = H.parse_feed(hexfeed(me=1, room_seed='s', players=[dict(id=2, listen='always'), dict(id='bob', room_seed='other')]))
+check(hub and len(hub['players']) == 2 and hub['players'][0]['room'] == hub['room'] and hub['players'][0]['me_id'] == ('2', True)
+      and hub['players'][1]['room'] == H.room_from_seed('other')[0], "a hub's players: the host's room unless their own")
 
 # ---- the reader: what is in the file at the start is not live; a change is
 with tempfile.TemporaryDirectory() as tmp:
@@ -191,11 +206,11 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
           and obj(local, 12) == dict(type='translations_status', translations=[{'from': 'ja', 'to': 'en', 'state': 'downloading', 'progress': 0.43}]),
           '... the translation (stripped), the states (progress to 1/100)')
     link.set_voice('connected')
-    check(obj(local, 13) == dict(type='voice', state='connected') and link.set_voice('connected') is None and 'pcvx_t14.xml' not in names(local),
+    check(obj(local, 13) == dict(type='voice', state='connected', players=[]) and link.set_voice('connected') is None and 'pcvx_t14.xml' not in names(local),
           'the voice chat\'s state: an object when it changes, nothing when it does not')
     link.on_feed(fd(ping=1, sid=6, ack=0), 'local-proximity-chat')
     check(not any('pcvx_t%d.xml' % n in names(local) for n in range(3, 14)) and 'pcvx_p1' in names(local) and obj(local, 1)['type'] == 'hello'
-          and obj(local, 2) == dict(type='voice', state='connected') and link.n == 2,
+          and obj(local, 2) == dict(type='voice', state='connected', players=[]) and link.n == 2,
           'a new session (a level start): unread objects dropped, numbers start over with the hello, then the voice state')
     link2 = H.Link([local, shop], log=lambda s: None)
     link2.on_feed(fd(sid=6, ack=4, ping=9), 'local-proximity-chat')

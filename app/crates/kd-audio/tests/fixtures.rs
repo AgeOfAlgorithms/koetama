@@ -104,6 +104,7 @@ fn feed_of(v: &Value) -> Feed {
                 az: s["az"].as_f64().unwrap(),
                 el: s["el"].as_f64().unwrap(),
                 muffle: s["muffle"].as_f64().unwrap(),
+                ..Default::default()
             },
         );
     }

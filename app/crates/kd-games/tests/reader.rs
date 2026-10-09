@@ -139,7 +139,8 @@ fn teardown_module_end_to_end() {
     let n = g.updates();
     assert!(g.connected() && g.wants_mic() && g.language() == "ru" && !g.live_words() && n >= 1);
     assert!(mods.join("pcvx_p7").exists(), "the ping answered");
-    assert_eq!(sink.0.lock().unwrap()[0].speakers[&3].az, 90.0);
+    let rid = kd_common::feed::relay_id("", &kd_common::feed::PlayerId::number(3));
+    assert_eq!(sink.0.lock().unwrap()[0].speakers[&rid].az, 90.0);
     assert!(mods.join("pcvx_t1.xml").exists(), "the session's hello");
     assert!(g.send('f', 1, "hello", None, None) && mods.join("pcvx_t2.xml").exists());
     assert!(g.send_text("typed") && mods.join("pcvx_t3.xml").exists());

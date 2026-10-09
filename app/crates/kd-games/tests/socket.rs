@@ -126,9 +126,10 @@ fn socket_end_to_end() {
     wait_until("the feed arrives", || g.feed().is_some());
     let f = g.feed().unwrap();
     assert!(f.vol == 0.5 && f.mic && f.lang == "ru" && !f.live && f.seq == 1);
-    let s7 = &f.speakers[&7];
+    let rid = |n: i64| kd_common::feed::relay_id("", &kd_common::feed::PlayerId::number(n));
+    let s7 = &f.speakers[&rid(7)];
     assert!(s7.src == 1 && s7.talk && s7.gain == 0.8 && s7.az == 90.0 && s7.el == -5.5 && s7.muffle == 0.25);
-    let s8 = &f.speakers[&8];
+    let s8 = &f.speakers[&rid(8)];
     assert!(s8.src == 2 && !s8.talk && s8.gain == 1.0 && s8.az == 0.0 && s8.muffle == 0.0, "defaults");
     assert_eq!(sink.0.lock().unwrap().len(), 1);
     assert!(g.connected() && g.wants_mic() && g.language() == "ru" && !g.live_words() && g.updates() == 1);
@@ -279,17 +280,21 @@ fn voice_room_fields() {
     // the room, key, me and to (PROTOCOL.md "Real voices"): kept when all good, else no room; bad ids in "to" skipped
     let p = |s: &str| kd_games::socket::parse_socket_feed(&serde_json::from_str(s).unwrap(), 1);
     let (room, key) = ("0123456789abcdef".repeat(2), "fedcba9876543210".repeat(4));
-    let f = p(&format!(r#"{{"room":"{room}","key":"{key}","me":7,"to":[2,3,2,0,70000,4]}}"#)).unwrap();
-    assert!(f.has_room() && f.room == room && f.key == key && f.me == 7 && f.to == vec![2, 3, 4]);
+    let f = p(&format!(r#"{{"room":"{room}","key":"{key}","me":7,"to":[2,3,2,"ann",7,4]}}"#)).unwrap();
+    let rid = |id: kd_common::feed::PlayerId| kd_common::feed::relay_id(&room, &id);
+    let n = kd_common::feed::PlayerId::number;
+    assert!(f.has_room() && f.room == room && f.key == key && f.me == rid(n(7)));
+    assert_eq!(f.to, vec![rid(n(2)), rid(n(3)), rid(kd_common::feed::PlayerId::string("ann")), rid(n(4))], "the room's numbers, each once, not me");
     let none = p(&format!(r#"{{"room":"{}","key":"{key}","me":7}}"#, room.to_uppercase())).unwrap();
     assert!(!none.has_room() && none.key.is_empty() && none.me == 0);
     assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}"}}"#)).unwrap().has_room(), "no id: no room");
-    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":65536}}"#)).unwrap().has_room());
+    assert!(p(&format!(r#"{{"room":"{room}","key":"{key}","me":"76561198000000001"}}"#)).unwrap().has_room(), "a string id");
+    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":7.5}}"#)).unwrap().has_room(), "not an id: no room");
     assert!(!p(r#"{"listen":"always"}"#).unwrap().has_room());
     let many: Vec<String> = (1..=70).map(|i| i.to_string()).collect();
     assert_eq!(p(&format!(r#"{{"to":[{}]}}"#, many.join(","))).unwrap().to.len(), 64, "at most 64");
     assert!(p(r#"{"room":7}"#).is_err() && p(r#"{"to":[1.5]}"#).is_err() && p(r#"{"to":3}"#).is_err());
-    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":"7"}}"#)).unwrap().has_room(), "a bad me: no room");
+    assert!(!p(&format!(r#"{{"room":"{room}","key":"{key}","me":""}}"#)).unwrap().has_room(), "an empty id: no room");
 }
 
 #[test]

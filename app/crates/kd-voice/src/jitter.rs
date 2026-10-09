@@ -218,7 +218,7 @@ mod tests {
 
     /// packet seq: three frames whose values are seq*10 + 0, 1, 2
     fn pk(seq: u32, last: bool) -> Packet {
-        Packet { seq, last, frames: (0..3).map(|i| vec![(seq * 10 + i) as u8]).collect() }
+        Packet { seq, last, frames: (0..3).map(|i| vec![(seq * 10 + i) as u8]).collect(), ..Default::default() }
     }
 
     /// pull n frames' worth, one frame at a time -> each frame's value (None: silence)
@@ -311,12 +311,12 @@ mod tests {
     #[test]
     fn a_restarted_sender_and_wrapping_seq() {
         let mut j = Jitter::new(Fake);
-        j.insert(Packet { seq: u32::MAX, last: false, frames: vec![vec![1]; 3] }, 0.0);
-        j.insert(Packet { seq: 0, last: true, frames: vec![vec![2]; 3] }, 0.0);
+        j.insert(Packet { seq: u32::MAX, last: false, frames: vec![vec![1]; 3], ..Default::default() }, 0.0);
+        j.insert(Packet { seq: 0, last: true, frames: vec![vec![2]; 3], ..Default::default() }, 0.0);
         let got = play(&mut j, 7, 0.0);
         assert_eq!(got, [1.0, 1.0, 1.0, 2.0, 2.0, 2.0].map(Some).into_iter().chain([None]).collect::<Vec<_>>());
         // (the sender's Koetama started over: its seq is far from the last one) - not late, a new start
-        j.insert(Packet { seq: 2_000_000, last: true, frames: vec![vec![7]; 3] }, 1.0);
+        j.insert(Packet { seq: 2_000_000, last: true, frames: vec![vec![7]; 3], ..Default::default() }, 1.0);
         assert_eq!(j.late, 0);
         assert_eq!(play(&mut j, 3, 1.0), [7.0, 7.0, 7.0].map(Some).to_vec());
     }
@@ -325,7 +325,7 @@ mod tests {
     fn short_stretch_and_odd_pull_sizes() {
         let mut j = Jitter::new(Fake);
         // (one frame, last: under START but complete - it plays)
-        j.insert(Packet { seq: 9, last: true, frames: vec![vec![5]] }, 0.0);
+        j.insert(Packet { seq: 9, last: true, frames: vec![vec![5]], ..Default::default() }, 0.0);
         let mut out = vec![0.0; 700];
         assert!(j.pull(&mut out, 0.0) && out.iter().all(|&s| s == 5.0));
         assert!(j.pull(&mut out, 0.0) && out[..260].iter().all(|&s| s == 5.0) && out[260..].iter().all(|&s| s == 0.0));

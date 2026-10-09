@@ -11,6 +11,7 @@ mod console;
 mod dialog;
 mod fonts;
 mod gui;
+mod hub;
 mod instance;
 mod mic;
 mod runtime;

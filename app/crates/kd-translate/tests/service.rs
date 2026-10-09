@@ -151,7 +151,7 @@ impl Rig {
             .unwrap()
             .iter()
             .filter_map(|e| match e {
-                Event::Reply { id: i, text } if *i == id => Some(text.clone()),
+                Event::Reply { id: i, text, .. } if *i == id => Some(text.clone()),
                 _ => None,
             })
             .collect()

@@ -23,8 +23,9 @@ The game's whole state for Koetama, sent again whenever something in it changes 
 counts a game as gone after 1.5 s without one). Every field is optional; a missing one has its default.
 
     {"type":"feed","volume":1,"listen":"push_to_talk","talk_key":false,"lang":"en","live":true,
-     "speakers":[{"id":2,"gain":0.8,"azimuth":30,"elevation":0,"muffle":0.1}],
-     "room":"<32 hex>","key":"<64 hex>","me":1,"to":[2],"region":"",
+     "me":"76561198000000001","room_seed":"lobby 1234 + its password","range":[10,30],
+     "listener":{"position":[0,1.7,0],"forward":[0,0,1],"right":[1,0,0],"up":[0,1,0]},
+     "speakers":[{"id":"76561198000000002","name":"Ana","position":[3,1.7,8],"muffle":0.1}],
      "translations":[{"from":"ja","to":"en"}],"to_translate":[{"id":7,"text":"こんにちは"}]}
 
 | field | default | meaning |
@@ -34,15 +35,22 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `talk_key` | false | push to talk: true while the talk key is held. Send a feed as soon as it changes. The microphone stays open, so a line starts from just before the key arrived (the feed's delay costs no first word) and ends 0.25 s after it is let go |
 | `lang` | `"en"` | the language the player speaks (`en`, `ru`, `zh`, `yue`, `ja`, `ko`, `es`, ... or `auto`: Koetama finds it, even several in one line) |
 | `live` | true | the words so far while the player talks (false: only the finished line; less CPU) |
-| `speakers` | none | the other players this player hears now, and how: `id` (required: their player id), `gain` 0..1 (0 or not listed: not heard), `azimuth` (degrees from where the camera looks: 0 ahead, 90 right, ±180 behind), `elevation` (degrees up), `muffle` 0..1 (0 clear; behind walls, or where words are garbled). A **test voice** instead of a player: `"test_voice": n` (one of the profile's `test_voices`) and `"talking": true` while it should play |
-| `room`, `key` | none | the session's voice room: 32 and 64 lower-case hex digits (Koetama makes them: "Real voices"); none: no voices sent or heard |
-| `me` | none | this player's id in the game session, 1..65535 |
-| `to` | none | the player ids who should get this player's voice right now (the game decides who is in range); empty: nobody |
+| `speakers` | none | the other players this player can hear, and how: `id` (required: their player id), then EITHER `position` (with `listener`: Koetama works out the direction, and the loudness from the distance and that player's `range` - "Positions and ranges") OR `azimuth` (degrees from where the camera looks: 0 ahead, 90 right, ±180 behind) and `elevation` (degrees up); `gain` 0..1 (given: used as it is; 0: not heard), `muffle` 0..1 (0 clear, 1 the most muffled; behind a wall ~0.7, or where words are garbled), `name` (shown in Koetama's window), `range` (theirs, until their own Koetama announces one). A **test voice** instead of a player: `"test_voice": n` (one of the profile's `test_voices`), `"talking": true` while it should play, and optionally its own `range` |
+| `me` | none | this player's id in the game session: a whole number or a string of 1 to 64 characters (at most 255 bytes of UTF-8; a Steam id, a name) - the same one the other players' games use for this player |
+| `name` | `""` | this player's name (shown in the other players' Koetama windows) |
+| `room_seed` | none | the session's voice room, as any string of 1 to 256 characters every player of the session has (a lobby id and its password, a server's address and world): each Koetama makes the same room and key from it. Anyone who knows the seed can listen: put something private in it ("Real voices") |
+| `room`, `key` | none | instead of `room_seed`: the room and key themselves, 32 and 64 lower-case hex digits (the ones Koetama offers in a `room` object, shared by the game: "Real voices"). Neither: no voices sent or heard |
+| `listener` | none | where this player hears from: `{"position": [x,y,z], "forward": [x,y,z], "right": [x,y,z], "up": [x,y,z]}` in the game's own units and axes (the three directions settle which way is right; they need not be unit length) |
+| `range` | none | how far this player's voice reaches now: `[near, far]` in the game's units - full loudness within `near`, nothing beyond `far` (a whisper `[1,4]`, talk `[8,25]`, a shout `[20,70]`). Other players' Koetamas use it for this player's loudness |
+| `to` | (with `range` and positions: everyone within `far`) | the player ids who should get this player's voice right now; empty: nobody. Left out: with `range`, `listener` and speakers' positions, Koetama sends to the speakers within `far` (and 10 % more); else nobody |
 | `region` | `""` | where the voice room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; `""` (or anything else): wherever the first player is. Every player of a session sends the same one |
 | `translations` | none | up to two `{"from", "to"}` (language codes): "Translation" |
 | `to_translate` | none | the chat lines to translate: `{"id", "text"}`, at most 16, each at most 400 bytes of UTF-8. Ids are the game's (1 to 15 digits, unique in the session). Keep a line in every feed until its `translation` arrives (drop it after ~10 s without one) |
 
-Bad values are skipped or replaced by the default (a bad room, key or `me`: no room).
+Bad values are skipped or replaced by the default (a bad room, key or `me`: no room). Numbers may be written as
+decimals (`1.0`) and an empty list as `{}` (Lua's JSON libraries do both).
+
+A **hub** (a game whose script runs only on the host, "Hub") adds `players`: one feed per other player.
 
 ### Koetama -> game
 
@@ -55,9 +63,13 @@ Each object has a `"type"` first.
 | `{"type":"speech","kind":"live","utt":4,"text":"hello there","times":[0.1,0.55],"ago":1.02}` | the words so far, while they talk (only with `live`) |
 | `{"type":"speech","kind":"final","utt":4,"text":"hello there everyone","times":[0.1,0.55,0.9],"ago":2.4}` | the finished line (`text` may be `""`: nothing made out; the live words go) |
 | `{"type":"room","room":"<32 hex>","key":"<64 hex>"}` | a new voice room, once per session: "Real voices" |
-| `{"type":"voice","state":"connected"}` | the voice chat's link changed: `off`, `connecting`, `connected` or `unreachable` (the last tries failed; it keeps trying) |
-| `{"type":"translation","id":7,"text":"Hello"}` | the translation of line `id`, exactly one per id. `""`: nothing to show (nothing in a source language, the same as the line, or a bad line). A line that comes while a translation's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
+| `{"type":"voice","state":"connected","players":["7656...02"]}` | the voice chat changed: `state` `off`, `connecting`, `connected`, `unreachable` (the last tries failed; it keeps trying) or `id_taken` (another player's id clashes with this one in this room: no voice this session - "Real voices"); `players`: the other players whose Koetama is in the room (their ids as the game gives them) |
+| `{"type":"talking","id":"7656...02","talking":true}` | a player's voice started (`true`) or stopped (`false`) being heard here - and this player's own (`id` = `me`) being sent. For speaking icons over heads |
+| `{"type":"status","speech":"ready","microphone":"open"}` | after the hello, and when it changes: `speech` `off` (the game does not ask for it), `loading` (the models load; the first time they are downloaded), `ready` or `error`; `microphone` `closed`, `open` or `none` (no microphone). Lines said before `ready` and `open` are not heard |
+| `{"type":"translation","id":7,"text":"Hello","from":"es","to":"en"}` | the translation of line `id`, exactly one per id; `from` / `to`: the translation that was used (left out with `""`). `""`: nothing to show (nothing in a source language, the same as the line, or a bad line). A line that comes while a translation's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
 | `{"type":"translations_status","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}` | each translation's state, when one changes (at most every 0.5 s while downloading): `ready`, `downloading` (with `progress` 0..1), `loading`, `unavailable` (no model for it) or `error` (tried again after a minute) |
+| `{"type":"join_code","player":"7656...02","code":"K7QF-4MXA"}` | a hub only ("Hub"): the code that player types into their Koetama to join |
+| `{"type":"player","player":"7656...02","joined":true}` | a hub only: that player's Koetama joined (or left) |
 
 **Speech.** `utt` numbers a line (its `start`, `live` and `final` share it). **Live words only grow**: about once a
 second Koetama reads the line so far again and sends only the words two reads agree on, never the newest one, and
@@ -71,13 +83,24 @@ of the speaker ("... the rest" arriving mid-sentence, "the start ..." walking aw
 
 Players' voices travel between their Koetamas through **the relay**, a Cloudflare Worker (`relay/`;
 `wss://koetama-relay.ageofalgorithms.workers.dev`, or `KOETAMA_RELAY`). The game never carries audio. It tells its
-player's Koetama the room (`room`, `key`, `me`, `region`), who should get this player's voice now (`to`), and how loud
-each other player is (`speakers`).
+player's Koetama the session's room, this player's id (`me`), and where everyone is ("Positions and ranges") or how
+loud and from where each other player is heard (`speakers`) and who should get this player's voice (`to`).
 
-**Who makes the room.** A game script has no good random numbers, so Koetama makes the room: once per session it
-sends a `room` object with a fresh random room and key. The game gives ONE room to every player of the session (in
-Teardown: each player's game forwards its offer to the host, the host keeps the first and shares it), and every
-player's feed names it. Any player with Koetama can make the room; the key reaches only the players in the session.
+**One room for the session**, two ways:
+- **`room_seed`**: a string every player's game already has - a lobby or match id, a server's address and world name,
+  a co-op password. Each Koetama makes the room and key from it (room = the first 32 hex digits of
+  HMAC-SHA256(seed, "koetama room"), key = HMAC-SHA256(seed, "koetama key")). No mod networking needed. Whoever knows
+  the seed can listen, so mix in something private: a lobby password, a key the host's mod shares, the session's
+  start time and the players' ids together.
+- **`room` and `key`**: once per session Koetama offers a fresh random room in a `room` object (a game script has no
+  good random numbers). The game gives ONE room to every player (in Teardown: each player's game forwards its offer to
+  the host, the host keeps the first and shares it), and every player's feed names it. Private by construction.
+
+**Player ids** are the game's own (`me`, speakers' `id`, `to`): numbers or strings. Inside the room each one is a
+16-bit number, the first two bytes of SHA-256("koetama id:" + room + ":" + id) (1..65535; a number id as its decimal
+digits), so every Koetama names every player alike. Two ids of one room may meet on one number (about 1 in 500 with 12
+players): the relay keeps the newer connection and closes the older one, whose Koetama is told `id_taken` and stays
+out of that room (`voice` object) - it does not fight back; the next session has another room, and other numbers.
 
 **Sending.** Koetama connects to `<relay>/v1/room/<room>?me=<me>[&region=<region>]` (a WebSocket) while the feed
 names a room, reconnecting after a drop (1, 2, 4 ... 30 s), with a text `ping` every 20 s. It sends while the player
@@ -89,17 +112,60 @@ detector hears speech, from 0.3 s before it noticed), only to `to`. Audio: Opus,
   `[1][from as u16 big-endian][payload]`. The relay forwards a packet to the named players only, never back to the
   sender, and never looks inside.
 - **Payload** = `nonce (12 random bytes) | ChaCha20-Poly1305(key, nonce, plaintext, aad = from as u16 big-endian)`;
-  a packet that does not decrypt is dropped. Plaintext: `[1][seq: u32 BE][flags: u8, 1 = the last packet of a
-  stretch of talking][k][k x (len: u16 BE, Opus bytes)]`.
+  a packet that does not decrypt is dropped. Plaintext (version 2): `[2][seq: u32 BE][flags: u8: 1 = the last packet
+  of a stretch of talking, 2 = presence (no audio), 4 = the sender's id is a number][near: f32 BE][far: f32 BE][n: u8][the sender's id: n bytes UTF-8]
+  [k][k x (len: u16 BE, Opus bytes)]` - the sender's `range` (0, 0: none given) and its game id travel with its voice.
+  **Presence:** every 5 s a packet without audio goes to every player in the feed's `speakers` and `to`, so the
+  others know who is in the room (`voice` `players`: heard from in the last 15 s).
 - **Playing:** per sender a jitter buffer (starts at 60 ms buffered and 40 ms after the first packet; at most
-  300 ms), Opus loss concealment for a missing packet, ended 0.5 s after the last packet. Mixed with the feed's
-  `gain`, `azimuth`, `elevation` and `muffle` for that player.
+  300 ms), Opus loss concealment for a missing packet, ended 0.5 s after the last packet. Mixed with that player's
+  loudness, direction and muffle (the feed's, or worked out from positions).
 
 **The relay** (`relay/`): one Durable Object per room (by name; with a region: `<room>@<region>`, created with that
 location hint), the WebSocket Hibernation API. Limits: 64 players in a room, 64 recipients and 4000 bytes of
 payload in a packet, 60 packets a second from one connection; a second connection with the same `me` replaces the
 first (close code 4000). `/` and `/v1` say what it is. `npm test`, `node test/smoke.mjs <url>` (a live room),
 `npm run deploy` (from `relay/`, the `relay` conda env).
+
+## Positions and ranges
+
+A game can give Koetama positions instead of doing the sound's maths itself:
+- **`listener`**: this player's ears - `position`, and the directions `forward`, `right` and `up` (the camera's, or
+  the head's), in the game's units and axes. Giving all three settles left-handed against right-handed axes.
+- each speaker's **`position`**: Koetama works out the direction (azimuth, elevation) from the listener, and the
+  loudness from the distance: 1 within that player's `near`, falling to 0 at their `far` (the square of the way
+  left: `((far - d) / (far - near))²`). Their range is the one their own Koetama announces (their feed's `range`,
+  carried in their voice packets), else the speaker's `range` in this feed, else this player's own `range`, else
+  `[10, 30]`.
+- a speaker's **`gain`**, when given, wins over the distance (a radio, a phone call, the dead hearing the living).
+- **`range`**: how far this player's voice reaches right now (whispering, talking, shouting), in the game's units.
+  With it, positions and no `to`, Koetama sends this player's voice to the speakers within `far` (+10 %).
+- `muffle` stays the game's (it knows the walls: a raycast between the two players).
+
+Azimuth and elevation (and `gain`, `to`) still work as before for a game that works them out itself.
+
+## Hub: games whose script runs only on the host
+
+Some games run mod scripts on one machine only (Tabletop Simulator: the host; a server-side mod): the other players'
+games tell their Koetamas nothing. The host's Koetama then works as a **hub** for them:
+
+1. The host's feed adds **`players`**: a list of feeds, one per other player, each with that player's `id` (as in
+   `me`) and anything a feed holds for them - `listen`, `talk_key`, `lang`, `name`, `listener`, `speakers`, `range`,
+   `to`, `translations`, `to_translate`. The room (`room_seed`, or `room` and `key`) and `region` are the host's
+   unless a player's feed gives its own. The host's own fields stay at the top, as usual.
+2. For each player the hub answers once a **`join_code`** (`K7QF-4MXA`: 8 characters, about 40 bits). The game shows
+   each player their own code, privately (TTS: `broadcastToColor`).
+3. The player types it into their Koetama ("Join a hosted game" in the window; `koetama --cli --join K7QF-4MXA`). Their Koetama connects to the hub through the
+   relay (a room made from the code: only the two of them have it) and from then on works as if that player's feed
+   came from a game on their own PC: their microphone, speech to text, their voice in the session's room, their
+   translations. The hub sends it that player's feed whenever it changes (at least once a second).
+4. Whatever that player's Koetama would tell a game, the hub tells the host's game, with **`"player": <id>`** added:
+   `speech`, `talking`, `translation`, `translations_status`, `status`, `voice`. A `player` object says when a
+   player's Koetama joins or leaves.
+
+Between the hub and a player's Koetama: plaintext type 3 = a JSON message (`{"feed": {...}}` one way, `{"objects":
+[...]}` the other), cut into parts of at most 3500 bytes: `[3][message: u32 BE][part: u8][parts: u8][bytes]`, hub
+relay id 1, player 2.
 
 ## Translation
 

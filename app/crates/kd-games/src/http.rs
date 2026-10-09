@@ -48,8 +48,8 @@ struct Outbox {
     objects: Vec<(i64, String)>,
     /// the next object's number
     next: i64,
-    /// the voice chat's state as last told (a new session hears it after its hello)
-    voice: String,
+    /// the standing objects as last told (kind -> object: a new session hears them after its hello)
+    standing: std::collections::BTreeMap<&'static str, String>,
 }
 
 struct Shared {
@@ -88,7 +88,7 @@ impl HttpGame {
             listening: AtomicBool::new(false),
             feed: Mutex::new(None),
             updates: AtomicU64::new(0),
-            out: Mutex::new(Outbox { voice: "off".into(), next: 1, ..Default::default() }),
+            out: Mutex::new(Outbox { next: 1, ..Default::default() }),
             arrived: Condvar::new(),
             feeds: AtomicU64::new(0),
             open: AtomicUsize::new(0),
@@ -377,9 +377,10 @@ fn on_feed(body: &[u8], ctx: &Ctx) -> Result<String, String> {
             let n = out.next;
             out.objects.push((n, hello));
             out.next += 1;
-            if out.voice != "off" {
-                let (n, voice) = (out.next, api::voice(&out.voice));
-                out.objects.push((n, voice));
+            let standing: Vec<String> = out.standing.values().cloned().collect();
+            for o in standing {
+                let n = out.next;
+                out.objects.push((n, o));
                 out.next += 1;
             }
         }
@@ -456,6 +457,7 @@ impl Game for HttpGame {
         let mut out = lock(&self.shared.out);
         out.session = None;
         out.objects.clear();
+        out.standing.clear();
     }
 
     fn send(&self, kind: char, utt: u32, text: &str, times: Option<&[f64]>, t0: Option<Instant>) -> bool {
@@ -472,20 +474,24 @@ impl Game for HttpGame {
         !text.is_empty() && self.send('f', 0, text, None, None)
     }
 
-    fn set_voice_state(&self, state: &str) {
+    fn set_standing(&self, kind: &'static str, object: String) {
         let changed = {
             let mut out = lock(&self.shared.out);
-            let changed = out.voice != state;
-            out.voice = state.to_string();
+            let changed = out.standing.get(kind) != Some(&object);
+            out.standing.insert(kind, object.clone());
             changed
         };
         if changed {
-            self.push(api::voice(state));
+            self.push(object);
         }
     }
 
-    fn send_translation(&self, id: i64, text: &str) -> bool {
-        self.push(api::translation(id, &cut_translation(text)))
+    fn send_object(&self, object: String) -> bool {
+        self.push(object)
+    }
+
+    fn send_translation(&self, id: i64, text: &str, rule: Option<(&str, &str)>) -> bool {
+        self.push(api::translation(id, &cut_translation(text), rule))
     }
 
     fn send_translations_state(&self, states: &[RuleState]) -> bool {

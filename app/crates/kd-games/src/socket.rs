@@ -48,6 +48,8 @@ struct Shared {
     /// what the mod's hello said: "<game> (<mod>)"
     peer: Mutex<Option<String>>,
     listening: AtomicBool,
+    /// the standing objects as last told (kind -> object): a new connection gets them after its hello
+    standing: Mutex<std::collections::BTreeMap<&'static str, String>>,
 }
 
 /// One line to the client; false (and the client dropped) if it cannot be written.
@@ -154,6 +156,10 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 let mut client = lock(&sh.client);
                 *client = Some(writer);
                 write_line(&mut client, &hello_line(&profile));
+                // (then the standing objects: the voice chat, the status)
+                for o in lock(&sh.standing).values() {
+                    write_line(&mut client, o);
+                }
                 conn = Some(Conn { stream, buf: Vec::new(), told_bad: false });
                 session += 1;
             }
@@ -264,6 +270,7 @@ impl SocketGame {
             updates: AtomicU64::new(0),
             peer: Mutex::new(None),
             listening: AtomicBool::new(false),
+            standing: Mutex::new(std::collections::BTreeMap::new()),
         });
         SocketGame { profile, builtin, port, sink, log, shared, thread: None }
     }
@@ -349,12 +356,19 @@ impl Game for SocketGame {
         !text.is_empty() && self.send('f', 0, text, None, None)
     }
 
-    fn set_voice_state(&self, state: &str) {
-        self.send_line(&api::voice(state));
+    fn set_standing(&self, kind: &'static str, object: String) {
+        let changed = lock(&self.shared.standing).insert(kind, object.clone()).as_ref() != Some(&object);
+        if changed {
+            self.send_line(&object);
+        }
     }
 
-    fn send_translation(&self, id: i64, text: &str) -> bool {
-        self.send_line(&api::translation(id, &cut_translation(text)))
+    fn send_object(&self, object: String) -> bool {
+        self.send_line(&object)
+    }
+
+    fn send_translation(&self, id: i64, text: &str, rule: Option<(&str, &str)>) -> bool {
+        self.send_line(&api::translation(id, &cut_translation(text), rule))
     }
 
     fn send_translations_state(&self, rules: &[RuleState]) -> bool {

@@ -78,7 +78,7 @@ fn json_messages_and_a_safe_sweep() {
     assert_eq!(names(&a), want, "old files of mine (an older Koetama's v6, vc too) swept, the decoys kept; on written");
     assert_eq!(names(&b), ["talky_on"]);
     // the voice chat's state before any game: kept for the session's start (no file now)
-    link.set_voice("connected");
+    link.set_standing("voice", kd_games::api::voice("connected", &[]));
     assert_eq!(names(&b), ["talky_on"]);
     assert!(!gone.exists(), "a missing folder is never made");
     // the folders by tag: ws-* the second, anything else the first
@@ -91,7 +91,7 @@ fn json_messages_and_a_safe_sweep() {
         serde_json::from_str(&std::fs::read_to_string(d.join(format!("talky_t{n}.json"))).unwrap()).unwrap()
     };
     assert_eq!(obj(&a, 1)["type"], "hello", "a session starts with the hello");
-    assert_eq!(obj(&a, 2), json!({"type": "voice", "state": "connected"}), "... then the voice state");
+    assert_eq!(obj(&a, 2), json!({"type": "voice", "state": "connected", "players": []}), "... then the voice state");
     let two_s_ago = Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
     assert!(link.send_msg('l', 7, "  héllo wörld 你好 ", Some(&[0.1, 0.554, 1.0, 1.2]), Some(two_s_ago)));
     assert!(link.send_text("typed"));

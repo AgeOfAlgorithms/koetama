@@ -460,3 +460,20 @@ Koetama's files are `on`, `p<n>` and object n of each session (`t<n>`: json, or 
 hex; object 1 is the hello). No feed versions: an older Koetama is recognised by its `v5` / `v6` files (Koetama 0.4.0
 sweeps them). Profiles' test voices are `{"id": ...}` (was `src`). The Teardown mod was ported by an agent (JSON in
 Lua, hex both ways).
+
+**2026-10-09: what other games need (docs/game-survey.md; the user: "do all 5").** A survey of how mods in other
+games can reach a local app (Valheim, Godot, Tabletop Simulator, Monster Hunter Rise demos in `examples/mods/`, an
+HTTP connector for sandboxed scripts) found five gaps, all closed in protocol 2 without a version bump:
+1. `room_seed`: one shared secret (a lobby id, a server's join secret) instead of the game making room + key.
+2. Player ids may be strings (Steam ids, names): relay ids are hashed from them; a clash is `voice` `id_taken`.
+3. Positions: `listener` + speakers' `position` + `range` [near, far] - Koetama computes direction, loudness and `to`
+   (a game no longer does vector maths in its script language).
+4. Objects for the game's HUD: `talking` (who speaks now, this player too), `status` (speech engine and microphone),
+   `voice` with `players` (who is in the voice room: voice packets v2 carry the sender's id and range, and a presence
+   packet every 5 s), `translation` with `from` / `to`.
+5. The hub, for games whose script runs only on the host (Tabletop Simulator, many server-side mods): the host's feed
+   lists `players`; each gets a join code (8 characters, shown by the game) to type into their own Koetama ("Join a
+   hosted game", `--join`), which then works for them as if their game fed it, through the relay.
+Tested: Rust and Python suites (fixtures shared), and over the live relay (no relay change was needed): a joined
+player's typed line reached the host's game 251 ms after it was typed; two seeded Koetamas saw each other in
+`players` and the listener heard `talking` ~140 ms after the speaker's own Koetama. NOT tried in a real game yet.

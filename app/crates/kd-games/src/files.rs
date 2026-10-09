@@ -307,8 +307,8 @@ struct LinkState {
     mic: bool,
     lang: String,
     live: bool,
-    /// the voice chat's state as last told (a new session hears it again after its hello)
-    voice: String,
+    /// the standing objects as last told (kind -> object: a new session hears them after its hello)
+    standing: BTreeMap<&'static str, String>,
 }
 
 /// Koetama's files for the game: <prefix>on, the answer to each ping, numbered message files. Shared by the feed's
@@ -373,7 +373,7 @@ impl Link {
                 mic: false,
                 lang: "en".into(),
                 live: true,
-                voice: "off".into(),
+                standing: BTreeMap::new(),
             }),
             features: Mutex::new(vec!["speech", "voices", "rooms", "translate"]),
         }
@@ -483,17 +483,22 @@ impl Link {
         }
     }
 
-    /// The voice chat's state for the game (a voice object when it changes; a new session gets it after its hello).
-    pub fn set_voice(&self, state: &str) {
+    /// A standing object (Game::set_standing): written when it changed; a new session gets it after its hello.
+    pub fn set_standing(&self, kind: &'static str, object: String) {
         let changed = {
             let mut s = self.lock();
-            let changed = s.voice != state;
-            s.voice = state.to_string();
+            let changed = s.standing.get(kind) != Some(&object);
+            s.standing.insert(kind, object.clone());
             changed
         };
         if changed {
-            self.write_obj(crate::api::voice(state));
+            self.write_obj(object);
         }
+    }
+
+    /// Any other object for the game. False if no game is listening.
+    pub fn send_object(&self, object: String) -> bool {
+        self.write_obj(object)
     }
 
     /// All my files gone.
@@ -555,14 +560,14 @@ impl Link {
         s.mic = feed.mic;
         s.lang = feed.lang.clone();
         s.live = feed.live;
-        let voice = s.voice.clone();
+        let standing: Vec<String> = s.standing.values().cloned().collect();
         drop(s);
         if new_session {
-            // (the session's first object: what this Koetama does; then the voice chat's state, when there is one)
+            // (the session's first object: what this Koetama does; then the standing ones - the voice chat, the status)
             let features = self.features.lock().unwrap_or_else(|e| e.into_inner()).clone();
             self.write_obj(crate::api::hello(&features));
-            if voice != "off" {
-                self.write_obj(crate::api::voice(&voice));
+            for o in standing {
+                self.write_obj(o);
             }
         }
     }
@@ -587,8 +592,8 @@ impl Link {
     }
 
     /// The translation of line `id` ("" = nothing to show). False if no game is listening.
-    pub fn send_translation(&self, id: i64, text: &str) -> bool {
-        self.write_obj(crate::api::translation(id, &cut_translation(text)))
+    pub fn send_translation(&self, id: i64, text: &str, rule: Option<(&str, &str)>) -> bool {
+        self.write_obj(crate::api::translation(id, &cut_translation(text), rule))
     }
 
     /// The translations' states. False if no game is listening.
@@ -793,8 +798,12 @@ impl Game for FilesGame {
             Some(FeedReader::start_logged(self.save.clone(), FeedReader::POLL, self.rules.clone(), on_feed, self.log.clone()));
     }
 
-    fn set_voice_state(&self, state: &str) {
-        self.link.set_voice(state);
+    fn set_standing(&self, kind: &'static str, object: String) {
+        self.link.set_standing(kind, object);
+    }
+
+    fn send_object(&self, object: String) -> bool {
+        self.link.send_object(object)
     }
 
     fn stop(&mut self) {
@@ -810,8 +819,8 @@ impl Game for FilesGame {
         self.link.send_text(text)
     }
 
-    fn send_translation(&self, id: i64, text: &str) -> bool {
-        self.link.send_translation(id, text)
+    fn send_translation(&self, id: i64, text: &str, rule: Option<(&str, &str)>) -> bool {
+        self.link.send_translation(id, text, rule)
     }
 
     fn send_translations_state(&self, rules: &[feed::RuleState]) -> bool {

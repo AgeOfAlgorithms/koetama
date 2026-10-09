@@ -14,13 +14,14 @@
 pub mod codec;
 pub mod crypto;
 pub mod frames;
+pub mod hub;
 pub mod gate;
 pub mod jitter;
 pub mod packet;
 pub mod relay;
 mod voice;
 
-pub use voice::{Playback, Sender, Voice, VoiceStatus, HEARD};
+pub use voice::{Playback, Sender, Voice, VoiceEvent, VoiceStatus, HEARD, PRESENCE_EVERY, PRESENT};
 
 /// The relay Koetama uses (KOETAMA_RELAY overrides it: tests, a relay of one's own)
 pub const RELAY: &str = "wss://koetama-relay.ageofalgorithms.workers.dev";

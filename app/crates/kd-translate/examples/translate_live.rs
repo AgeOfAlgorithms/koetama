@@ -54,7 +54,7 @@ fn main() {
         t.request(i as i64 + 1, line);
         loop {
             match rx.recv_timeout(Duration::from_secs(30)).expect("a reply") {
-                Event::Reply { id, text } if id == i as i64 + 1 => {
+                Event::Reply { id, text, .. } if id == i as i64 + 1 => {
                     println!(
                         "{:5.0} ms  {line}\n          -> {}",
                         sent.elapsed().as_secs_f64() * 1000.0,

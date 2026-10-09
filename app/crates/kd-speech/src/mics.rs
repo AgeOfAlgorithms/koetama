@@ -38,6 +38,9 @@ fn store(level: &AtomicU64, db: f64) {
     level.store(db.to_bits(), Ordering::Relaxed);
 }
 
+/// Where a recording microphone's blocks also go (the voice chat).
+pub type Tap = Arc<dyn Fn(&[f32]) + Send + Sync>;
+
 /// A recording played into the listener in real time as if it were the microphone (tests without one):
 /// from the start each time it is opened, then quiet.
 pub struct WavMicrophone {
@@ -46,11 +49,26 @@ pub struct WavMicrophone {
     log: Log,
     run: Option<Arc<AtomicBool>>, // (the playing thread's "keep going"; None: closed)
     level: Arc<AtomicU64>,
+    /// each block also goes here (the voice chat, as the real microphone's does)
+    tap: Option<Tap>,
 }
 
 impl WavMicrophone {
     pub fn new(listener: Listener, audio: Vec<f32>, log: Log) -> WavMicrophone {
-        WavMicrophone { listener, audio: Arc::new(audio), log, run: None, level: Arc::new(AtomicU64::new((-120f64).to_bits())) }
+        WavMicrophone {
+            listener,
+            audio: Arc::new(audio),
+            log,
+            run: None,
+            level: Arc::new(AtomicU64::new((-120f64).to_bits())),
+            tap: None,
+        }
+    }
+
+    /// Each block (RATE) also to `tap` - the voice chat.
+    pub fn with_tap(mut self, tap: Tap) -> WavMicrophone {
+        self.tap = Some(tap);
+        self
     }
 }
 
@@ -63,6 +81,7 @@ impl Mic for WavMicrophone {
         if self.run.is_none() {
             let go = Arc::new(AtomicBool::new(true));
             let (listener, audio, level, g) = (self.listener.clone(), self.audio.clone(), self.level.clone(), go.clone());
+            let tap = self.tap.clone();
             std::thread::spawn(move || {
                 let t0 = Instant::now();
                 let quiet = vec![0f32; BLOCK];
@@ -71,6 +90,9 @@ impl Mic for WavMicrophone {
                     let x = if k < audio.len() { &audio[k..(k + BLOCK).min(audio.len())] } else { &quiet[..] };
                     store(&level, dbfs(x));
                     listener.push(x);
+                    if let Some(t) = &tap {
+                        t(x);
+                    }
                     k += BLOCK;
                     pace(t0, k);
                 }

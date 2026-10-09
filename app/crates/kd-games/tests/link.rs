@@ -194,14 +194,14 @@ fn helper_link_checks() {
     let (room, key) = ("ab".repeat(16), "cd".repeat(32));
     assert!(link.send_msg('r', 0, &format!("{room}:{key}"), None, None));
     assert_eq!(obj(&local, 11), serde_json::json!({"type": "room", "room": room, "key": key}));
-    link.set_voice("connected");
-    assert_eq!(obj(&local, 12), serde_json::json!({"type": "voice", "state": "connected"}));
-    link.set_voice("connected");
+    link.set_standing("voice", kd_games::api::voice("connected", &[]));
+    assert_eq!(obj(&local, 12), serde_json::json!({"type": "voice", "state": "connected", "players": []}));
+    link.set_standing("voice", kd_games::api::voice("connected", &[]));
     assert!(!names(&local).contains(&"pcvx_t13.xml".into()), "the same state again: nothing");
     link.on_feed(&fd(6, 0, 1, false, "en"), "local-proximity-chat");
     let n = names(&local);
     assert!((3..=12).all(|k| !n.contains(&format!("pcvx_t{k}.xml"))) && n.contains(&"pcvx_p1".into()), "a new session: {n:?}");
-    assert!(obj(&local, 1)["type"] == "hello" && obj(&local, 2) == serde_json::json!({"type": "voice", "state": "connected"}) && link.n() == 2,
+    assert!(obj(&local, 1)["type"] == "hello" && obj(&local, 2) == serde_json::json!({"type": "voice", "state": "connected", "players": []}) && link.n() == 2,
         "the new session: the hello, then the voice state");
     link.send_text("first of the new level");
     assert!(names(&local).contains(&"pcvx_t3.xml".into()));

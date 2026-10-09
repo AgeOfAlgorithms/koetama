@@ -191,6 +191,22 @@ def feed_cases():
         dict(room=room, key=key, me=7.0, to=[2.0, 3.0], speakers=[dict(id=2.0, test_voice=1.0, talking=True)],
              to_translate=[dict(id=5.0, text='hola')]),
         dict(seq=1.5), dict(me=7.5, room=room, key=key), dict(speakers={'id': 1}), dict(to_translate=[dict(id=2.5, text='x')]),
+        # string ids, a room seed, positions and ranges, names, clashes, a hub's players
+        dict(me='7656119800001', room_seed='lobby 42 + pw', range=[2, 10], name='Me!',
+             listener=dict(position=[1, 2, 3], forward=[0, 0, 2], right=[3, 0, 0], up=[0, 1, 0]),
+             speakers=[dict(id='7656119800002', position=[6, 2, 8], name='Ana'), dict(id='far', position=[0, 0, 60]),
+                       dict(id='radio', position=[0, 40, 3], gain=0.5), dict(id=5, position=[1, 9, 3], range=[1, 20]),
+                       dict(id='beside', position=[1, 2, 3], muffle=0.7), dict(id='tv', test_voice=2, position=[2, 2, 2])]),
+        dict(me='me', room_seed='x' * 257, room=room, key=key, speakers=[dict(id='a', azimuth=10)], to=['a', 'me', 7]),
+        dict(me='ü' * 64, room_seed='s'), dict(me='😀' * 64, room_seed='s'), dict(me='x' * 65, room_seed='s'), dict(me='a' + chr(10) + 'b', room_seed='s'),
+        dict(me='me', room_seed='s', listener=dict(position=[0, 0, 0], forward=[0, 0, 0], right=[1, 0, 0], up=[0, 1, 0])),
+        dict(me='me', room_seed='s', listener=dict(position=[0, 0], forward=[0, 0, 1], right=[1, 0, 0], up=[0, 1, 0])),
+        dict(me='me', room_seed='s', range=[5, 5], speakers=[dict(id=1, range=[3, 1])]),
+        dict(me=1, room_seed='s', speakers=[dict(id=2), dict(id=3)], to=[]),
+        dict(me=1, room_seed='s', players=[dict(id=2, listen='always', lang='de'), dict(id='bob', room_seed='other'),
+                                          dict(id=2, listen='off'), dict(listen='always'),
+                                          dict(id=3, room=room, key=key, region='weur')]),
+        dict(me=1, room_seed='s', players='x'), dict(me=1, players=[dict(id=2, listen='loud')]),
     ]
     feeds = [hx(o) for o in objs]
     feeds += [json.dumps(objs[0]), ' ' + hx(objs[2]).upper() + ' ', '', 'garbage', '7b', hx([1, 2]), 'zz' + hx(objs[1])]
@@ -218,7 +234,14 @@ def feed_cases():
                 for i, t in [(7, 'Hello, how are you?'), (8, ''), (123456789012345, 'こんにちは "x"')]]
     objects += [dict(fn='translations_status', args=[st], out=td.translations_status(st))
                 for st in [[], [('ja', 'en', 'ready', 1.0), ('ko', 'en', 'downloading', 0.4271)], [('mt', 'en', 'downloading', 1.7)]]]
-    objects += [dict(fn='voice', args=[s], out=td.voice(s)) for s in ('connected', 'unreachable')]
+    objects += [dict(fn='voice', args=[s, ps], out=td.voice(s, ps))
+                for s, ps in (('connected', []), ('unreachable', [('7656119800002', False), ('3', True)]), ('id_taken', []))]
+    objects += [dict(fn='talking', args=[p, on], out=td.talking(p, on)) for p, on in ((('ana', False), True), (('7', True), False))]
+    objects += [dict(fn='status', args=[a, b], out=td.status(a, b)) for a, b in (('loading', 'closed'), ('ready', 'open'))]
+    objects += [dict(fn='translation', args=[3, 'Hi', ['es', 'en']], out=td.translation(3, 'Hi', ('es', 'en'))),
+                dict(fn='translation', args=[4, '', ['es', 'en']], out=td.translation(4, '', ('es', 'en')))]
+    objects += [dict(fn='join_code', args=[('bob', False), 'K7QF-4MXA'], out=td.join_code(('bob', False), 'K7QF-4MXA')),
+                dict(fn='player', args=[('9', True), True], out=td.player(('9', True), True))]
     prefabs = [dict(object=o, out=td.object_prefab(o)) for o in (td.voice('off'), td.translation(1, 'Ünïcode ✓ 你好'))]
     dump('feed.json', dict(parse=parse, find=finds, objects=objects, prefab=prefabs, TEXT_MAX=td.TEXT_MAX,
                            TRANSLATION_MAX=td.TRANSLATION_MAX, PROTOCOL=td.PROTOCOL))

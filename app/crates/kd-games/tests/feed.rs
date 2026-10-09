@@ -5,7 +5,7 @@
 use kd_games::api;
 use kd_games::files::TRANSLATION_MAX;
 use kd_games::teardown::{find_feeds, parse_feed, TEXT_MAX};
-use kd_common::feed::RuleState;
+use kd_common::feed::{Feed, PlayerId, RuleState};
 use serde_json::Value;
 
 fn fixture() -> Value {
@@ -22,11 +22,90 @@ fn same_f64(want: &Value, got: f64) -> bool {
     }
 }
 
+/// a float as Python wrote it, to the last bits (NaN as null)
+fn close(want: &Value, got: f64) -> bool {
+    match want.as_f64() {
+        Some(w) => (w - got).abs() <= 1e-9 * w.abs().max(1.0),
+        None => got.is_nan(),
+    }
+}
+
+fn pid(v: &Value) -> Option<PlayerId> {
+    v.as_array().map(|a| PlayerId { text: a[0].as_str().unwrap().into(), number: a[1].as_bool().unwrap() })
+}
+
+fn range_of(v: &Value) -> Option<(f64, f64)> {
+    v.as_array().map(|a| (a[0].as_f64().unwrap(), a[1].as_f64().unwrap()))
+}
+
+/// One feed against Python's (a hub's players too).
+fn same_feed(f: &Feed, want: &Value, text: &str) {
+    assert_eq!(f.seq, want["seq"].as_i64().unwrap(), "{text}");
+    assert!(same_f64(&want["vol"], f.vol), "{text}");
+    assert_eq!(f.sid, want["sid"].as_i64().unwrap(), "{text}");
+    assert_eq!(f.ack, want["ack"].as_i64().unwrap(), "{text}");
+    assert_eq!(f.ping, want["ping"].as_i64().unwrap(), "{text}");
+    assert_eq!(f.mic, want["mic"].as_bool().unwrap(), "{text}");
+    assert_eq!(f.ptt, want["ptt"].as_bool(), "{text}");
+    assert_eq!(f.lang, want["lang"].as_str().unwrap(), "{text}");
+    assert_eq!(f.live, want["live"].as_bool().unwrap(), "{text}");
+    assert_eq!(f.room, want["room"].as_str().unwrap(), "{text}");
+    assert_eq!(f.key, want["key"].as_str().unwrap(), "{text}");
+    assert_eq!(f.me, want["me"].as_i64().unwrap(), "{text}");
+    assert_eq!(f.me_id, pid(&want["me_id"]), "{text}");
+    assert_eq!(f.name, want["name"].as_str().unwrap(), "{text}");
+    assert_eq!(f.range, range_of(&want["range"]), "{text}");
+    let clashes: Vec<PlayerId> = want["clashes"].as_array().unwrap().iter().map(|c| pid(c).unwrap()).collect();
+    assert_eq!(f.clashes, clashes, "{text}");
+    assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
+    let to: Vec<i64> = want["to"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+    assert_eq!(f.to, to, "{text}");
+    let translations: Vec<(String, String)> = want["translations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r[0].as_str().unwrap().to_string(), r[1].as_str().unwrap().to_string()))
+        .collect();
+    assert_eq!(f.translations, translations, "{text}");
+    let requests: Vec<(i64, String)> = want["to_translate"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r[0].as_i64().unwrap(), r[1].as_str().unwrap().to_string()))
+        .collect();
+    assert_eq!(f.to_translate, requests, "{text}");
+    let sp = want["speakers"].as_object().unwrap();
+    assert_eq!(f.speakers.len(), sp.len(), "{text}");
+    for (k, v) in sp {
+        let s = &f.speakers[&k.parse::<i64>().unwrap()];
+        assert_eq!(s.src, v["src"].as_i64().unwrap());
+        assert_eq!(s.talk, v["talk"].as_bool().unwrap());
+        assert!(close(&v["gain"], s.gain), "{text}: gain {}", s.gain);
+        assert!(close(&v["az"], s.az), "{text}: az {}", s.az);
+        assert!(close(&v["el"], s.el), "{text}: el {}", s.el);
+        assert!(same_f64(&v["muffle"], s.muffle));
+        assert_eq!(Some(s.id.clone()), pid(&v["id"]), "{text}");
+        assert_eq!(s.name, v["name"].as_str().unwrap(), "{text}");
+        assert_eq!(s.gain_given, v["gain_given"].as_bool().unwrap(), "{text}");
+        assert_eq!(s.range, range_of(&v["range"]), "{text}");
+        match (s.distance, v["distance"].as_f64()) {
+            (Some(d), Some(w)) => assert!((d - w).abs() <= 1e-9 * w.max(1.0), "{text}: distance {d}"),
+            (None, None) => {}
+            (d, w) => panic!("{text}: distance {d:?} vs {w:?}"),
+        }
+    }
+    let players = want["players"].as_array().unwrap();
+    assert_eq!(f.players.len(), players.len(), "{text}: players");
+    for (p, w) in f.players.iter().zip(players) {
+        same_feed(p, w, text);
+    }
+}
+
 #[test]
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 47);
+    assert_eq!(cases.len(), 60);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -36,46 +115,7 @@ fn parse_as_python() {
             continue;
         }
         let f = got.unwrap_or_else(|| panic!("{text:?} should parse"));
-        assert_eq!(f.seq, want["seq"].as_i64().unwrap(), "{text}");
-        assert!(same_f64(&want["vol"], f.vol), "{text}");
-        assert_eq!(f.sid, want["sid"].as_i64().unwrap(), "{text}");
-        assert_eq!(f.ack, want["ack"].as_i64().unwrap(), "{text}");
-        assert_eq!(f.ping, want["ping"].as_i64().unwrap(), "{text}");
-        assert_eq!(f.mic, want["mic"].as_bool().unwrap(), "{text}");
-        assert_eq!(f.ptt, want["ptt"].as_bool(), "{text}");
-        assert_eq!(f.lang, want["lang"].as_str().unwrap(), "{text}");
-        assert_eq!(f.live, want["live"].as_bool().unwrap(), "{text}");
-        assert_eq!(f.room, want["room"].as_str().unwrap(), "{text}");
-        assert_eq!(f.key, want["key"].as_str().unwrap(), "{text}");
-        assert_eq!(f.me, want["me"].as_i64().unwrap(), "{text}");
-        assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
-        let to: Vec<i64> = want["to"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
-        assert_eq!(f.to, to, "{text}");
-        let translations: Vec<(String, String)> = want["translations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| (r[0].as_str().unwrap().to_string(), r[1].as_str().unwrap().to_string()))
-            .collect();
-        assert_eq!(f.translations, translations, "{text}");
-        let requests: Vec<(i64, String)> = want["to_translate"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| (r[0].as_i64().unwrap(), r[1].as_str().unwrap().to_string()))
-            .collect();
-        assert_eq!(f.to_translate, requests, "{text}");
-        let sp = want["speakers"].as_object().unwrap();
-        assert_eq!(f.speakers.len(), sp.len(), "{text}");
-        for (k, v) in sp {
-            let s = &f.speakers[&k.parse::<i64>().unwrap()];
-            assert_eq!(s.src, v["src"].as_i64().unwrap());
-            assert_eq!(s.talk, v["talk"].as_bool().unwrap());
-            assert!(same_f64(&v["gain"], s.gain), "{text}: gain {}", s.gain);
-            assert!(same_f64(&v["az"], s.az));
-            assert!(same_f64(&v["el"], s.el));
-            assert!(same_f64(&v["muffle"], s.muffle));
-        }
+        same_feed(&f, want, text);
     }
 }
 
@@ -110,7 +150,10 @@ fn objects_byte_identical() {
                 f64s(&a[3]).as_deref(),
                 a[4].as_f64(),
             ),
-            "translation" => api::translation(a[0].as_i64().unwrap(), a[1].as_str().unwrap()),
+            "translation" => {
+                let rule = a.get(2).and_then(Value::as_array).map(|r| (r[0].as_str().unwrap(), r[1].as_str().unwrap()));
+                api::translation(a[0].as_i64().unwrap(), a[1].as_str().unwrap(), rule)
+            }
             "translations_status" => api::translations_status(
                 &a[0]
                     .as_array()
@@ -124,7 +167,11 @@ fn objects_byte_identical() {
                     })
                     .collect::<Vec<_>>(),
             ),
-            "voice" => api::voice(a[0].as_str().unwrap()),
+            "voice" => api::voice(a[0].as_str().unwrap(), &a[1].as_array().unwrap().iter().map(|p| pid(p).unwrap()).collect::<Vec<_>>()),
+            "talking" => api::talking(&pid(&a[0]).unwrap(), a[1].as_bool().unwrap()),
+            "status" => api::status(a[0].as_str().unwrap(), a[1].as_str().unwrap()),
+            "join_code" => api::join_code(&pid(&a[0]).unwrap(), a[1].as_str().unwrap()),
+            "player" => api::player(&pid(&a[0]).unwrap(), a[1].as_bool().unwrap()),
             f => panic!("unknown {f}"),
         };
         assert_eq!(got, c["out"].as_str().unwrap(), "{c}");
@@ -147,13 +194,14 @@ fn helper_feed_checks() {
         {"id":2001,"test_voice":2,"talking":true,"gain":1.0,"elevation":-3.5,"muffle":0.25}]}"#))
     .unwrap();
     assert!(f.seq == 42 && f.vol == 0.5 && f.sid == 7 && f.ack == 3 && f.ping == 12 && f.mic && f.ptt.is_none());
-    let s = &f.speakers[&2001];
+    let rid = |n: i64| kd_common::feed::relay_id("", &PlayerId::number(n));
+    let s = &f.speakers[&rid(2001)];
     assert!(s.src == 2 && s.talk && s.gain == 1.0 && s.az == 0.0 && s.el == -3.5 && s.muffle == 0.25);
-    assert!(!f.speakers[&2000].talk);
+    assert!(!f.speakers[&rid(2000)].talk);
     let f = parse_feed(r#"{"type":"feed"}"#).unwrap();
     assert!(f.speakers.is_empty() && !f.mic && f.lang == "en" && f.live && f.vol == 1.0, "plain JSON; the defaults");
     let f = parse_feed(&hex(r#"{"listen":"push_to_talk","talk_key":true,"lang":"zh","live":false,"speakers":[{"id":3,"gain":0.5}]}"#)).unwrap();
-    assert!(f.mic && f.ptt == Some(true) && f.lang == "zh" && !f.live && f.speakers[&3].src == 0);
+    assert!(f.mic && f.ptt == Some(true) && f.lang == "zh" && !f.live && f.speakers[&rid(3)].src == 0);
     for bad in ["garbage", "7b", "[1,2]", r#"{"listen":"sometimes"}"#, r#"{"volume":"loud"}"#] {
         assert!(parse_feed(bad).is_none(), "{bad}");
     }
