@@ -72,7 +72,7 @@ game can show your words in text to other players. By extension, your game or mo
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
 bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.3. See [What's new](#whats-new).
+> **Status:** early prototype, version 0.4. See [What's new](#whats-new).
 
 ## Highlights
 
@@ -88,6 +88,25 @@ bytes it cannot listen to, and only to the players close enough to hear you.
 - **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
 
 ## What's new
+
+### 0.4.0: translation, more games, walkie-talkies
+
+- **Chat translation.** Lines in another language are translated on your own PC (Mozilla's offline models,
+  downloaded the first time a language needs them), so you can read players you share no language with.
+- **Built for more games.** One simple JSON API for every game, over a local socket, HTTP (for games whose mods can
+  only make web requests) or files. Example mods for Valheim, Godot and Tabletop Simulator show how
+  ([PROTOCOL.md](PROTOCOL.md)).
+- **Positions instead of maths.** A game can give player positions and voice ranges; Koetama works out direction,
+  loudness and who hears whom. Player ids can be Steam ids or names, and a shared `room_seed` makes the voice room.
+- **Hosted games.** For games whose mods run only on the host, each player joins with a short code the game shows
+  them, and their Koetama works through the host's.
+- **Walkie-talkies, loudspeakers and PA systems.** A voice can also come out of devices, each with a realistic sound
+  (static and squelch, a horn's ring, a hall's echo), and games choose their own effects: pitch, wobble, robot,
+  echo, reverb and more.
+- **For game screens.** Games are told who is talking, who is in the voice chat, and whether speech is ready.
+- **Safer.** Updates must carry a signature from the release key; nobody can push a player out of a voice room by
+  taking their number; join codes work once; plus the fixes from a full security audit.
+- **Fixed:** on Windows, a voice connection could drop for a second at random.
 
 ### 0.3.1: Koetama
 
