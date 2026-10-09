@@ -146,8 +146,8 @@ def bubble(t, tr=None):
 
 
 def receives(b):
-    """what a receiver gets as text: "receives" and the bubble"""
-    return '<span class="got"><span class="verb">receives</span>%s</span>' % b
+    """what a receiver gets as text: "sees" and the bubble"""
+    return '<span class="got"><span class="verb">sees</span>%s</span>' % b
 
 
 def channel(kind, label):
