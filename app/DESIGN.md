@@ -91,8 +91,18 @@ pub struct Input;  impl Input {
     pub fn device_name(&self) -> String;                                 // mono at `rate`, ~50 ms blocks, any device rate
 }
 ```
-A speaker with src 0 is a real player: the mixer pulls their voice from `streams` (talk ignored; gain 0 or not in the
-feed: not played, not even pulled), placed like a test voice. Devices are chosen by NAME (the window stores names). The output callback must never block on the game: it locks
+A speaker with src 0 is a real player: the mixer pulls their voice from `streams` (talk ignored; not audible - gain 0
+and no device heard - or not in the feed: not played, not even pulled), placed like a test voice.
+
+Devices and sound effects (PROTOCOL.md "Devices", "Sound effects"): `kd_common::feed::{Device, Effects, Via, Out}` -
+a speaker's `via` (each device: its places as this player hears them - az, el, gain, delay -, muffle, signal, and its
+Effects: the device's preset with the feed's `effects` on top) and a speaker's own `effects` (the direct voice).
+`pub mod effects { Effect::new(seed); set(&Effects, signal); process(x, on, out) -> still sounding }`: one chain of
+blocks (pitch, robot, band + horn, drive, compress, lofi, wobble, hiss / crackle / squelch / hum, echo, reverb), a
+block at 0 costing nothing. The mixer keeps per voice an Effect for the direct voice (made when the feed first asks)
+and a DevOut per device: its Effect, the walls' low-pass, an echo line (MAX_DELAY 0.5 s) that each place reads at its
+own delay (a PA's farther speakers come later), and per place the panned gains. A device keeps playing after the voice
+stops while its effect still sounds (a squelch tail, a reverb). Devices are chosen by NAME (the window stores names). The output callback must never block on the game: it locks
 the mixer, renders, unlocks. The audio thread runs at raised priority (Windows: MMCSS "Pro Audio" or
 THREAD_PRIORITY_TIME_CRITICAL if cpal does not already): the speech work runs the process below normal priority.
 

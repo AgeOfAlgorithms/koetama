@@ -1,6 +1,7 @@
 //! The voice mixer (each voice placed by the game's gain, direction and muffle) and the low-pass that muffles
 //! (engine/audio.py: Mixer, lowpass, pan_gains, behind).
-use kd_common::feed::{Feed, FeedSink};
+use crate::effects::Effect;
+use kd_common::feed::{Feed, FeedSink, Via, MAX_DELAY};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -116,7 +117,123 @@ pub trait Streams: Send {
     fn pull(&mut self, id: i64, out: &mut [f32]) -> bool;
 }
 
+/// samples a device's echo line holds: the longest delay and a long block
+const RING: usize = (MAX_DELAY * RATE as f64) as usize + 8192;
+
+/// A device a voice comes out of (PROTOCOL.md "Devices"): its sound (effects.rs), the walls' muffle, then each of its
+/// places - delayed by how much farther it is than the nearest, panned and faded like a voice.
+struct DevOut {
+    effect: Effect,
+    /// it still makes sound (the voice, a squelch tail, the reverb)
+    sounding: bool,
+    muffle: f64,
+    hist: Vec<f32>,
+    ir: Vec<f64>,
+    ir_a: f64,
+    full: Vec<f32>,
+    y: Vec<f32>,
+    lp: Vec<f32>,
+    /// the echo line and where the next sample goes
+    ring: Vec<f32>,
+    w: usize,
+    /// per place: the gains (left, right) and the delay (samples) last used
+    outs: Vec<(f64, f64, f64)>,
+}
+
+impl DevOut {
+    fn new(seed: u64) -> DevOut {
+        DevOut {
+            effect: Effect::new(seed),
+            sounding: false,
+            muffle: 0.0,
+            hist: vec![0.0; LP_TAPS],
+            ir: Vec::with_capacity(LP_TAPS),
+            ir_a: f64::NAN,
+            full: Vec::new(),
+            y: Vec::new(),
+            lp: Vec::new(),
+            ring: vec![0.0; RING],
+            w: 0,
+            outs: Vec::with_capacity(kd_common::feed::MAX_OUTS),
+        }
+    }
+
+    fn quiet(&self) -> bool {
+        !self.sounding && self.outs.iter().all(|o| o.0 < 1e-4 && o.1 < 1e-4)
+    }
+
+    /// One block into `out` (interleaved stereo): `x` the voice, `on` whether it comes through this device now,
+    /// `via` as the feed has it (None: gone - fading out). -> the louder gain of its places.
+    #[allow(clippy::too_many_arguments)]
+    fn render(&mut self, x: &[f32], on: bool, via: Option<&Via>, master: f64, k: f64, ramp: &[f32], out: &mut [f32]) -> f64 {
+        let frames = x.len();
+        if let Some(v) = via {
+            self.effect.set(&v.effects, v.signal);
+        }
+        self.y.clear();
+        self.y.resize(frames, 0.0);
+        self.sounding = self.effect.process(x, on, &mut self.y);
+        let tm = via.map_or(self.muffle, |v| v.muffle);
+        self.muffle += (tm - self.muffle) * k;
+        let fc = CUT_CLEAR * (CUT_MUFFLED / CUT_CLEAR).powf(self.muffle);
+        let a = 1.0 - (-2.0 * std::f64::consts::PI * fc / RATE as f64).exp();
+        if a != self.ir_a {
+            lowpass_ir_into(a, &mut self.ir);
+            self.ir.reverse(); // (back to front: see lowpass_into)
+            self.ir_a = a;
+        }
+        lowpass_into(&self.y, &mut self.hist, &self.ir, &mut self.full, &mut self.lp);
+        for (i, &s) in self.lp.iter().enumerate() {
+            self.ring[(self.w + i) % RING] = s;
+        }
+        let places = via.map_or(0, |v| v.outs.len());
+        if self.outs.len() < places {
+            self.outs.resize(places, (0.0, 0.0, 0.0));
+        }
+        let max_delay = (RING - frames.min(RING)) as f64;
+        let mut level = 0.0f64;
+        for (j, o) in self.outs.iter_mut().enumerate() {
+            let place = via.and_then(|v| v.outs.get(j));
+            let (tl, tr, td) = match place {
+                Some(p) => {
+                    let b = behind(p.az);
+                    let g = p.gain * master * (1.0 - BEHIND_QUIET * b);
+                    let (l, r) = pan_gains(p.az, p.el);
+                    (g * l, g * r, (p.delay * RATE as f64).min(max_delay))
+                }
+                None => (0.0, 0.0, o.2),
+            };
+            let nl = o.0 + (tl - o.0) * k;
+            let nr = o.1 + (tr - o.1) * k;
+            if nl > 1e-6 || nr > 1e-6 || o.0 > 1e-6 || o.1 > 1e-6 {
+                let (gl0, dl) = (o.0 as f32, (nl - o.0) as f32);
+                let (gr0, dr) = (o.1 as f32, (nr - o.1) as f32);
+                let start = self.w + RING - td.round() as usize;
+                for (i, f) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                    let s = self.ring[(start + i) % RING];
+                    f[0] += s * (gl0 + dl * ramp[i]);
+                    f[1] += s * (gr0 + dr * ramp[i]);
+                }
+            }
+            *o = (nl, nr, td);
+            level = level.max(nl).max(nr);
+        }
+        self.w = (self.w + frames) % RING;
+        // (places gone from the feed and faded: let go)
+        while self.outs.len() > places && self.outs.last().is_some_and(|o| o.0 < 1e-4 && o.1 < 1e-4) {
+            self.outs.pop();
+        }
+        level
+    }
+}
+
 struct Voice {
+    /// the devices it comes out of (the feed's `via`, in order)
+    devs: Vec<DevOut>,
+    /// effects on the direct voice (made when the feed first asks for some), and whether they still sound
+    fx: Option<Effect>,
+    fx_sounding: bool,
+    fx_out: Vec<f32>,
     pos: usize,
     /// (a new turn starts the clip from its beginning: the game times the words to it)
     talking: bool,
@@ -138,6 +255,10 @@ struct Voice {
 impl Voice {
     fn new() -> Voice {
         Voice {
+            devs: Vec::new(),
+            fx: None,
+            fx_sounding: false,
+            fx_out: Vec::new(),
             pos: 0,
             talking: false,
             gl: 0.0,
@@ -171,6 +292,8 @@ pub struct Mixer {
     ids: Vec<i64>,
     ramp: Vec<f32>,
     stereo: Vec<f32>,
+    /// a block of silence (a device's input while no voice comes through it)
+    zeros: Vec<f32>,
 }
 
 impl Mixer {
@@ -194,6 +317,7 @@ impl Mixer {
             ids: Vec::new(),
             ramp: Vec::new(),
             stereo: Vec::new(),
+            zeros: Vec::new(),
         }
     }
 
@@ -256,6 +380,9 @@ impl Mixer {
         self.ramp.clear();
         self.ramp.extend((1..=frames).map(|i| i as f32 / frames as f32));
         let ramp = &self.ramp;
+        self.zeros.clear();
+        self.zeros.resize(frames, 0.0);
+        let zeros = &self.zeros;
 
         let ids = &mut self.ids;
         ids.clear();
@@ -275,7 +402,7 @@ impl Mixer {
                 v.x.resize(frames, 0.0);
             }
             let streaming = real
-                && sp.is_some_and(|s| s.gain > 0.0)
+                && sp.is_some_and(|s| s.audible())
                 && self.streams.as_mut().is_some_and(|st| st.pull(sid, &mut v.x));
             let clip = if real { None } else { sp.and_then(|s| self.clips.get(&s.src)) };
             let talking = streaming || (sp.is_some_and(|s| s.talk) && clip.is_some());
@@ -284,7 +411,7 @@ impl Mixer {
             }
             v.talking = talking;
             let (tl, tr, tm) = match sp {
-                Some(s) if talking => {
+                Some(s) if talking || v.fx_sounding => {
                     let b = behind(s.az);
                     let g = s.gain * master * (1.0 - BEHIND_QUIET * b);
                     let (l, r) = pan_gains(s.az, s.el);
@@ -292,7 +419,8 @@ impl Mixer {
                 }
                 _ => (0.0, 0.0, v.muffle),
             };
-            if !talking && v.gl < 1e-4 && v.gr < 1e-4 {
+            if !talking && !v.fx_sounding && v.gl < 1e-4 && v.gr < 1e-4 && v.devs.iter().all(DevOut::quiet) {
+                v.devs.clear();
                 v.gl = 0.0;
                 v.gr = 0.0;
                 self.levels.insert(sid, 0.0);
@@ -314,6 +442,7 @@ impl Mixer {
                         // (an empty clip, or a real player gone from the feed: nothing to play)
                         v.gl = 0.0;
                         v.gr = 0.0;
+                        v.devs.clear();
                         self.levels.insert(sid, 0.0);
                         continue;
                     }
@@ -332,7 +461,21 @@ impl Mixer {
                 v.ir.reverse(); // (back to front: see lowpass_into)
                 v.ir_a = a;
             }
-            lowpass_into(&v.x, &mut v.hist, &v.ir, &mut v.full, &mut v.y);
+            // (the direct voice's own effects - a helmet, a robot; the devices take the voice as it came)
+            let fx = sp.map(|s| s.effects).filter(|e| !e.is_clean());
+            let direct: &[f32] = if fx.is_some() || v.fx_sounding {
+                let e = v.fx.get_or_insert_with(|| Effect::new((sid as u64).wrapping_mul(31)));
+                e.set(&fx.unwrap_or_default(), 1.0);
+                v.fx_out.clear();
+                v.fx_out.resize(frames, 0.0);
+                let on = talking && fx.is_some();
+                let x = if on { &v.x[..frames] } else { &zeros[..] };
+                v.fx_sounding = e.process(x, on, &mut v.fx_out);
+                &v.fx_out
+            } else {
+                &v.x
+            };
+            lowpass_into(direct, &mut v.hist, &v.ir, &mut v.full, &mut v.y);
             let nl = v.gl + (tl - v.gl) * k;
             let nr = v.gr + (tr - v.gr) * k;
             // (the gains ramp across the block, in float32 as numpy does)
@@ -344,7 +487,26 @@ impl Mixer {
             }
             v.gl = nl;
             v.gr = nr;
-            self.levels.insert(sid, nl.max(nr));
+            let mut level = nl.max(nr);
+            // the devices it comes out of
+            let via: &[Via] = sp.map_or(&[], |s| &s.via);
+            while v.devs.len() < via.len() {
+                let i = v.devs.len() as u64 + 1;
+                v.devs.push(DevOut::new((sid as u64).wrapping_mul(31).wrapping_add(i)));
+            }
+            for (i, d) in v.devs.iter_mut().enumerate() {
+                let dv = via.get(i);
+                let on = talking && dv.is_some_and(Via::audible);
+                if !on && d.quiet() {
+                    continue;
+                }
+                let x = if on { &v.x[..frames] } else { &zeros[..] };
+                level = level.max(d.render(x, on, dv, master, k, ramp, out));
+            }
+            while v.devs.len() > via.len() && v.devs.last().is_some_and(DevOut::quiet) {
+                v.devs.pop();
+            }
+            self.levels.insert(sid, level);
         }
         for s in out.iter_mut() {
             *s = s.tanh();

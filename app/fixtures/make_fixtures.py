@@ -207,6 +207,28 @@ def feed_cases():
                                           dict(id=2, listen='off'), dict(listen='always'),
                                           dict(id=3, room=room, key=key, region='weur')]),
         dict(me=1, room_seed='s', players='x'), dict(me=1, players=[dict(id=2, listen='loud')]),
+        # devices, sound effects, transmit
+        dict(me='a', room_seed='s', range=[2, 10], transmit=['b', 'c', 'a', 'z'],
+             listener=dict(position=[0, 0, 0], forward=[0, 0, 1], right=[1, 0, 0], up=[0, 1, 0]),
+             speakers=[dict(id='b', position=[3, 0, 4],
+                            via=[dict(device='radio', position=[0, 0, 1], signal=0.4),
+                                 dict(device='pa', positions=[[0, 5, 10], [0, 5, 40], [30, 5, 0]],
+                                      effects=dict(reverb=0.9, static=0.1, band=False, echo=0.3, hum=None)),
+                                 dict(position=[2, 0, 0], range=[1, 3],
+                                      effects=dict(pitch=15, wobble=0.4, robot=60, echo=[0.25, 2], drive=False))]),
+                       dict(id='c', via=[dict(device='loudspeaker')]),
+                       dict(id='m', via=[dict(device='loudspeaker', position=[0, 0, 10], facing=[0, 0, 1]),
+                                         dict(device='loudspeaker', position=[0, 0, 10], facing=[0, 0, -2]),
+                                         dict(device='loudspeaker', position=[0, 0, 10], facing=[1, 0, 0], back=0.5),
+                                         dict(device='pa', position=[0, 0, 10], facing=[0, 0, 0])]),
+                       dict(id='d', azimuth=20, effects=dict(pitch=-3, reverb=0.7, band=[100, 30000]),
+                            via=[dict(device='radio', gain=0.5, azimuth=-90), dict(device='pa', positions=[[1, 1, 1]])]),
+                       dict(id='e', via={})]),
+        dict(me='a', room_seed='s', transmit=True, to=['b']), dict(me='a', room_seed='s', transmit=False),
+        dict(speakers=[dict(id=1, via=[dict(device='tv')])]),
+        dict(speakers=[dict(id=1, via=[dict(effects=dict(band=[3000, 300]))])]),
+        dict(speakers=[dict(id=1, via=[dict(effects=dict(drive='x'))])]), dict(speakers=[dict(id=1, effects=[1])]),
+        dict(transmit='all'), dict(speakers=[dict(id=1, via=[dict(positions=[[1, 2]])])]),
     ]
     feeds = [hx(o) for o in objs]
     feeds += [json.dumps(objs[0]), ' ' + hx(objs[2]).upper() + ' ', '', 'garbage', '7b', hx([1, 2]), 'zz' + hx(objs[1])]

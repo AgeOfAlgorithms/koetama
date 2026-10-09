@@ -3,7 +3,7 @@
 //! translations_status: one line each, "type" first). The socket connector sends them as lines, the files connector
 //! as numbered files (json, or a Teardown prefab whose tag holds the object's hex: object_prefab).
 use crate::profile::Profile;
-use kd_common::feed::{self, Feed, PlayerId, RuleState, Speaker};
+use kd_common::feed::{self, Device, Effects, Feed, Out, PlayerId, RuleState, Speaker, Via};
 use kd_common::paths;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -332,6 +332,152 @@ fn short_text(v: Option<&Value>) -> String {
     v.and_then(Value::as_str).unwrap_or("").chars().filter(|c| !c.is_control()).take(64).collect()
 }
 
+/// A number field of an object (absent or null: `def`).
+fn number(o: &Value, k: &str, def: f64) -> Result<f64, String> {
+    match o.get(k) {
+        None | Some(Value::Null) => Ok(def),
+        Some(x) => x.as_f64().filter(|f| f.is_finite()).ok_or(format!("\"{k}\" must be a number")),
+    }
+}
+
+/// `effects` (PROTOCOL.md "Sound effects") on top of `base` (a device's preset): each field given replaces the
+/// preset's (0, false or null: that effect off).
+fn parse_effects(v: Option<&Value>, base: Effects) -> Result<Effects, String> {
+    let o = match v {
+        None | Some(Value::Null) => return Ok(base),
+        Some(o) if o.is_object() => o,
+        Some(_) => return Err("\"effects\" must be an object".into()),
+    };
+    let off = |k: &str| matches!(o.get(k), Some(Value::Bool(false)) | Some(Value::Null));
+    let amount = |k: &str, def: f64, lo: f64, hi: f64| -> Result<f64, String> {
+        if off(k) {
+            return Ok(0.0);
+        }
+        Ok(number(o, k, def).map_err(|_| format!("the effect \"{k}\" must be a number"))?.clamp(lo, hi))
+    };
+    let pair = |k: &str| -> Option<(f64, f64)> {
+        let a = list(o.get(k)?)?;
+        match (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64), a.len()) {
+            (Some(x), Some(y), 2) if x.is_finite() && y.is_finite() => Some((x, y)),
+            _ => None,
+        }
+    };
+    let band = match o.get("band") {
+        None => base.band,
+        Some(Value::Null) | Some(Value::Bool(false)) => None,
+        Some(_) => {
+            let (lo, hi) = pair("band").ok_or("the effect \"band\" must be [low Hz, high Hz]")?;
+            let (lo, hi) = (lo.clamp(20.0, 20000.0), hi.clamp(20.0, 20000.0));
+            if lo >= hi {
+                return Err("the effect \"band\" must be [low Hz, high Hz], low below high".into());
+            }
+            Some((lo, hi))
+        }
+    };
+    let echo = match o.get("echo") {
+        None => base.echo,
+        Some(Value::Null) | Some(Value::Bool(false)) => None,
+        Some(x) if x.is_number() => {
+            let d = x.as_f64().filter(|d| d.is_finite()).unwrap_or(0.0);
+            (d > 0.0).then_some((d.clamp(0.02, 1.0), 0.35))
+        }
+        Some(_) => {
+            let (d, f) = pair("echo").ok_or("the effect \"echo\" must be a delay in seconds or [delay, feedback]")?;
+            (d > 0.0).then_some((d.clamp(0.02, 1.0), f.clamp(0.0, 0.9)))
+        }
+    };
+    Ok(Effects {
+        band,
+        drive: amount("drive", base.drive, 0.0, 1.0)?,
+        compress: amount("compress", base.compress, 0.0, 1.0)?,
+        hiss: amount("static", base.hiss, 0.0, 1.0)?,
+        crackle: amount("crackle", base.crackle, 0.0, 1.0)?,
+        squelch: amount("squelch", base.squelch, 0.0, 1.0)?,
+        horn: amount("horn", base.horn, 0.0, 1.0)?,
+        lofi: amount("lofi", base.lofi, 0.0, 1.0)?,
+        wobble: amount("wobble", base.wobble, 0.0, 1.0)?,
+        pitch: amount("pitch", base.pitch, -12.0, 12.0)?,
+        robot: amount("robot", base.robot, 0.0, 2000.0)?,
+        echo,
+        reverb: amount("reverb", base.reverb, 0.0, 1.0)?,
+        hum: amount("hum", base.hum, 0.0, 1.0)?,
+    })
+}
+
+/// A speaker's `via` (PROTOCOL.md "Devices"): each device's places as this player hears them - direction, loudness
+/// by the distance and the device's range (or the `gain` given), and how much later than the nearest place each is.
+fn parse_via(v: Option<&Value>, ears: Option<Ears>) -> Result<Vec<Via>, String> {
+    let a = match v {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(x) => list(x).filter(|a| a.len() <= feed::MAX_VIA).ok_or("\"via\" must be a list of at most 8 devices")?,
+    };
+    let mut out = Vec::new();
+    for d in a {
+        if !d.is_object() {
+            return Err("each of \"via\" must be an object".into());
+        }
+        let device = match d.get("device") {
+            None | Some(Value::Null) => Device::Plain,
+            Some(x) => x
+                .as_str()
+                .and_then(Device::from_name)
+                .ok_or("a device's \"device\" must be \"radio\", \"loudspeaker\", \"pa\" or \"plain\"")?,
+        };
+        let mut places: Vec<[f64; 3]> = vec3(d.get("position")).into_iter().collect();
+        match d.get("positions") {
+            None | Some(Value::Null) => {}
+            Some(x) => {
+                let ps = list(x).filter(|p| p.len() <= feed::MAX_OUTS).ok_or("a device's \"positions\" must be a list of at most 16 positions")?;
+                for p in ps {
+                    places.push(vec3(Some(p)).ok_or("a device's \"positions\" must be a list of [x, y, z]")?);
+                }
+            }
+        }
+        places.truncate(feed::MAX_OUTS);
+        let range = range(d.get("range")).unwrap_or(device.default_range());
+        let gain_given = d.get("gain").is_some_and(|g| !g.is_null());
+        let given = number(d, "gain", 1.0)?.clamp(0.0, 1.0);
+        // (a horn pointing somewhere: loud in front, `back` straight behind)
+        let facing = vec3(d.get("facing")).and_then(unit);
+        let back = number(d, "back", device.default_back())?.clamp(0.0, 1.0);
+        let outs: Vec<Out> = match ears.filter(|_| !places.is_empty()) {
+            Some(e) => {
+                let placed: Vec<(f64, f64, f64)> = places.iter().map(|p| e.place(*p)).collect();
+                let nearest = placed.iter().map(|p| p.2).fold(f64::INFINITY, f64::min);
+                placed
+                    .iter()
+                    .zip(&places)
+                    .map(|(&(az, el, dist), p)| Out {
+                        az,
+                        el,
+                        gain: if gain_given {
+                            given
+                        } else {
+                            feed::falloff(dist, range) * facing.map_or(1.0, |f| feed::directivity(f, sub(e.position, *p), back))
+                        },
+                        delay: ((dist - nearest) / feed::SOUND_SPEED).clamp(0.0, feed::MAX_DELAY),
+                    })
+                    .collect()
+            }
+            // (no positions, or no listener: one place, where the game says)
+            None => vec![Out {
+                az: number(d, "azimuth", 0.0)?,
+                el: number(d, "elevation", 0.0)?,
+                gain: if gain_given || places.is_empty() { given } else { 0.0 },
+                delay: 0.0,
+            }],
+        };
+        out.push(Via {
+            device,
+            outs,
+            muffle: number(d, "muffle", 0.0)?.clamp(0.0, 1.0),
+            signal: number(d, "signal", 1.0)?.clamp(0.0, 1.0),
+            effects: parse_effects(d.get("effects"), Effects::preset(device))?,
+        });
+    }
+    Ok(out)
+}
+
 /// One feed (the top one, or a hub's player's: `inherit` = the host's room, key and region).
 fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Feed, String> {
     if !v.is_object() {
@@ -419,12 +565,16 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
                     _ => None,
                 };
                 let own_range = range(s.get("range"));
+                let via = parse_via(s.get("via"), ears)?;
                 let gain_given = s.get("gain").is_some_and(|g| !g.is_null());
+                let directed = ["position", "azimuth", "elevation"].iter().any(|k| s.get(*k).is_some_and(|x| !x.is_null()));
                 let gain = if gain_given {
                     num(s, "gain", 1.0)?.clamp(0.0, 1.0)
                 } else if let Some((_, _, d)) = placed {
                     // (for now: the range known here; the runtime puts in the one the player's Koetama announces)
                     feed::falloff(d, own_range.or(my_range).unwrap_or(feed::DEFAULT_RANGE))
+                } else if !via.is_empty() && !directed {
+                    0.0 // (heard only through their devices)
                 } else {
                     1.0
                 };
@@ -446,6 +596,8 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
                         distance: placed.map(|p| p.2),
                         gain_given,
                         range: own_range,
+                        via,
+                        effects: parse_effects(s.get("effects"), Effects::default())?,
                     },
                 );
             }
@@ -470,6 +622,22 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
             feed::voice_to(ids.iter().map(|id| feed::relay_id(&room, id)).filter(|&r| r != me).map(Some))
         }
         Some(_) => return Err("\"to\" must be a list of at most 256 player ids".into()),
+    };
+    // (transmit: into a device - also to these players, or to everyone in the room)
+    let mut transmit_all = false;
+    let to = match v.get("transmit") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => to,
+        Some(Value::Bool(true)) => {
+            transmit_all = true;
+            to
+        }
+        Some(x) if list(x).is_some_and(|a| a.len() <= 256) => {
+            let ids: Option<Vec<PlayerId>> = list(x).unwrap_or_default().iter().map(player_id).collect();
+            let ids = ids.ok_or("\"transmit\" must be true, false or a list of player ids")?;
+            let extra = ids.iter().map(|id| feed::relay_id(&room, id)).filter(|&r| r != me);
+            feed::voice_to(to.iter().copied().chain(extra).map(Some))
+        }
+        Some(_) => return Err("\"transmit\" must be true, false or a list of at most 256 player ids".into()),
     };
     let translations = match v.get("translations") {
         None | Some(Value::Null) => Vec::new(),
@@ -525,6 +693,7 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         name: short_text(v.get("name")),
         range: my_range,
         clashes,
+        transmit_all,
         players: Vec::new(),
         raw: String::new(),
     })

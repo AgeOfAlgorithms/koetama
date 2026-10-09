@@ -6,6 +6,7 @@
 //! output's audio thread locks it for each block (lock, render, unlock). `Output` and `Input` own their cpal stream:
 //! keep them alive as long as the sound should play; dropping one stops it.
 mod devices;
+pub mod effects;
 mod mixer;
 mod wav;
 

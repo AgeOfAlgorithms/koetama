@@ -85,10 +85,12 @@ struct Cfg {
     me_id: Option<PlayerId>,
     range: Option<(f32, f32)>,
     to: Vec<u16>,
+    /// `transmit: true`: the voice also goes to everyone in the room (heard from within PRESENT)
+    to_all: bool,
     /// the microphone is wanted, and push to talk (Some(held)) or the speech detector (None)
     mic: bool,
     ptt: Option<bool>,
-    /// the real players this one hears (src 0, gain above 0)
+    /// the real players this one hears (src 0, gain above 0 or a device heard)
     hears: Vec<u16>,
     /// the real players' ids (src 0), by relay id
     ids: HashMap<u16, PlayerId>,
@@ -285,10 +287,11 @@ impl Voice {
         // (relay ids: 1..=65535, never this player's own)
         let rid = |&i: &i64| u16::try_from(i).ok().filter(|&i| i > 0 && i != me);
         c.to = feed.to.iter().filter_map(rid).collect();
+        c.to_all = feed.transmit_all;
         c.mic = feed.mic;
         c.ptt = feed.ptt;
         let real = || feed.speakers.iter().filter(|(_, s)| s.src == 0);
-        c.hears = real().filter(|(_, s)| s.gain > 0.0).filter_map(|(id, _)| rid(id)).collect();
+        c.hears = real().filter(|(_, s)| s.audible()).filter_map(|(id, _)| rid(id)).collect();
         c.ids = real().filter(|(_, s)| !s.id.text.is_empty()).filter_map(|(id, s)| Some((rid(id)?, s.id.clone()))).collect();
         let mut present_to = c.to.clone();
         for r in real().filter_map(|(id, _)| rid(id)) {
@@ -490,7 +493,17 @@ fn run(sh: Arc<Shared>, rx: Receiver<Block>, relay: String, log: Log) {
                 (true, Some(held)) => Some(Mode::PushToTalk(held)),
                 (true, None) => Some(Mode::Detector(false)), // (talking: per block)
             };
-            (c.wanted(), c.room.clone(), c.me, c.key, c.to.clone(), mode, c.me_id.clone(), c.range, c.present_to.clone())
+            let mut to = c.to.clone();
+            if c.to_all {
+                // (into a device for everyone: every player in the room now)
+                let now = sh.now();
+                for (&r, s) in lock(&sh.seen).iter() {
+                    if now - s.t <= PRESENT && r != c.me && !to.contains(&r) && to.len() < frames::MAX_TO {
+                        to.push(r);
+                    }
+                }
+            }
+            (c.wanted(), c.room.clone(), c.me, c.key, to, mode, c.me_id.clone(), c.range, c.present_to.clone())
         };
         if room != last_room {
             // (a new room: a new key - what was buffered and heard goes; connect at once)

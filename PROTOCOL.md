@@ -35,7 +35,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `talk_key` | false | push to talk: true while the talk key is held. Send a feed as soon as it changes. The microphone stays open, so a line starts from just before the key arrived (the feed's delay costs no first word) and ends 0.25 s after it is let go |
 | `lang` | `"en"` | the language the player speaks (`en`, `ru`, `zh`, `yue`, `ja`, `ko`, `es`, ... or `auto`: Koetama finds it, even several in one line) |
 | `live` | true | the words so far while the player talks (false: only the finished line; less CPU) |
-| `speakers` | none | the other players this player can hear, and how: `id` (required: their player id), then EITHER `position` (with `listener`: Koetama works out the direction, and the loudness from the distance and that player's `range` - "Positions and ranges") OR `azimuth` (degrees from where the camera looks: 0 ahead, 90 right, ±180 behind) and `elevation` (degrees up); `gain` 0..1 (given: used as it is; 0: not heard), `muffle` 0..1 (0 clear, 1 the most muffled; behind a wall ~0.7, or where words are garbled), `name` (shown in Koetama's window), `range` (theirs, until their own Koetama announces one). A **test voice** instead of a player: `"test_voice": n` (one of the profile's `test_voices`), `"talking": true` while it should play, and optionally its own `range` |
+| `speakers` | none | the other players this player can hear, and how: `id` (required: their player id), then EITHER `position` (with `listener`: Koetama works out the direction, and the loudness from the distance and that player's `range` - "Positions and ranges") OR `azimuth` (degrees from where the camera looks: 0 ahead, 90 right, ±180 behind) and `elevation` (degrees up); `gain` 0..1 (given: used as it is; 0: not heard), `muffle` 0..1 (0 clear, 1 the most muffled; behind a wall ~0.7, or where words are garbled), `name` (shown in Koetama's window), `range` (theirs, until their own Koetama announces one), `via` (the devices their voice also comes out of: "Devices"). A **test voice** instead of a player: `"test_voice": n` (one of the profile's `test_voices`), `"talking": true` while it should play, and optionally its own `range` |
 | `me` | none | this player's id in the game session: a whole number or a string of 1 to 64 characters (at most 255 bytes of UTF-8; a Steam id, a name) - the same one the other players' games use for this player |
 | `name` | `""` | this player's name (shown in the other players' Koetama windows) |
 | `room_seed` | none | the session's voice room, as any string of 1 to 256 characters every player of the session has (a lobby id and its password, a server's address and world): each Koetama makes the same room and key from it. Anyone who knows the seed can listen: put something private in it ("Real voices") |
@@ -43,6 +43,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `listener` | none | where this player hears from: `{"position": [x,y,z], "forward": [x,y,z], "right": [x,y,z], "up": [x,y,z]}` in the game's own units and axes (the three directions settle which way is right; they need not be unit length) |
 | `range` | none | how far this player's voice reaches now: `[near, far]` in the game's units - full loudness within `near`, nothing beyond `far` (a whisper `[1,4]`, talk `[8,25]`, a shout `[20,70]`). Other players' Koetamas use it for this player's loudness |
 | `to` | (with `range` and positions: everyone within `far`) | the player ids who should get this player's voice right now; empty: nobody. Left out: with `range`, `listener` and speakers' positions, Koetama sends to the speakers within `far` (and 10 % more); else nobody |
+| `transmit` | false | this player's voice is going into a device now ("Devices"): `true` - also to everyone in the voice room; a list of player ids - also to them |
 | `region` | `""` | where the voice room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; `""` (or anything else): wherever the first player is. Every player of a session sends the same one |
 | `translations` | none | up to two `{"from", "to"}` (language codes): "Translation" |
 | `to_translate` | none | the chat lines to translate: `{"id", "text"}`, at most 16, each at most 400 bytes of UTF-8. Ids are the game's (1 to 15 digits, unique in the session). Keep a line in every feed until its `translation` arrives (drop it after ~10 s without one) |
@@ -143,6 +144,80 @@ A game can give Koetama positions instead of doing the sound's maths itself:
 - `muffle` stays the game's (it knows the walls: a raycast between the two players).
 
 Azimuth and elevation (and `gain`, `to`) still work as before for a game that works them out itself.
+
+## Devices: walkie-talkies, loudspeakers, a PA
+
+A voice can also come out of things: a walkie-talkie on someone's belt or on the floor, a loudspeaker (a megaphone,
+an intercom), a PA system's speakers around a building. Each sounds like one: a walkie-talkie narrow, hissing and
+crackling, with a click when the talk button goes down and a burst of static (the squelch tail) when it comes up; a
+loudspeaker narrow, hard and ringing; a PA fuller, through several speakers at once - the farther ones arriving later
+(echo) - and the hall's reverb. The direct voice still plays where the player stands, as usual.
+
+These are ways a voice can sound, nothing more: whether a game has walkie-talkie items, needs one to use the radio,
+or just offers a "radio" chat mode is the game's business. Koetama plays what the feed asks for. A device with no
+position (`{"device": "radio"}`) plays in this player's own ear: a radio chat with no items at all.
+
+**The talker's game** says when their voice goes into a device (the walkie's talk button held, at the PA's
+microphone, a megaphone up): **`transmit`** in the feed - `true` (to everyone in the voice room) or a list of player
+ids (the ones whose games might play it: the walkie channel's players, everyone near the PA's speakers). Their voice
+then goes to those players as well as to `to`. Left out or `false`: no device.
+
+**Each listener's game** says where that voice comes out for them: the speaker's entry gets **`via`**, a list of
+devices (at most 8), each
+
+    {"device":"radio","position":[4,1,2],"signal":0.7}
+    {"device":"loudspeaker","position":[0,3,10],"range":[5,40]}
+    {"device":"pa","positions":[[0,5,0],[30,5,0],[60,5,0]],"effects":{"reverb":0.8}}
+    {"position":[0,2,0],"effects":{"pitch":5,"wobble":0.4,"static":0.3}}
+
+| field | default | meaning |
+|---|---|---|
+| `device` | `plain` | the preset: `radio` (a walkie-talkie, a radio set), `loudspeaker` (a megaphone, an intercom, one horn), `pa` (a PA system: several speakers, a hall), `plain` (no effects but the ones given) |
+| `position` / `positions` | none | where it is (with `listener`), or several places that play together (at most 16; a PA's speakers): direction and loudness from each, and a speaker farther than the nearest one is heard later by the difference in distance (sound at 343 units a second: the game's units are taken as metres) |
+| `azimuth`, `elevation` | 0 | instead of positions, for a game that works out directions itself |
+| `range` | radio `[1,8]`, loudspeaker `[5,40]`, pa `[10,60]`, plain `[10,30]` | how far the device is heard: loudness by distance as for voices ("Positions and ranges") - the device's own, not the talker's |
+| `gain` | (by distance) | given: used as it is (0: not heard) |
+| `facing` | none | the direction it points ([x, y, z]): a horn is loud in front and quiet behind - by the angle to the listener, 1 straight ahead down to `back` straight behind (back + (1 - back) ((1 + cos) / 2)²). A megaphone: where its holder looks |
+| `back` | loudspeaker 0.15, others 1 | the loudness straight behind, 0..1, when it has a `facing` (1: the same all round) |
+| `muffle` | 0 | as for a voice: the walls between the listener and the device |
+| `signal` | 1 | reception, 0..1: lower is more static and crackle, words breaking up below ~0.3 |
+| `effects` | the preset's | how it sounds: "Sound effects" |
+
+A speaker with `via` and no `position`, `azimuth` or `gain` is heard only through its devices (a walkie-talkie
+across the map). A talker's loudness carries through (a whisper into a walkie-talkie comes out quiet, a shout
+distorts). Test voices take `via` too, so a game can try its devices with no second player. Devices are the game's to
+show: `talking` says when a player is heard, and the text bubbles of what they said (`speech`, shared by the game as
+usual) belong at the devices as well as over the talker.
+
+## Sound effects
+
+How a device - or a player's own voice - sounds is a chain of effects, each set on its own. A device starts from
+its preset; `effects` changes any of them (0, `false` or `null`: off) and leaves the rest. A speaker's own
+`effects` (on their entry in `speakers`, no preset) change their direct voice: a helmet, a robot, a ghost. So the
+game decides how each of its voice modes sounds, and gets a sensible sound when it says nothing.
+
+    "effects": {"band": [300, 3000], "drive": 0.4, "static": 0.2, "pitch": 4, "echo": [0.25, 0.4], "reverb": 0.3}
+
+| effect | value | what it does | radio | loudspeaker | pa |
+|---|---|---|---|---|---|
+| `band` | [low Hz, high Hz] | keeps only that band (a small speaker, a phone line) | [300, 3000] | [400, 5000] | [150, 7000] |
+| `drive` | 0..1 | saturation and clipping (louder words break up more) | 0.4 | 0.6 | 0.2 |
+| `compress` | 0..1 | evens out loudness (a whisper and a shout come closer) | 0.35 | 0.4 | 0.5 |
+| `static` | 0..1 | hiss under the voice | 0.2 | | |
+| `crackle` | 0..1 | crackles and dropouts | 0.1 | | |
+| `squelch` | 0..1 | a click when the voice starts, a burst of static when it ends (a walkie-talkie's talk button) | 0.8 | | |
+| `horn` | 0..1 | a horn's resonances and metallic ring | | 0.7 | 0.2 |
+| `lofi` | 0..1 | lower sample rate and bits (a cheap digital link) | 0.2 | | |
+| `wobble` | 0..1 | the pitch and loudness waver (tape, a fading signal, underwater) | | | |
+| `pitch` | -12..12 | semitones up (a higher voice) or down | | | |
+| `robot` | Hz, 0..2000 | ring modulation (a robot; ~30-100 Hz) | | | |
+| `echo` | seconds, or [seconds, feedback 0..0.9] | a repeating echo (a canyon; feedback 0.35 when not given) | | | |
+| `reverb` | 0..1 | the room: a small room .. a hangar | | | 0.5 |
+| `hum` | 0..1 | mains hum | | | 0.05 |
+
+(The presets' numbers may still be tuned; a game that wants a sound exactly should give its effects.) A device's
+`signal` adds static and crackle on top. Effects never make the voice much louder or quieter: the
+distance does that.
 
 ## Hub: games whose script runs only on the host
 

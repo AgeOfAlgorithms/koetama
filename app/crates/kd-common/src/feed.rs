@@ -77,7 +77,199 @@ pub struct Speaker {
     /// the range the feed gives for this speaker ([near, far]; a test voice's own), if any
     #[serde(default)]
     pub range: Option<(f64, f64)>,
+    /// the devices their voice also comes out of for this player (PROTOCOL.md "Devices"), at most MAX_VIA
+    #[serde(default)]
+    pub via: Vec<Via>,
+    /// effects on their direct voice (a helmet, a robot; default none)
+    #[serde(default)]
+    pub effects: Effects,
 }
+
+impl Speaker {
+    /// Heard at all: directly, or through one of the devices.
+    pub fn audible(&self) -> bool {
+        self.gain > 0.0 || self.via.iter().any(Via::audible)
+    }
+}
+
+/// What a voice can come out of besides the player (PROTOCOL.md "Devices"): a preset of sound effects and a range.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Device {
+    /// no preset: only the effects the feed gives
+    #[default]
+    Plain,
+    /// a walkie-talkie, a radio set
+    Radio,
+    /// a megaphone, an intercom, one horn
+    Loudspeaker,
+    /// a PA system: several speakers, a hall
+    Pa,
+}
+
+impl Device {
+    pub fn from_name(s: &str) -> Option<Device> {
+        match s {
+            "plain" => Some(Device::Plain),
+            "radio" => Some(Device::Radio),
+            "loudspeaker" => Some(Device::Loudspeaker),
+            "pa" => Some(Device::Pa),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Device::Plain => "plain",
+            Device::Radio => "radio",
+            Device::Loudspeaker => "loudspeaker",
+            Device::Pa => "pa",
+        }
+    }
+
+    /// how far it is heard when the feed does not say
+    pub fn default_range(self) -> (f64, f64) {
+        match self {
+            Device::Plain => DEFAULT_RANGE,
+            Device::Radio => (1.0, 8.0),
+            Device::Loudspeaker => (5.0, 40.0),
+            Device::Pa => (10.0, 60.0),
+        }
+    }
+
+    /// how loud it is straight behind, when it points somewhere (`facing`): a horn is directional
+    pub fn default_back(self) -> f64 {
+        if self == Device::Loudspeaker {
+            0.15
+        } else {
+            1.0
+        }
+    }
+}
+
+/// The loudness of a horn pointing along `facing` (a unit vector) heard from `to` (from the horn to the listener):
+/// 1 straight ahead, `back` straight behind, between: back + (1 - back) ((1 + cos) / 2)^2.
+pub fn directivity(facing: [f64; 3], to: [f64; 3], back: f64) -> f64 {
+    let n = (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt();
+    if n < 1e-9 {
+        return 1.0;
+    }
+    let cos = (facing[0] * to[0] + facing[1] * to[1] + facing[2] * to[2]) / n;
+    let h = (1.0 + cos.clamp(-1.0, 1.0)) / 2.0;
+    back + (1.0 - back) * h * h
+}
+
+/// A voice's sound effects (PROTOCOL.md "Sound effects"), each a block of its own: 0 / None is off. A device's
+/// preset (Effects::preset) with the feed's `effects` on top; the mixer runs them (kd_audio::effects).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Effects {
+    /// keep only this band, Hz (low, high): a small speaker
+    pub band: Option<(f64, f64)>,
+    /// saturation and clipping 0..1
+    pub drive: f64,
+    /// compression 0..1 (whisper and shout closer together)
+    pub compress: f64,
+    /// hiss under the voice 0..1 (`static`)
+    pub hiss: f64,
+    /// crackles and dropouts 0..1
+    pub crackle: f64,
+    /// a radio's key-up click and squelch tail 0..1 (how loud)
+    pub squelch: f64,
+    /// a horn's resonances and metallic ring 0..1
+    pub horn: f64,
+    /// lower sample rate and bits 0..1 (a cheap digital link)
+    pub lofi: f64,
+    /// pitch and loudness wobble 0..1 (tape flutter, a fading signal)
+    pub wobble: f64,
+    /// semitones, -12..12 (higher voice: up)
+    pub pitch: f64,
+    /// ring modulation, Hz (a robot voice; 0 off)
+    pub robot: f64,
+    /// a repeating echo: (delay s 0.02..1, feedback 0..0.9)
+    pub echo: Option<(f64, f64)>,
+    /// reverb 0..1 (a small room .. a hangar)
+    pub reverb: f64,
+    /// mains hum 0..1
+    pub hum: f64,
+}
+
+impl Effects {
+    /// A device's sound when the feed changes nothing.
+    pub fn preset(d: Device) -> Effects {
+        match d {
+            Device::Plain => Effects::default(),
+            Device::Radio => Effects {
+                band: Some((300.0, 3000.0)),
+                drive: 0.4,
+                compress: 0.35,
+                hiss: 0.2,
+                crackle: 0.1,
+                squelch: 0.8,
+                lofi: 0.2,
+                ..Effects::default()
+            },
+            Device::Loudspeaker => Effects {
+                band: Some((400.0, 5000.0)),
+                drive: 0.6,
+                compress: 0.4,
+                horn: 0.7,
+                ..Effects::default()
+            },
+            Device::Pa => Effects {
+                band: Some((150.0, 7000.0)),
+                drive: 0.2,
+                compress: 0.5,
+                horn: 0.2,
+                reverb: 0.5,
+                hum: 0.05,
+                ..Effects::default()
+            },
+        }
+    }
+
+    /// Nothing to do: the voice as it is.
+    pub fn is_clean(&self) -> bool {
+        *self == Effects::default()
+    }
+}
+
+/// One place a device plays from, as this player hears it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Out {
+    /// degrees, as a speaker's
+    pub az: f64,
+    pub el: f64,
+    /// 0..1
+    pub gain: f64,
+    /// s after the device's nearest place (a PA's farther speakers: the echo)
+    pub delay: f64,
+}
+
+/// A device a voice comes out of.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Via {
+    pub device: Device,
+    /// its places (a PA: several), at least one
+    pub outs: Vec<Out>,
+    /// 0 clear .. 1 behind walls
+    pub muffle: f64,
+    /// a radio's reception 0..1 (lower: more hiss and crackle, dropouts below ~0.3)
+    pub signal: f64,
+    /// its sound: the device's preset with the feed's `effects` on top
+    pub effects: Effects,
+}
+
+impl Via {
+    pub fn audible(&self) -> bool {
+        self.outs.iter().any(|o| o.gain > 0.0)
+    }
+}
+
+/// the most devices a speaker comes out of, and places a device has
+pub const MAX_VIA: usize = 8;
+pub const MAX_OUTS: usize = 16;
+/// the speed of sound (game units, taken as metres, a second) and the longest echo delay kept
+pub const SOUND_SPEED: f64 = 343.0;
+pub const MAX_DELAY: f64 = 0.5;
 
 /// The loudness at a distance for a voice reaching (near, far): 1 within near, ((far - d) / (far - near))^2 beyond,
 /// 0 from far on (PROTOCOL.md "Positions and ranges").
@@ -153,6 +345,10 @@ pub struct Feed {
     /// the speakers' ids that clash with this player's (or each other's) number in this room
     #[serde(default)]
     pub clashes: Vec<PlayerId>,
+    /// `transmit: true` - this player's voice also goes to everyone in the voice room (the ids of `transmit: [..]`
+    /// are in `to`; PROTOCOL.md "Devices")
+    #[serde(default)]
+    pub transmit_all: bool,
     /// a hub's other players: a feed each, its me_id the player (PROTOCOL.md "Hub")
     #[serde(default)]
     pub players: Vec<Feed>,

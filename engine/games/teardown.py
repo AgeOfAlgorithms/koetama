@@ -271,6 +271,124 @@ def _short(v):
     return ''.join(c for c in v if unicodedata.category(c) != 'Cc')[:64] if isinstance(v, str) else ''
 
 
+# devices and sound effects (PROTOCOL.md "Devices", "Sound effects"; kd_common::feed::Effects::preset - keep the same)
+CLEAN = dict(band=None, drive=0.0, compress=0.0, hiss=0.0, crackle=0.0, squelch=0.0, horn=0.0, lofi=0.0, wobble=0.0,
+             pitch=0.0, robot=0.0, echo=None, reverb=0.0, hum=0.0)
+PRESETS = {
+    'plain': CLEAN,
+    'radio': dict(CLEAN, band=(300.0, 3000.0), drive=0.4, compress=0.35, hiss=0.2, crackle=0.1, squelch=0.8, lofi=0.2),
+    'loudspeaker': dict(CLEAN, band=(400.0, 5000.0), drive=0.6, compress=0.4, horn=0.7),
+    'pa': dict(CLEAN, band=(150.0, 7000.0), drive=0.2, compress=0.5, horn=0.2, reverb=0.5, hum=0.05),
+}
+DEVICE_RANGE = {'plain': (10.0, 30.0), 'radio': (1.0, 8.0), 'loudspeaker': (5.0, 40.0), 'pa': (10.0, 60.0)}
+DEVICE_BACK = {'plain': 1.0, 'radio': 1.0, 'loudspeaker': 0.15, 'pa': 1.0}
+SOUND_SPEED, MAX_DELAY = 343.0, 0.5
+
+
+def directivity(facing, to, back):
+    """a horn pointing along facing (unit), heard from `to` (horn -> listener): 1 ahead, back behind"""
+    n = math.sqrt(_dot(to, to))
+    if n < 1e-9:
+        return 1.0
+    h = (1.0 + min(1.0, max(-1.0, _dot(facing, to) / n))) / 2.0
+    return back + (1.0 - back) * h * h
+EFFECT_LIMITS = dict(drive=(0, 1), compress=(0, 1), hiss=(0, 1), crackle=(0, 1), squelch=(0, 1), horn=(0, 1),
+                     lofi=(0, 1), wobble=(0, 1), pitch=(-12, 12), robot=(0, 2000), reverb=(0, 1), hum=(0, 1))
+
+
+def _pair(v):
+    if not isinstance(v, list) or len(v) != 2:
+        return None
+    ok = all(not isinstance(x, bool) and isinstance(x, (int, float)) and math.isfinite(x) for x in v)
+    return (float(v[0]), float(v[1])) if ok else None
+
+
+def _effects(v, base):
+    """`effects` on top of a preset: each field given replaces the preset's (0, false or null: off)"""
+    if v is None:
+        return dict(base)
+    if not isinstance(v, dict):
+        raise ValueError('effects')
+    out = dict(base)
+    for k, (lo, hi) in EFFECT_LIMITS.items():
+        name = 'static' if k == 'hiss' else k
+        if name in v and (v[name] is False or v[name] is None):
+            out[k] = 0.0
+        elif name in v:
+            out[k] = float(min(hi, max(lo, _num(v, name, base[k]))))
+    if 'band' in v:
+        if v['band'] is None or v['band'] is False:
+            out['band'] = None
+        else:
+            p = _pair(v['band'])
+            if p is None:
+                raise ValueError('band')
+            lo, hi = min(20000.0, max(20.0, p[0])), min(20000.0, max(20.0, p[1]))
+            if lo >= hi:
+                raise ValueError('band')
+            out['band'] = (lo, hi)
+    if 'echo' in v:
+        e = v['echo']
+        if e is None or e is False:
+            out['echo'] = None
+        elif not isinstance(e, bool) and isinstance(e, (int, float)):
+            d = float(e) if math.isfinite(e) else 0.0
+            out['echo'] = (min(1.0, max(0.02, d)), 0.35) if d > 0 else None
+        else:
+            p = _pair(e)
+            if p is None:
+                raise ValueError('echo')
+            out['echo'] = (min(1.0, max(0.02, p[0])), min(0.9, max(0.0, p[1]))) if p[0] > 0 else None
+    return out
+
+
+def _via(v, ears):
+    """a speaker's `via`: each device's places as this player hears them"""
+    if v is None:
+        return []
+    a = [] if v == {} else v
+    if not isinstance(a, list) or len(a) > 8:
+        raise ValueError('via')
+    out = []
+    for d in a:
+        if not isinstance(d, dict):
+            raise ValueError('via')
+        dev = d['device'] if d.get('device') is not None else 'plain'
+        if not isinstance(dev, str) or dev not in PRESETS:
+            raise ValueError('device')
+        places = [_vec3(d['position'])] if _vec3(d.get('position')) else []
+        if d.get('positions') is not None:
+            ps = [] if d['positions'] == {} else d['positions']
+            if not isinstance(ps, list) or len(ps) > 16:
+                raise ValueError('positions')
+            for p in ps:
+                if _vec3(p) is None:
+                    raise ValueError('positions')
+                places.append(_vec3(p))
+        places = places[:16]
+        rng = _range(d.get('range')) or DEVICE_RANGE[dev]
+        given = d.get('gain') is not None
+        g = min(1.0, max(0.0, _num(d, 'gain', 1.0)))
+        facing = _unit(_vec3(d.get('facing'))) if _vec3(d.get('facing')) else None
+        back = min(1.0, max(0.0, _num(d, 'back', DEVICE_BACK[dev])))
+        if ears and places:
+            placed = [_place(ears, p) for p in places]
+            nearest = min(p[2] for p in placed)
+            outs = []
+            for (az, el, dist), p in zip(placed, places):
+                to = [ears[0][0] - p[0], ears[0][1] - p[1], ears[0][2] - p[2]]
+                dg = directivity(facing, to, back) if facing else 1.0
+                outs.append(dict(az=az, el=el, gain=g if given else falloff(dist, rng) * dg,
+                                 delay=min(MAX_DELAY, max(0.0, (dist - nearest) / SOUND_SPEED))))
+        else:
+            outs = [dict(az=_num(d, 'azimuth', 0.0), el=_num(d, 'elevation', 0.0),
+                         gain=g if (given or not places) else 0.0, delay=0.0)]
+        out.append(dict(device=dev, outs=outs, muffle=min(1.0, max(0.0, _num(d, 'muffle', 0.0))),
+                        signal=min(1.0, max(0.0, _num(d, 'signal', 1.0))),
+                        effects=_effects(d.get('effects'), PRESETS[dev])))
+    return out
+
+
 def _parse_one(v, inherit=None):
     """one feed (the top one, or a hub's player's: inherit = the host's (room, key, region)) -> a dict; raises
     ValueError for a value of the wrong kind"""
@@ -320,18 +438,22 @@ def _parse_one(v, inherit=None):
             continue
         placed = _place(ears, _vec3(sp['position'])) if ears and _vec3(sp.get('position')) else None
         own = _range(sp.get('range'))
+        via = _via(sp.get('via'), ears)
         given = sp.get('gain') is not None
+        directed = any(sp.get(k) is not None for k in ('position', 'azimuth', 'elevation'))
         if given:
             gain = min(1.0, max(0.0, _num(sp, 'gain', 1.0)))
         elif placed:
             gain = falloff(placed[2], own or my_range or DEFAULT_RANGE)
+        elif via and not directed:
+            gain = 0.0                                  # (heard only through their devices)
         else:
             gain = 1.0
         az, el = (placed[0], placed[1]) if placed else (_num(sp, 'azimuth', 0.0), _num(sp, 'elevation', 0.0))
         speakers[rid] = dict(src=_whole(tv) if tv is not None else 0, talk=_flag(sp, 'talking', False), gain=gain,
                              az=az, el=el, muffle=min(1.0, max(0.0, _num(sp, 'muffle', 0.0))), id=pid,
                              name=_short(sp.get('name')), distance=placed[2] if placed else None, gain_given=given,
-                             range=own)
+                             range=own, via=via, effects=_effects(sp.get('effects'), CLEAN))
     ids = []
     if v.get('to') is None:
         if my_range and ears:
@@ -347,6 +469,18 @@ def _parse_one(v, inherit=None):
             r = relay_id(room, pid)
             if r != me and r not in ids and len(ids) < 64:
                 ids.append(r)
+    transmit_all = False                                # (into a device: to these players too, or to everyone)
+    t = v.get('transmit')
+    if t is True:
+        transmit_all = True
+    elif t is not None and t is not False:
+        for i in _list(v, 'transmit', 256):
+            pid = player_id(i)
+            if pid is None:
+                raise ValueError('transmit')
+            r = relay_id(room, pid)
+            if r != me and r not in ids and len(ids) < 64:
+                ids.append(r)
     pairs = _list(v, 'translations', 16)
     if not all(isinstance(t, dict) and isinstance(t.get('from'), str) and isinstance(t.get('to'), str) for t in pairs):
         raise ValueError('translations')
@@ -358,7 +492,7 @@ def _parse_one(v, inherit=None):
                 ptt=_flag(v, 'talk_key', False) if listen == 'push_to_talk' else None, lang=lang,
                 live=_flag(v, 'live', True), speakers=speakers, room=room, key=key, me=me, to=ids, region=region,
                 translations=parse_translations(pairs), to_translate=parse_requests(lines), me_id=me_id,
-                name=_short(v.get('name')), range=my_range, clashes=clashes, players=[])
+                name=_short(v.get('name')), range=my_range, clashes=clashes, transmit_all=transmit_all, players=[])
 
 
 def parse_feed(text):

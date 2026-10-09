@@ -39,6 +39,29 @@ fn range_of(v: &Value) -> Option<(f64, f64)> {
 }
 
 /// One feed against Python's (a hub's players too).
+fn same_effects(e: &kd_common::feed::Effects, w: &Value, text: &str) {
+    let pair = |v: &Value| v.as_array().map(|a| (a[0].as_f64().unwrap(), a[1].as_f64().unwrap()));
+    assert_eq!(e.band, pair(&w["band"]), "{text}: band");
+    assert_eq!(e.echo, pair(&w["echo"]), "{text}: echo");
+    let fields = [
+        ("drive", e.drive),
+        ("compress", e.compress),
+        ("hiss", e.hiss),
+        ("crackle", e.crackle),
+        ("squelch", e.squelch),
+        ("horn", e.horn),
+        ("lofi", e.lofi),
+        ("wobble", e.wobble),
+        ("pitch", e.pitch),
+        ("robot", e.robot),
+        ("reverb", e.reverb),
+        ("hum", e.hum),
+    ];
+    for (k, x) in fields {
+        assert!(same_f64(&w[k], x), "{text}: effect {k} {x} vs {}", w[k]);
+    }
+}
+
 fn same_feed(f: &Feed, want: &Value, text: &str) {
     assert_eq!(f.seq, want["seq"].as_i64().unwrap(), "{text}");
     assert!(same_f64(&want["vol"], f.vol), "{text}");
@@ -93,7 +116,22 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
             (None, None) => {}
             (d, w) => panic!("{text}: distance {d:?} vs {w:?}"),
         }
+        same_effects(&s.effects, &v["effects"], text);
+        let via = v["via"].as_array().unwrap();
+        assert_eq!(s.via.len(), via.len(), "{text}: via");
+        for (d, w) in s.via.iter().zip(via) {
+            assert_eq!(d.device.name(), w["device"].as_str().unwrap(), "{text}");
+            assert!(same_f64(&w["muffle"], d.muffle) && same_f64(&w["signal"], d.signal), "{text}");
+            same_effects(&d.effects, &w["effects"], text);
+            let outs = w["outs"].as_array().unwrap();
+            assert_eq!(d.outs.len(), outs.len(), "{text}: outs");
+            for (o, wo) in d.outs.iter().zip(outs) {
+                assert!(close(&wo["az"], o.az) && close(&wo["el"], o.el), "{text}: {o:?}");
+                assert!(close(&wo["gain"], o.gain) && close(&wo["delay"], o.delay), "{text}: {o:?}");
+            }
+        }
     }
+    assert_eq!(f.transmit_all, want["transmit_all"].as_bool().unwrap(), "{text}");
     let players = want["players"].as_array().unwrap();
     assert_eq!(f.players.len(), players.len(), "{text}: players");
     for (p, w) in f.players.iter().zip(players) {
@@ -105,7 +143,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 60);
+    assert_eq!(cases.len(), 69);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
