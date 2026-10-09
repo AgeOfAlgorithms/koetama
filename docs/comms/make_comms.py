@@ -54,7 +54,7 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 2
 .bubble.translated { color: #8d2a5c; }
 .bubble .tr { display: block; border-top: 1px solid #c9a3b6; margin-top: 4px; padding-top: 3px; color: #8d2a5c; font-size: 16px; }
 .channel { display: grid; justify-items: center; gap: 8px; }
-.wire { position: relative; width: 100%%; height: 4px; border-radius: 2px; }
+.wire { position: relative; width: calc(100%% - 36px); height: 4px; border-radius: 2px; }
 .wire::after { content: ""; position: absolute; right: -1px; top: 50%%; width: 11px; height: 11px; border-top: 4px solid currentColor; border-right: 4px solid currentColor; transform: translateY(-50%%) rotate(45deg); border-radius: 1px; }
 .chip { font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; letter-spacing: .03em; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
 .c-audio .wire { background: var(--audio); color: var(--audio); } .c-audio .chip { background: var(--audio-soft); color: var(--audio); }
