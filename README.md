@@ -41,12 +41,30 @@ Koetama (声魂, "voice spirit" in Japanese) runs next to your game. It plays th
 stand: louder when close, muffled behind walls. It also writes what you say as you say it, so the
 game can show your words in text to other players. By extension, your game or mod gains speech recognition capability, which easily lets you build speech-activated events in the game.
 
-**What kind of mods can I build with Koetama?**
-- Proximity voice chat in a game that never had voice chat before.
-- Seamless voice vs text communication between Koetama users and players without Koetama.
-- A multiplayer chat history that records spoken words into multilingual text.
-- A door that opens when a player verbally says "open sesame".
-- A wand that shoots out a variety of magic spells on specific voice commands.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/comms/1-voice-dark.png">
+  <img src="docs/comms/1-voice-light.png" width="760" alt="Voice to voice: Player 1 says &quot;How is your mother?&quot; on mic, and Player 2 nearby hears it">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/comms/2-captions-dark.png">
+  <img src="docs/comms/2-captions-light.png" width="760" alt="Voice to text: Player 1 says &quot;How is your mother?&quot; on mic, and a deaf player nearby reads it in a bubble">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/comms/3-typed-dark.png">
+  <img src="docs/comms/3-typed-light.png" width="760" alt="Text to text in proximity: a player without a microphone types &quot;How is your mother?&quot;; the players 6 m and 18 m away read it, the one 60 m away gets nothing">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/comms/4-translation-dark.png">
+  <img src="docs/comms/4-translation-light.png" width="760" alt="Voice with translation: Player 1 says &quot;Как твоя мама?&quot; in Russian; Player 2 hears it and reads it with the translation &quot;How is your mother?&quot;">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/comms/5-command-dark.png">
+  <img src="docs/comms/5-command-light.png" width="760" alt="Voice command: Player 1 says &quot;Open sesame&quot;, and the game opens a door">
+</picture>
 
 **Speech to text runs on your own PC**, and no account is needed. Your voice reaches the other players through a
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
@@ -57,14 +75,12 @@ bytes it cannot listen to, and only to the players close enough to hear you.
 ## Highlights
 
 - **Real voice chat.** Hear the other players where they stand: the game sets each voice's volume, direction and
-  muffling. Only the players in range get your voice, and a whisper stays private.
-- **Push to talk or always on.** Hold the game's talk key, or let Koetama hear when you speak.
-- **Live words.** Your line appears while you talk and is finished when you stop. Words already shown never jump back.
+  muffling. Only the players in range get your voice.
 - **For deaf and hard-of-hearing players.** Everyone who talks with Koetama is captioned live, so players who can't
-  hear (or play without sound) can follow every voice, and players without a microphone can still talk with them.
-- **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line.
-- **Fair proximity.** Each word carries the time it was said, so a player who walks up mid-sentence sees only what
-  they could have heard.
+  hear can follow every conversation, and players without a microphone can still talk with them.
+- **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line. Chat in
+  another language is translated on your own PC as it arrives, so you can play with people you share no language
+  with.
 - **Light on your PC.** Only the speech models for your languages load: about 0.9 GB of memory for one language, up
   to 1.5 GB for several. It runs on the CPU, below the game's priority, and stays idle while you are silent.
 - **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
