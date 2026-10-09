@@ -41,6 +41,8 @@ Koetama (声魂, "voice spirit" in Japanese) runs next to your game. It plays th
 stand: louder when close, muffled behind walls. It also writes what you say as you say it, so the
 game can show your words in text to other players. By extension, your game or mod gains speech recognition capability, which easily lets you build speech-activated events in the game.
 
+**What kind of communications are possible with Koetama?**
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/1-voice-dark.png">
   <img src="docs/comms/1-voice-light.png" width="760" alt="Voice to voice: Player 1 says &quot;How is your mother?&quot; on mic, and Player 2 nearby hears it">
