@@ -2,7 +2,6 @@
 //! `<relay>/v1/room/<room>?me=<me>` (wss: TLS by rustls with the Mozilla roots; ws: plain, for a local relay and the
 //! tests), blocking with short read timeouts, used by one thread (the voice thread). Binary frames both ways
 //! (frames.rs); the text "ping" keeps it alive (answered "pong").
-use std::io::ErrorKind;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +29,36 @@ pub fn room_url(relay: &str, room: &str, me: u16) -> String {
     let (room, region) = room.split_once('@').map_or((room, ""), |(r, g)| (r, g));
     let region = if region.is_empty() { String::new() } else { format!("&region={region}") };
     format!("{}/v1/room/{room}?me={me}{region}", relay.trim_end_matches('/'))
+}
+
+/// This Koetama's claim on a player id in a room (PROTOCOL.md "Real voices"): 32 hex digits, the same every time
+/// this install connects with that id to that room (a reconnect, a restart), different for any other install. The
+/// relay keeps an id for the connection that has it first; a newer one replaces it only with the same owner - so a
+/// player can come back, but nobody else can push them out.
+pub fn owner(room: &str, me: u16) -> String {
+    let mac = kd_common::feed::hmac_sha256(install_secret(), format!("koetama owner:{room}:{me}").as_bytes());
+    mac[..16].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 32 random bytes made once per install (data_dir/relay-owner.key; this run's own if the file cannot be kept).
+fn install_secret() -> &'static [u8] {
+    static SECRET: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    SECRET.get_or_init(|| {
+        let path = kd_common::paths::data_dir().join("relay-owner.key");
+        if let Ok(b) = std::fs::read(&path) {
+            if b.len() == 32 {
+                return b;
+            }
+        }
+        let b = crate::crypto::random_bytes(32).unwrap_or_else(|_| {
+            // (no randomness from the system: a run-only value - this run can still reconnect)
+            let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            kd_common::feed::hmac_sha256(&t.as_nanos().to_le_bytes(), &std::process::id().to_le_bytes()).to_vec()
+        });
+        let _ = std::fs::create_dir_all(kd_common::paths::data_dir());
+        let _ = std::fs::write(&path, &b);
+        b
+    })
 }
 
 fn tls() -> Result<Arc<rustls::ClientConfig>, String> {
@@ -71,7 +100,7 @@ impl Conn {
 
     /// open, telling a refused player id apart.
     pub fn join(relay: &str, room: &str, me: u16) -> Result<Conn, OpenError> {
-        let url = room_url(relay, room, me);
+        let url = format!("{}&owner={}", room_url(relay, room, me), owner(room, me));
         let uri: tungstenite::http::Uri = url.parse().map_err(|_| format!("not a relay address: {relay}"))?;
         let secure = match uri.scheme_str() {
             Some("wss") => true,
@@ -142,7 +171,7 @@ impl Conn {
                     })
                 }
                 Ok(_) => {} // ("pong", WebSocket pings: tungstenite answers them)
-                Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                Err(tungstenite::Error::Io(e)) if kd_common::timed_out(&e) => {
                     return Ok(())
                 }
                 Err(e) => return Err(e.to_string()),

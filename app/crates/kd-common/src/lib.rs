@@ -20,3 +20,11 @@ pub fn stdout_log() -> Log {
 pub fn null_log() -> Log {
     Arc::new(|_: &str| {})
 }
+
+/// A read that ran out of time (nothing came yet) rather than a broken connection. Windows sometimes answers a socket
+/// read past its timeout with ERROR_IO_PENDING (997, "Overlapped I/O operation is in progress") instead of
+/// WSAETIMEDOUT - taken for a broken connection, it dropped a voice connection for a second.
+pub fn timed_out(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) || e.raw_os_error() == Some(997)
+}

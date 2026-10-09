@@ -25,6 +25,18 @@ export function roomName(room, region) {
 }
 
 /** A player id from the URL (?me=), or null. */
+// A connection's owner (?owner=): 32 lower-case hex digits its Koetama makes the same every time it connects with
+// that player id to that room; "" when none is given (an older Koetama).
+export function parseOwner(s) {
+  return typeof s === "string" && /^[0-9a-f]{32}$/.test(s) ? s : "";
+}
+
+// A second connection with a player id already in the room: "replace" the old one (a reconnect: the same owner, or
+// the old one gave none) or "refuse" the new one (someone else's claim on a player who is there).
+export function onSameId(oldOwner, newOwner) {
+  return !oldOwner || oldOwner === newOwner ? "replace" : "refuse";
+}
+
 export function parseId(s) {
   if (typeof s !== "string" || !/^[0-9]{1,5}$/.test(s)) return null;
   const n = Number(s);

@@ -1,6 +1,6 @@
 [package]
 name = "kd-update"
-description = "Koetama: updates from GitHub Releases (check, download and verify the installer, run it)"
+description = "Koetama: updates from GitHub Releases (check, download and verify the installer - signed checksums - run it)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,3 +10,9 @@ kd-common.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+ed25519-dalek.workspace = true
+
+[dev-dependencies]
+# (examples/release_key.rs: the maintainer's signing tool - a key file (PKCS#8 PEM) and a new key's randomness; not in the app)
+ed25519-dalek = { workspace = true, features = ["pem"] }
+getrandom = "0.3"

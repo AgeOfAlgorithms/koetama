@@ -223,15 +223,31 @@ only output folder) - test_e2e.py uses them; KOETAMA_PROFILES_DIR (tests: the pr
 ```rust
 pub fn version_tuple(v: &str) -> Vec<u32>;  pub fn newer(latest: &str, current: &str) -> bool;
 pub struct Release { pub version, pub notes, pub installer: Option<String>, pub installer_url: Option<String>,
-                     pub sums_url: Option<String>, pub page: String }
+                     pub sums_url: Option<String>, pub sig_url: Option<String>, pub page: String,
+                     pub refused: Option<String> }                  // refused: why the installer is not offered
+impl Release { pub fn installable(&self) -> bool }                   // an installer and not refused
 pub fn parse_release(json: &str, current: &str) -> Option<Release>;   // None: not newer, a draft, a prerelease
-pub fn check(timeout: Duration) -> Result<Option<Release>, String>;
+pub fn check(timeout: Duration) -> Result<Option<Release>, String>;  // + vet() with RELEASE_KEY
+pub fn vet(r: &mut Release, key: &str, timeout);                      // sets refused: signature / version / not listed
+pub const RELEASE_KEY: &str;  SUMS;  SIG;  NOT_SIGNED;                // the public key (hex); asset names
+pub fn sums_header(version) -> String;                                // "# koetama <version>"
+pub fn verify_sums(sums: &[u8], sig: &[u8], key: &str, version: &str) -> Result<String, String>;
+pub fn signed_sums(r: &Release, key: &str, timeout) -> Result<String, String>;  // downloaded + verify_sums
 pub fn expected_sha(sums: &str, name: &str) -> Option<String>;  pub fn sha256_file(path) -> io::Result<String>;
 pub fn signer(path) -> (Option<String>, Option<String>);              // Windows Authenticode (status, subject)
-pub fn download(r: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String>;  // checksum + same publisher
+pub fn download(r: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String>;  // signed sums + checksum + same publisher
+pub fn download_with(r, key: &str, progress) -> Result<PathBuf, String>;          // (the tests' key)
 pub fn install(path) -> io::Result<()>;                                // /VERYSILENT ... /RELAUNCH=1, detached
 pub const PAGE: &str;  pub fn api_url() -> String;
 ```
+
+Signed updates: `SHA256SUMS.txt` is trusted only when `SHA256SUMS.txt.sig` (Ed25519, `ed25519-dalek`, 128 hex digits)
+is the release key's signature over its exact bytes (`verify_strict`) and its first line is `# koetama <version>` of
+the release being installed; both files must come from this repo's release URLs like the installer. No `.sig`, a bad
+one, another release's file or no key built in: `refused` (NOT_SIGNED ...), the window and `--selftest` say why, the
+releases page is still offered. Authenticode (same publisher, when this build is signed) stays as a second layer.
+`examples/release_key.rs` is the maintainer's tool (`new-key` / `sign` / `verify`; PEM key file, PROJECT.md
+"Release plan"); CI writes the version line and never sees the private key.
 
 ## koetama (the program)
 
@@ -266,9 +282,11 @@ pub struct Sender;  Sender::new()?.push(x_48k, Mode) -> Vec<Packet>;   // gate +
     pub fn take_events(&self) -> Vec<VoiceEvent>;   // VoiceEvent::Talking { id, talking } (remote and this player)
     pub fn stop(&self);
 }
-pub mod hub { HUB = 1, PLAYER = 2, MESSAGE = 3, PART = 3500, ALPHABET, new_code, normalize_code, pairing_room,
-              parts, Assembler, Channel::start(relay, code, me, log) -> Option<Channel>: send(&Value), received(),
-              other_there(), connected() }
+pub mod hub { HUB = 1, PLAYER = 2, MESSAGE = 3, PART = 3500, ALPHABET, REPAIR_AFTER = 30 s, new_code, normalize_code,
+              pairing_room, parts, Assembler, Link { room, key }, link_of(code_key, shared, hub_pub, player_pub),
+              Handshake::new(code_key, me)?: hello(), answer(&Value) -> Option<(reply, Link)>, open_frame, message_frames,
+              Channel::start(relay, code, me, log) -> Option<Channel>: send(&Value), received(), other_there(),
+              connected() /* in the link's room */, paired(), quiet() -> Option<Duration> }
 ```
 Ids: a player id is a number or a string (`kd_common::feed::PlayerId`, at most 64 characters / 255 bytes); its
 relay id is `feed::relay_id(room, id)` (the first 2 bytes of SHA-256("koetama id:" room ":" id), 0 -> 65535). Two
@@ -286,13 +304,20 @@ DEFAULT_RANGE (10, 30); a `gain` the game gives wins. With no `to`, it is every 
 
 Hub (`koetama::hub::Hub`, the host's side; `kd_games::joined::JoinedGame`, a player's): the host's feed lists
 `players` (each a feed; api::parse_feed keeps them in `Feed::players`, each with `raw` - its JSON merged with the
-host's room / key / region when it has none). For each, the hub makes a join code and a `Channel` (HUB) in the room
-the code makes; it tells the game the code (`join_code`, once per session), sends `{"feed": ..}` on each change and
-every 0.5 s, and hands the game each `{"objects": [..]}` the player's Koetama sends with `"player"` added
-(api::from_player), plus `player` joined / left (other_there: heard within 5 s; the player's Koetama sends an empty
-`objects` every 2 s). The player's JoinedGame is a Game like any other: its feed comes from the hub, its objects go
-there, its standing objects are sent again when the link comes up. Messages are cut into parts of 3500 bytes
-(`[3][msg u32][part][parts][bytes]`, encrypted like voice packets, relay ids 1 and 2).
+host's room / key / region when it has none). For each, the hub makes a join code and a `Channel` (HUB); it tells the
+game the code (`join_code`, once per session). The code is used once: in the room it makes, the player's Channel
+says `hello` (its X25519 public key, x25519-dalek, the private key from getrandom; every 1 s until answered), the
+hub's answers `welcome` (its own) to the first one, and both move to the LINK's room with the link's key
+(`link_of`: HMAC-SHA256 of the code's key, the shared secret and both public keys); the hub never goes back to the
+code's room, and nothing but the handshake is sent or taken there (Handshake is the pure state machine, the Channel's
+thread the connections: after a drop it reconnects to the link's room). Over the link the hub sends `{"feed": ..}`
+on each change and every 0.5 s, and hands the game each `{"objects": [..]}` the player's Koetama sends with
+`"player"` added (api::from_player), plus `player` joined / left (other_there: heard over the link within 5 s; the
+player's Koetama sends an empty `objects` every 2 s). A paired link quiet for REPAIR_AFTER (30 s: the player's
+Koetama closed) is dropped and the player gets a new code (a new `join_code`). The player's JoinedGame is a Game like
+any other: its feed comes from the hub, its objects go there, its standing objects are sent again when the link
+comes up. Messages are cut into parts of 3500 bytes (`[3][msg u32][part][parts][bytes]`, encrypted like voice
+packets, relay ids 1 and 2). Limit: whoever has a code before its player uses it can race them (no PAKE).
 Threads: the voice thread connects while the feed names a room and the game is feeding (again after a drop: 1, 2, 4
 ... 30 s), reads the relay (5 ms read timeouts), pings every 20 s, and turns the microphone's queued blocks into
 packets (sent only to the feed's `to`). Received packets go into a jitter buffer per sender under one short lock;

@@ -92,6 +92,30 @@ then add its signing step to the workflow. The speech models stay OUT of the sig
 license is not OSI): they download per language (pinned Hugging Face revisions now; a mirror on our own release
 later). The language detector (Apache-2.0) ships inside the app. Optional: a winget listing.
 
+**Signed updates (2026-10-09, from the security audit).** The updater installs a release only when its
+`SHA256SUMS.txt` carries `SHA256SUMS.txt.sig`: an Ed25519 signature (128 hex digits) over the file's exact bytes by
+the release key, whose public key is built into the app (`kd_update::RELEASE_KEY`), and the file's first line is
+`# koetama <version>` for that very release (an older signed file under a new tag is refused). Unsigned, a bad
+signature, another version: the window and `--selftest` say why and only the releases page is offered. Authenticode
+(same publisher) stays as an extra layer once builds are signed. The private key is
+`$HOME/.koetama-signing/release.key` (PKCS#8 PEM), outside every repo: **back it up offline (a USB stick,
+a password manager) and never commit it or give it to CI.** Losing it means no installed copy can auto-update
+again until users reinstall a build with a new key by hand. Releasing (from `app/`, `export PATH="$HOME/.cargo/bin:$PATH"`):
+
+1. Set the version in `app/Cargo.toml`, commit, tag and push: `git tag v<version> && git push origin main v<version>`.
+2. CI builds both systems and drafts the release with the installer, the Linux build and `SHA256SUMS.txt` (first line
+   `# koetama <version>`, written from the tag). Nothing is public yet.
+3. Download the draft's checksums (do not open them in an editor - the signature is over the exact bytes):
+   `gh release download v<version> -R AgeOfAlgorithms/koetama -p SHA256SUMS.txt -D <some folder>`
+4. Sign: `cargo run -p kd-update --example release_key -- sign $HOME/.koetama-signing/release.key
+   <some folder>/SHA256SUMS.txt` (writes `SHA256SUMS.txt.sig`; refuses without the version line, or with a key
+   that is not the built-in one). Check: `cargo run -p kd-update --example release_key -- verify <some folder>/SHA256SUMS.txt`.
+5. Upload only the signature: `gh release upload v<version> <some folder>/SHA256SUMS.txt.sig -R AgeOfAlgorithms/koetama`.
+6. Publish the draft (GitHub's release page -> Edit -> Publish, or `gh release edit v<version> --draft=false -R AgeOfAlgorithms/koetama`).
+
+A new key (only if the old one is lost or leaked): `cargo run -p kd-update --example release_key -- new-key <file>`
+(never overwrites a file) prints the `pub const RELEASE_KEY` line to paste into `app/crates/kd-update/src/lib.rs`.
+
 ## Open
 
 - **Real voices (2026-10-07; built and tested offline and through the live relay, NOT tried in-game):** feed version

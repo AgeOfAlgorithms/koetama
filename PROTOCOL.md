@@ -89,21 +89,27 @@ loud and from where each other player is heard (`speakers`) and who should get t
 
 **One room for the session**, two ways:
 - **`room_seed`**: a string every player's game already has - a lobby or match id, a server's address and world name,
-  a co-op password. Each Koetama makes the room and key from it (room = the first 32 hex digits of
-  HMAC-SHA256(seed, "koetama room"), key = HMAC-SHA256(seed, "koetama key")). No mod networking needed. Whoever knows
-  the seed can listen, so mix in something private: a lobby password, a key the host's mod shares, the session's
-  start time and the players' ids together.
+  a co-op password. Each Koetama makes the room and key from it: s = scrypt(seed, salt "koetama room seed",
+  N = 2^16, r = 8, p = 1, 32 bytes) - slow on purpose (~0.1 s, once per seed), so whoever sees a room's name cannot
+  try guesses at the seed quickly -, then room = the first 32 hex digits of HMAC-SHA256(s, "koetama room") and key =
+  HMAC-SHA256(s, "koetama key"). No mod networking needed. Whoever knows the seed can listen, so mix in something
+  private: a lobby password, a key the host's mod shares, the session's start time and the players' ids together -
+  and the game's name, so two games' "lobby 42" are not one room.
 - **`room` and `key`**: once per session Koetama offers a fresh random room in a `room` object (a game script has no
   good random numbers). The game gives ONE room to every player (in Teardown: each player's game forwards its offer to
   the host, the host keeps the first and shares it), and every player's feed names it. Private by construction.
 
 **Player ids** are the game's own (`me`, speakers' `id`, `to`): numbers or strings. Inside the room each one is a
 16-bit number, the first two bytes of SHA-256("koetama id:" + room + ":" + id) (1..65535; a number id as its decimal
-digits), so every Koetama names every player alike. Two ids of one room may meet on one number (about 1 in 500 with 12
-players): the relay keeps the newer connection and closes the older one, whose Koetama is told `id_taken` and stays
-out of that room (`voice` object) - it does not fight back; the next session has another room, and other numbers.
+digits), so every Koetama names every player alike. **A number belongs to the Koetama that connects with it first**:
+each connection carries an `owner` (32 hex digits: HMAC-SHA256 of a secret made once per install, kept in Koetama's
+data folder, with the room and the number - the same every time that install connects as that player, nobody
+else's). The relay lets the same owner reconnect (its old connection is closed with 4000) and refuses anyone else
+(409): nobody can push a player out of the room by taking their number. Two ids of one room may meet on one number
+(about 1 in 500 with 12 players): the second player's Koetama is refused and told `id_taken`, and stays out of that
+room (`voice` object); the next session has another room, and other numbers.
 
-**Sending.** Koetama connects to `<relay>/v1/room/<room>?me=<me>[&region=<region>]` (a WebSocket) while the feed
+**Sending.** Koetama connects to `<relay>/v1/room/<room>?me=<me>&owner=<owner>[&region=<region>]` (a WebSocket) while the feed
 names a room, reconnecting after a drop (1, 2, 4 ... 30 s), with a text `ping` every 20 s. It sends while the player
 talks (push to talk: from 0.15 s before the press arrived until 0.25 s after the release; always: while the speech
 detector hears speech, from 0.3 s before it noticed), only to `to`. Audio: Opus, 48 kHz mono, 20 ms frames, 24 kbit/s,
@@ -124,8 +130,10 @@ detector hears speech, from 0.3 s before it noticed), only to `to`. Audio: Opus,
 
 **The relay** (`relay/`): one Durable Object per room (by name; with a region: `<room>@<region>`, created with that
 location hint), the WebSocket Hibernation API. Limits: 64 players in a room, 64 recipients and 4000 bytes of
-payload in a packet, 60 packets a second from one connection; a second connection with the same `me` replaces the
-first (close code 4000). `/` and `/v1` say what it is. `npm test`, `node test/smoke.mjs <url>` (a live room),
+payload in a packet, 60 packets a second from one connection (more are dropped; twice that and the connection is
+closed: 4008), 60 new connections a minute from one address (429); a second connection with the same `me` replaces the
+first (close code 4000) only with the same `owner` - else it is refused (409). It keeps no logs. `/` and `/v1` say
+what it is. `npm test`, `node test/smoke.mjs <url>` (a live room),
 `npm run deploy` (from `relay/`, the `relay` conda env).
 
 ## Positions and ranges
@@ -230,15 +238,39 @@ games tell their Koetamas nothing. The host's Koetama then works as a **hub** fo
    `me`) and anything a feed holds for them - `listen`, `talk_key`, `lang`, `name`, `listener`, `speakers`, `range`,
    `to`, `translations`, `to_translate`. The room (`room_seed`, or `room` and `key`) and `region` are the host's
    unless a player's feed gives its own. The host's own fields stay at the top, as usual.
-2. For each player the hub answers once a **`join_code`** (`K7QF-4MXA`: 8 characters, about 40 bits). The game shows
-   each player their own code, privately (TTS: `broadcastToColor`).
-3. The player types it into their Koetama ("Join a hosted game" in the window; `koetama --cli --join K7QF-4MXA`). Their Koetama connects to the hub through the
-   relay (a room made from the code: only the two of them have it) and from then on works as if that player's feed
-   came from a game on their own PC: their microphone, speech to text, their voice in the session's room, their
+2. For each player the hub answers a **`join_code`** (`K7QF-4MXA`: 8 characters, about 40 bits), once per game
+   session. The game shows each player their own code, privately (TTS: `broadcastToColor`). **A code works once.**
+3. The player types it into their Koetama ("Join a hosted game" in the window; `koetama --cli --join K7QF-4MXA`).
+   Their Koetama and the hub pair through the relay (below) and from then on it works as if that player's feed came
+   from a game on their own PC: their microphone, speech to text, their voice in the session's room, their
    translations. The hub sends it that player's feed whenever it changes (at least once a second).
 4. Whatever that player's Koetama would tell a game, the hub tells the host's game, with **`"player": <id>`** added:
    `speech`, `talking`, `translation`, `translations_status`, `status`, `voice`. A `player` object says when a
-   player's Koetama joins or leaves.
+   player's Koetama joins (only once the paired link is up) or leaves.
+5. If a paired player's Koetama is silent for 30 s (closed), the hub drops that link and makes the player a **new
+   code**: the game gets a new `join_code` object for them (and `player` left). A player whose connection merely
+   dropped comes back over the link with the key their Koetama still holds - no new code.
+
+**Pairing.** The code makes a room and a key: `HMAC-SHA256(code, "koetama hub room")` (its first 32 hex digits) and
+`HMAC-SHA256(code, "koetama hub key")` (the code's 8 characters, upper case, no dash). In that room, sealed with that
+key, the player's Koetama says `{"hello": "<its X25519 public key, 64 hex>"}` (again every second until answered)
+and the hub answers `{"welcome": "<the hub's X25519 public key>"}`. Both then derive the link:
+
+    link_key  = HMAC-SHA256(code_key, "koetama hub link" | X25519 shared secret | hub_pub | player_pub)
+    link_room = first 32 hex digits of HMAC-SHA256(link_key, "koetama hub link room")
+
+and move to `link_room` (hub relay id 1, player 2, as before), sealing everything with `link_key`. After its first
+hello the hub leaves the code's room and never listens there again (a later hello is ignored). Feeds and objects go
+only over the link, never in the code's room; a player's Koetama takes a feed only from the link. Each pairing makes
+fresh X25519 keys (a low-order public key is refused).
+
+What this protects: someone who sees a code after it was used (a stream, a screenshot), or who sees the relay's
+traffic and guesses the code from the room's name, gets nothing - no feed (with the session's voice room key), no
+way to send objects to the host's game or to steer the player's microphone. What it cannot: someone who has the code
+**before** the player uses it can race them - pair with the hub as that player, or pose as the hub to the player (an
+active man in the middle). Short codes cannot prevent that without a PAKE; the window and the host's game show a
+player as joined only once the link is up, so a player who never gets there, or a join nobody made, calls for a new
+code (the game leaves that player out of `players` once, then lists them again: a new player gets a new code).
 
 Between the hub and a player's Koetama: plaintext type 3 = a JSON message (`{"feed": {...}}` one way, `{"objects":
 [...]}` the other), cut into parts of at most 3500 bytes: `[3][message: u32 BE][part: u8][parts: u8][bytes]`, hub

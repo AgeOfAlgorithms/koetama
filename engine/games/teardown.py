@@ -213,10 +213,17 @@ def relay_id(room, pid):
     return 65535 if n == 0 else n
 
 
+_SEEDS = {}
+
+
 def room_from_seed(seed):
-    """the room and key every Koetama makes from a room_seed (Rust: kd_common::feed::room_from_seed)"""
-    room = hmac.new(seed.encode('utf-8'), b'koetama room', hashlib.sha256).hexdigest()[:32]
-    return room, hmac.new(seed.encode('utf-8'), b'koetama key', hashlib.sha256).hexdigest()
+    """the room and key every Koetama makes from a room_seed (Rust: kd_common::feed::room_from_seed): scrypt first
+    (N 2^16, r 8, p 1: slow on purpose - a weak seed is not guessed quickly from the room's name)"""
+    if seed not in _SEEDS:
+        s = hashlib.scrypt(seed.encode('utf-8'), salt=b'koetama room seed', n=1 << 16, r=8, p=1, maxmem=1 << 27, dklen=32)
+        room = hmac.new(s, b'koetama room', hashlib.sha256).hexdigest()[:32]
+        _SEEDS[seed] = (room, hmac.new(s, b'koetama key', hashlib.sha256).hexdigest())
+    return _SEEDS[seed]
 
 
 def falloff(d, rng):

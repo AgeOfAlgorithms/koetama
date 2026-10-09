@@ -175,7 +175,7 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 continue;
             }
             Ok(n) => c.buf.extend_from_slice(&chunk[..n]),
-            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted) => continue,
+            Err(e) if kd_common::timed_out(&e) || e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => {
                 drop_conn(&mut conn, &format!("{}: the connection broke: {e}", profile.game));
                 continue;

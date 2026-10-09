@@ -93,7 +93,11 @@ pub fn run() -> i32 {
     });
     step("updates (GitHub)", &|| {
         match kd_update::check(Duration::from_secs(15)) {
-            Ok(Some(r)) => Ok(format!("{} is out", r.version)),
+            // (not signed: no update offered - the check itself worked; it says why)
+            Ok(Some(r)) => Ok(match &r.refused {
+                Some(why) => format!("{} is out; no update offered: {why}", r.version),
+                None => format!("{} is out", r.version),
+            }),
             Ok(None) => Ok("no newer release".into()),
             // (GitHub's limit on unsigned-in requests - CI machines share their address: HTTPS itself worked)
             // (a repository with no release yet: the check itself worked)

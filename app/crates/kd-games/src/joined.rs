@@ -2,6 +2,8 @@
 //! their "game" is the host's Koetama (the hub), through the relay. The hub sends this player's feed (`{"feed": ..}`);
 //! whatever Koetama would tell a game goes back to the hub (`{"objects": ["<object>", ...]}`), which tells the host's
 //! game with the player's id added. An empty `{"objects": []}` every 2 s says this player's Koetama is still here.
+//! The code is used once, for the key exchange (kd_voice::hub::Channel): the feed and the objects go only over the
+//! link it makes, which this Koetama keeps (in memory) to come back to after a drop.
 use crate::api;
 use crate::files::{cut_line, cut_translation, py_strip};
 use crate::profile::Profile;
@@ -205,10 +207,17 @@ impl Game for JoinedGame {
     }
 
     fn describe(&self) -> Vec<String> {
-        let there = self.link.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|l| l.other_there());
+        let link = self.link.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let (paired, there) = link.as_ref().map_or((false, false), |l| (l.paired(), l.other_there()));
         vec![
             format!("joined a hosted game with the code {}", self.code),
-            if there { "the host's Koetama is there".into() } else { "waiting for the host's Koetama".into() },
+            if there {
+                "the host's Koetama is there".into()
+            } else if paired {
+                "waiting for the host's Koetama (if its game shows you a new code, join again with that)".into()
+            } else {
+                "waiting for the host's Koetama (a code works once: if this one was used, the host's game shows a new one)".into()
+            },
         ]
     }
 }

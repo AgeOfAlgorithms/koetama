@@ -1,7 +1,17 @@
 // node --test test/   (the frame format, without Cloudflare)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MAX_PAYLOAD, MAX_TO, parseId, parseOut, parseRegion, roomName, route, voiceFrame } from "../src/frames.js";
+import { MAX_PAYLOAD, MAX_TO, onSameId, parseId, parseOut, parseOwner, parseRegion, roomName, route, voiceFrame } from "../src/frames.js";
+
+test("a player id is its first owner's: their reconnect replaces, anyone else is refused", () => {
+  const a = "0123456789abcdef0123456789abcdef", b = "f".repeat(32);
+  assert.equal(onSameId(a, a), "replace", "the same Koetama again");
+  assert.equal(onSameId(a, b), "refuse", "someone else");
+  assert.equal(onSameId(a, ""), "refuse", "someone without an owner");
+  assert.equal(onSameId("", b), "replace", "the old connection had none (an older Koetama)");
+  assert.equal(parseOwner(a), a);
+  for (const bad of [null, "", "XYZ", a.toUpperCase(), a + "0", a.slice(1)]) assert.equal(parseOwner(bad), "");
+});
 
 test("a packet for two players reaches them, marked with its sender", () => {
   const r = route(voiceFrame([2, 3], [9, 8, 7]), 1);

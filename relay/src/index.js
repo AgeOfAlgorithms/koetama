@@ -11,7 +11,7 @@
 // Cost (Workers pricing, 2026): incoming WebSocket messages count 20:1 as requests, outgoing ones are free, and with
 // the Hibernation API (ctx.acceptWebSocket) a room is not billed for duration between messages.
 import { DurableObject } from "cloudflare:workers";
-import { MAX_PAYLOAD, parseId, parseRegion, roomName, route } from "./frames.js";
+import { MAX_PAYLOAD, onSameId, parseId, parseOwner, parseRegion, roomName, route } from "./frames.js";
 
 const ROOM_PATH = /^\/v1\/room\/([0-9a-f]{32})$/;
 const MAX_PEERS = 64;           // connections in one room
@@ -51,17 +51,25 @@ export class Room extends DurableObject {
   }
 
   async fetch(request) {
-    const me = parseId(new URL(request.url).searchParams.get("me"));
+    const params = new URL(request.url).searchParams;
+    const me = parseId(params.get("me"));
     if (me === null) return new Response("bad player id\n", { status: 400 });
+    const owner = parseOwner(params.get("owner"));
     const tag = String(me);
-    // the same player again (a reconnect): the new connection replaces the old one
-    for (const old of this.ctx.getWebSockets(tag)) {
+    // the same player id again: their own reconnect replaces the old connection; anyone else's is refused (nobody
+    // can push a player out of the room by taking their id)
+    const olds = this.ctx.getWebSockets(tag);
+    for (const old of olds) {
+      const prev = (old.deserializeAttachment() || {}).owner || "";
+      if (onSameId(prev, owner) === "refuse") return new Response("this player id is taken in the room\n", { status: 409 });
+    }
+    for (const old of olds) {
       try { old.close(4000, "replaced"); } catch { /* already closing */ }
     }
     if (this.ctx.getWebSockets().length >= MAX_PEERS) return new Response("the room is full\n", { status: 503 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server, [tag]);
-    server.serializeAttachment({ me });
+    server.serializeAttachment({ me, owner });
     return new Response(null, { status: 101, webSocket: client });
   }
 

@@ -160,10 +160,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: art
-      - name: SHA256SUMS.txt
+      - name: SHA256SUMS.txt (first line "# koetama <version>"; signed by hand offline - the .sig is uploaded to the draft, no key here)
         run: |
+          V="${GITHUB_REF_NAME#v}"
+          [[ "$V" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { echo "the tag $GITHUB_REF_NAME is not v<version>"; exit 1; }
           cd art
-          sha256sum koetama-windows/Koetama-Setup*.exe koetama-linux/Koetama*linux.tar.gz | sed 's#  koetama-[a-z]*/#  #' > ../SHA256SUMS.txt
+          { echo "# koetama $V"
+            sha256sum koetama-windows/Koetama-Setup*.exe koetama-linux/Koetama*linux.tar.gz | sed 's#  koetama-[a-z]*/#  #'
+          } > ../SHA256SUMS.txt
+          grep -q "  Koetama-Setup-$V\.exe$" ../SHA256SUMS.txt || { echo "no Koetama-Setup-$V.exe (the tag must match app/Cargo.toml's version)"; exit 1; }
           cat ../SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:

@@ -9,7 +9,6 @@ use kd_audio::Streams;
 use kd_common::feed::{relay_id, Feed, PlayerId, Speaker};
 use kd_voice::{crypto, frames, Voice, VoiceEvent};
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
@@ -45,6 +44,8 @@ struct Mock {
     tried: Counts,
     /// player ids it refuses (409, as a relay that keeps the first connection with an id would)
     refuse: Arc<Mutex<Vec<u16>>>,
+    /// (room, player id) -> the owner of the connection that has it ("" none)
+    owners: Arc<Mutex<HashMap<(String, u16), String>>>,
 }
 
 fn count(c: &Counts, id: u16) -> u64 {
@@ -59,6 +60,7 @@ fn mock_relay() -> Mock {
         opened: Arc::default(),
         tried: Arc::default(),
         refuse: Arc::default(),
+        owners: Arc::default(),
     };
     let rooms: Rooms = Arc::default();
     let m2 = m.clone();
@@ -71,11 +73,14 @@ fn mock_relay() -> Mock {
     m
 }
 
-/// /v1/room/<32 hex>?me=<id> -> (room, id)
-fn room_and_id(path: &str) -> Option<(String, u16)> {
-    let (room, me) = path.strip_prefix("/v1/room/")?.split_once("?me=")?;
+/// /v1/room/<32 hex>?me=<id>[&owner=<32 hex>][&...] -> (room, id, owner: "" none)
+fn room_and_id(path: &str) -> Option<(String, u16, String)> {
+    let (room, query) = path.strip_prefix("/v1/room/")?.split_once('?')?;
     let ok = room.len() == 32 && room.bytes().all(|c| c.is_ascii_hexdigit());
-    ok.then(|| Some((room.to_string(), frames::parse_id(me)?)))?
+    let param = |k: &str| query.split('&').find_map(|p| p.strip_prefix(k)).unwrap_or("");
+    let owner = param("owner=");
+    let owner = if owner.len() == 32 && owner.bytes().all(|c| c.is_ascii_hexdigit()) { owner } else { "" };
+    ok.then(|| Some((room.to_string(), frames::parse_id(param("me="))?, owner.to_string())))?
 }
 
 #[allow(clippy::result_large_err)] // (tungstenite's handshake callback type)
@@ -83,9 +88,11 @@ fn serve(s: TcpStream, rooms: Rooms, m: Mock) {
     let mut path = String::new();
     let Ok(mut ws) = tungstenite::accept_hdr(s, |req: &Request, resp: Response| {
         path = req.uri().to_string();
-        if let Some((_, me)) = room_and_id(&path) {
+        if let Some((room, me, owner)) = room_and_id(&path) {
             *m.tried.lock().unwrap().entry(me).or_default() += 1;
-            if m.refuse.lock().unwrap().contains(&me) {
+            // (as relay/src/frames.js onSameId: an id held by another owner is refused)
+            let held = m.owners.lock().unwrap().get(&(room, me)).cloned().filter(|o| !o.is_empty() && *o != owner);
+            if m.refuse.lock().unwrap().contains(&me) || held.is_some() {
                 let no: ErrorResponse = tungstenite::http::Response::builder().status(409).body(Some("taken".into())).unwrap();
                 return Err(no);
             }
@@ -94,7 +101,8 @@ fn serve(s: TcpStream, rooms: Rooms, m: Mock) {
     }) else {
         return;
     };
-    let Some((room, me)) = room_and_id(&path) else { return };
+    let Some((room, me, owner)) = room_and_id(&path) else { return };
+    m.owners.lock().unwrap().insert((room.clone(), me), owner);
     *m.opened.lock().unwrap().entry(me).or_default() += 1;
     let (tx, rx) = channel::<Out>();
     // (the same player again: the new connection replaces the old one)
@@ -122,7 +130,7 @@ fn serve(s: TcpStream, rooms: Rooms, m: Mock) {
             }
             Ok(Message::Close(_)) => break,
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(tungstenite::Error::Io(e)) if kd_common::timed_out(&e) => {}
             Err(_) => break,
         }
         while let Ok(out) = rx.try_recv() {
@@ -236,7 +244,12 @@ fn wait_connected(vs: &[&Voice], feeds: &[Feed], secs: f64) {
 
 /// The four players through `relay`; delivered: the stand-in relay's count per player (None: the live relay).
 /// x: what A says (48 kHz); is_speech: compared by its loudness over time (else as a tone, by its pitch).
+/// (the tests that time voices in real time, and the one that pushes a connection out - the stand-in relay waits on a
+///  replaced connection - run one at a time: together, a busy moment starved a listener of packets)
+static SERIAL: Mutex<()> = Mutex::new(());
+
 fn four_players(relay: &str, delivered: Option<Counts>, x: &[f32], is_speech: bool) {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let text = crypto::new_room().unwrap();
     let (room, key) = text.split_once(':').unwrap();
     let wrong = crypto::new_room().unwrap().split_once(':').unwrap().1.to_string();
@@ -473,6 +486,31 @@ fn a_taken_id_stays_out_of_the_room() {
     }
 }
 
+/// Someone else connecting with a player's id (another owner) is refused (409); the player stays in the room, and
+/// their own reconnects still replace their old connection.
+#[test]
+fn nobody_else_can_take_a_players_id() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let m = mock_relay();
+    let (room, key) = new_room();
+    let a = Voice::start(m.url.clone(), kd_common::null_log());
+    let f = feed(&room, &key, 5, &[]);
+    wait_connected(&[&a], std::slice::from_ref(&f), 10.0);
+    let intruder = format!("{}/v1/room/{room}?me=5&owner={}", m.url, "f".repeat(32));
+    match tungstenite::connect(intruder.as_str()) {
+        Err(tungstenite::Error::Http(r)) => assert_eq!(r.status().as_u16(), 409),
+        other => panic!("the intruder should be refused: {:?}", other.map(|_| ())),
+    }
+    let t0 = Instant::now();
+    feed_until(&[&a], std::slice::from_ref(&f), 10.0, || t0.elapsed() > Duration::from_secs(1));
+    assert_eq!(a.status().state, "connected", "the player is still in");
+    // (their own Koetama again, with the same owner: in, as a reconnect)
+    let own = format!("{}/v1/room/{room}?me=5&owner={}", m.url, kd_voice::relay::owner(&room, 5));
+    let (mut back, _) = tungstenite::connect(own.as_str()).expect("the same owner may come back");
+    let _ = back.close(None);
+    a.stop();
+}
+
 /// The live relay (KOETAMA_RELAY or the deployed one): needs the internet.
 #[test]
 #[ignore]
@@ -481,4 +519,22 @@ fn voices_through_the_live_relay() {
         Some(x) => four_players(&kd_voice::relay_url(), None, &x, true),
         None => four_players(&kd_voice::relay_url(), None, &tone(), false),
     }
+}
+
+/// The live relay keeps a player id for its owner: someone else is refused (409), the same owner may come back.
+#[test]
+#[ignore]
+fn the_live_relay_keeps_a_players_id() {
+    let relay = kd_voice::relay_url();
+    let (room, _) = new_room();
+    let first = kd_voice::relay::Conn::join(&relay, &room, 5).expect("in the room");
+    // (the same owner again: in, replacing the first - and holding the id while someone else tries)
+    let again = kd_voice::relay::Conn::join(&relay, &room, 5).unwrap_or_else(|e| panic!("the same owner should come back: {}", e.text));
+    let intruder = format!("{}/v1/room/{room}?me=5&owner={}", relay, "f".repeat(32));
+    match tungstenite::connect(intruder.as_str()) {
+        Err(tungstenite::Error::Http(r)) => assert_eq!(r.status().as_u16(), 409),
+        other => panic!("someone else should be refused: {:?}", other.map(|_| ())),
+    }
+    again.close();
+    first.close();
 }

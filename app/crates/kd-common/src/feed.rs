@@ -495,12 +495,33 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     Sha256::new().chain_update(pad(0x5c)).chain_update(inner).finalize().into()
 }
 
-/// The room and key every player's Koetama makes from the session's room_seed (PROTOCOL.md "Real voices"): the
-/// first 32 hex digits of HMAC-SHA256(seed, "koetama room"), and HMAC-SHA256(seed, "koetama key") in hex.
+/// scrypt's cost for a room_seed: N = 2^SEED_LOG_N, r = 8, p = 1 (64 MiB, ~0.2 s once per seed) - so whoever sees
+/// a room's name (the relay) cannot try guesses at the seed quickly
+pub const SEED_LOG_N: u8 = 16;
+
+/// The room and key every player's Koetama makes from the session's room_seed (PROTOCOL.md "Real voices"):
+/// s = scrypt(seed, salt "koetama room seed", N = 2^16, r = 8, p = 1, 32 bytes); the room is the first 32 hex digits
+/// of HMAC-SHA256(s, "koetama room"), the key HMAC-SHA256(s, "koetama key") in hex. Slow on purpose (a weak seed
+/// cannot be guessed from the room's name quickly): the last few seeds are kept, so a feed a frame costs nothing.
 pub fn room_from_seed(seed: &str) -> (String, String) {
+    type Seeds = std::sync::Mutex<Vec<(String, (String, String))>>;
+    static SEEN: std::sync::OnceLock<Seeds> = std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some((_, r)) = seen.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(s, _)| s == seed) {
+        return r.clone();
+    }
+    let mut s = [0u8; 32];
+    let params = scrypt::Params::new(SEED_LOG_N, 8, 1, 32).expect("valid scrypt parameters");
+    scrypt::scrypt(seed.as_bytes(), b"koetama room seed", &params, &mut s).expect("a 32-byte output");
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
-    let room = hex(&hmac_sha256(seed.as_bytes(), b"koetama room"));
-    (room[..32].to_string(), hex(&hmac_sha256(seed.as_bytes(), b"koetama key")))
+    let room = hex(&hmac_sha256(&s, b"koetama room"));
+    let made = (room[..32].to_string(), hex(&hmac_sha256(&s, b"koetama key")));
+    let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
+    seen.push((seed.to_string(), made.clone()));
+    if seen.len() > 8 {
+        seen.remove(0);
+    }
+    made
 }
 
 /// The ids in `to` as the feed keeps them: good ones (1..=MAX_ID) in order, each once, the first MAX_TO; others skipped.

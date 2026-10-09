@@ -25,5 +25,9 @@ sherpa-onnx.workspace = true
 clap = { version = "4", features = ["derive"] }
 raw-window-handle = "0.6"
 
+[dev-dependencies]
+# (hub.rs's tests: a stand-in relay, as kd-voice/tests/relay.rs's)
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
 [build-dependencies]
 winresource = "0.1"

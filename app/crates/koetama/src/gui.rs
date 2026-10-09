@@ -484,7 +484,7 @@ impl App {
     fn footer_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let label = match &self.update {
-                Some(i) if cfg!(windows) && i.installer_url.is_some() => {
+                Some(i) if cfg!(windows) && i.installable() => {
                     format!("Update to {}", i.version)
                 }
                 Some(i) => format!("Get {}", i.version),
@@ -622,7 +622,7 @@ impl App {
         let Some(info) = self.update.clone() else {
             return;
         };
-        if !(cfg!(windows) && info.installer_url.is_some()) {
+        if !(cfg!(windows) && info.installable()) {
             open_url(&info.page);
             return;
         }
@@ -647,8 +647,12 @@ impl App {
                     self.upd_text = match &r {
                         None if quiet => String::new(),
                         None => "You have the latest version.".into(),
-                        Some(i) if cfg!(windows) && i.installer_url.is_some() => {
+                        Some(i) if cfg!(windows) && i.installable() => {
                             "A new version is ready.".into()
+                        }
+                        // (its checksums are not signed with the release key, or do not hold: the page only)
+                        Some(Release { refused: Some(why), .. }) if cfg!(windows) => {
+                            format!("A new version is out, but not installed from here: {why}. Get it from the download page.")
                         }
                         Some(_) => "A new version is out (download page).".into(),
                     };

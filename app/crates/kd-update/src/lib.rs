@@ -2,9 +2,15 @@
 //! check it, run it.
 //!
 //! A release is tagged v<version> and has the assets Koetama-Setup-<version>.exe (Windows installer), the Linux
-//! build, and SHA256SUMS.txt ("<sha256>  <file name>" per line). The installer is checked against SHA256SUMS.txt,
-//! and - when this copy of Koetama is code-signed - must carry a valid signature from the same publisher. Then it
-//! runs silently (it replaces the files and starts the new version) and this copy closes.
+//! build, SHA256SUMS.txt (first line "# koetama <version>", then "<sha256>  <file name>" per line) and
+//! SHA256SUMS.txt.sig: the maintainer's Ed25519 signature over SHA256SUMS.txt's exact bytes, made offline with
+//! examples/release_key.rs (one line of hex), checked with the public key built in here (RELEASE_KEY). The checksums
+//! are used only when that signature is good and their first line names this release's version (an older signed
+//! file under a new tag does not pass); then the installer must match them, and - when this copy of Koetama is
+//! code-signed - must carry a valid Authenticode signature from the same publisher. Then it runs silently (it
+//! replaces the files and starts the new version) and this copy closes. A release that is not signed is not
+//! installed from here: check() says why (Release::refused) and the releases page is still offered.
+use ed25519_dalek::{Signature, VerifyingKey};
 use kd_common::{fetch, paths};
 use regex::Regex;
 use serde_json::Value;
@@ -22,6 +28,16 @@ pub const REPO_PAGES: &str = "https://github.com/AgeOfAlgorithms/koetama/";
 pub const RELEASE_FILES: &str = "https://github.com/AgeOfAlgorithms/koetama/releases/download/";
 /// What GitHub's API answers in.
 pub const ACCEPT: &str = "application/vnd.github+json";
+
+/// The release key: the Ed25519 public key (hex) whose signature SHA256SUMS.txt must carry. Its private key is the
+/// maintainer's, kept offline (PROJECT.md "Release plan"); `cargo run -p kd-update --example release_key -- new-key`
+/// printed this line. "": no key - no update is installed from here.
+pub const RELEASE_KEY: &str = "d51775904e6ebd0e8d873f8a104bb4e4c76a03fd213727426a51390a19568221";
+/// The release's checksums and their signature (asset names).
+pub const SUMS: &str = "SHA256SUMS.txt";
+pub const SIG: &str = "SHA256SUMS.txt.sig";
+/// How every refusal over the signature begins (the window and the selftest show the whole reason).
+pub const NOT_SIGNED: &str = "this release is not signed";
 
 static NUMBERS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]+").unwrap());
 
@@ -57,8 +73,20 @@ pub struct Release {
     pub installer_url: Option<String>,
     /// SHA256SUMS.txt
     pub sums_url: Option<String>,
+    /// SHA256SUMS.txt.sig (the signature over SHA256SUMS.txt)
+    pub sig_url: Option<String>,
     /// the release's page
     pub page: String,
+    /// why this release's installer is not offered (set by check(): its signature or checksums do not hold -
+    /// NOT_SIGNED ...); the page still is
+    pub refused: Option<String>,
+}
+
+impl Release {
+    /// The installer can be downloaded and run from here: there is one and check() found it in signed checksums.
+    pub fn installable(&self) -> bool {
+        self.installer_url.is_some() && self.refused.is_none()
+    }
 }
 
 fn text_of(v: &Value) -> Option<&str> {
@@ -112,8 +140,10 @@ fn release_from(rel: &Value, current: &str) -> Option<Release> {
         notes: text_of(&rel["body"]).unwrap_or("").to_string(),
         installer: inst.map(|(n, _)| n.clone()),
         installer_url: inst.map(|(_, u)| u.clone()),
-        sums_url: assets.iter().find(|(n, _)| n == "SHA256SUMS.txt").map(|(_, u)| u.clone()),
+        sums_url: assets.iter().find(|(n, _)| n == SUMS).map(|(_, u)| u.clone()),
+        sig_url: assets.iter().find(|(n, _)| n == SIG).map(|(_, u)| u.clone()),
         page,
+        refused: None,
     })
 }
 
@@ -123,7 +153,8 @@ fn release_from(rel: &Value, current: &str) -> Option<Release> {
 pub const NO_RELEASES: &str = "no releases found";
 
 /// The latest release if it is newer than this copy; else None. Err on network trouble ("could not check: ...") and
-/// when there is no release at all (NO_RELEASES ...).
+/// when there is no release at all (NO_RELEASES ...). A release whose installer would not pass download()'s checks
+/// of the signed checksums comes back with `refused` (why): not offered for install, its page still is.
 pub fn check(timeout: Duration) -> Result<Option<Release>, String> {
     let text = match fetch::get_text(&api_url(), Some(ACCEPT), timeout) {
         Ok(t) => t,
@@ -132,7 +163,89 @@ pub fn check(timeout: Duration) -> Result<Option<Release>, String> {
         Err(e) => return Err(format!("could not check: {e}")),
     };
     let rel: Value = serde_json::from_str(&text).map_err(|e| format!("could not check: {e}"))?;
-    Ok(release_from(&rel, paths::VERSION))
+    let mut r = release_from(&rel, paths::VERSION);
+    if let Some(r) = r.as_mut() {
+        vet(r, RELEASE_KEY, timeout);
+    }
+    Ok(r)
+}
+
+/// Before the installer is offered: the release's signed checksums (signed_sums, with this public key) list it;
+/// else `refused` says why. (A release with no installer for this system: nothing to vet - its page is offered.)
+pub fn vet(r: &mut Release, key: &str, timeout: Duration) {
+    let Some(name) = r.installer.clone().filter(|_| r.installer_url.is_some()) else {
+        return;
+    };
+    r.refused = signed_sums(r, key, timeout).and_then(|sums| listed(&sums, &name)).err();
+}
+
+/// The checksum the (signed) SHA256SUMS.txt gives the installer.
+fn listed(sums: &str, name: &str) -> Result<String, String> {
+    expected_sha(sums, name).ok_or_else(|| format!("the installer is not in {SUMS}"))
+}
+
+/// A whole hex string's bytes (either case), or None.
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    let s = s.as_bytes();
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
+    let digit = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    s.chunks(2).map(|p| Some((digit(p[0])? << 4) | digit(p[1])?)).collect()
+}
+
+/// The first line a release's SHA256SUMS.txt must have: "# koetama <version>" (signed with the rest: the checksums
+/// are this release's, not an older release's under a new tag).
+pub fn sums_header(version: &str) -> String {
+    format!("# {} {version}", paths::APP_ID)
+}
+
+/// SHA256SUMS.txt's text, if `sig` (SHA256SUMS.txt.sig: the signature's 64 bytes as hex; whitespace around it
+/// ignored) is the Ed25519 signature of `key` (the public key as hex: RELEASE_KEY) over the exact bytes of `sums`,
+/// and their first line is sums_header(version). Else why not (NOT_SIGNED ... when the signature does not hold).
+pub fn verify_sums(sums: &[u8], sig: &[u8], key: &str, version: &str) -> Result<String, String> {
+    if key.is_empty() {
+        return Err(format!("{NOT_SIGNED} (this build has no release key to check it with)"));
+    }
+    let key = unhex(key)
+        .and_then(|k| <[u8; 32]>::try_from(k).ok())
+        .and_then(|k| VerifyingKey::from_bytes(&k).ok())
+        .ok_or_else(|| format!("{NOT_SIGNED} (this build's release key is not a valid key)"))?;
+    let sig = std::str::from_utf8(sig)
+        .ok()
+        .and_then(|s| unhex(s.trim()))
+        .and_then(|b| <[u8; 64]>::try_from(b).ok())
+        .map(|b| Signature::from_bytes(&b))
+        .ok_or_else(|| format!("{NOT_SIGNED} ({SIG} is not a signature)"))?;
+    // (strict: no weak keys, no second form of the same signature)
+    key.verify_strict(sums, &sig)
+        .map_err(|_| format!("{NOT_SIGNED} ({SIG} does not match {SUMS} and the release key)"))?;
+    let text = std::str::from_utf8(sums).map_err(|_| format!("{SUMS} is not text"))?;
+    let first = text.split('\n').next().unwrap_or("").trim_end_matches('\r');
+    if version.is_empty() || first != sums_header(version) {
+        return Err(format!("the signed {SUMS} is not this release's ({version}): its first line is {first:?}"));
+    }
+    Ok(text.to_string())
+}
+
+/// The release's SHA256SUMS.txt, downloaded with its signature and verified (verify_sums, with this public key) -
+/// the only checksums an installer is checked against. Err: why not (no signature: NOT_SIGNED ...).
+pub fn signed_sums(r: &Release, key: &str, timeout: Duration) -> Result<String, String> {
+    if key.is_empty() {
+        return verify_sums(b"", b"", key, &r.version);
+    }
+    let Some(sums_url) = &r.sums_url else {
+        return Err(format!("this release has no {SUMS}"));
+    };
+    let Some(sig_url) = &r.sig_url else {
+        return Err(format!("{NOT_SIGNED} (it has no {SIG})"));
+    };
+    let get = |url: &str, what: &str| {
+        fetch::get_text(url, Some(ACCEPT), timeout).map_err(|e| format!("could not download {what}: {e}"))
+    };
+    let sums = get(sums_url, SUMS)?;
+    let sig = get(sig_url, SIG)?;
+    verify_sums(sums.as_bytes(), sig.as_bytes(), key, &r.version)
 }
 
 /// A file's SHA-256, in lower-case hex.
@@ -257,18 +370,27 @@ fn show(v: &Option<String>) -> &str {
 }
 
 /// The release's installer, downloaded (to a fresh temp folder) and checked: its path. progress(0..1) as it comes.
-/// Err when a check fails: the checksum, or - when this program is validly signed - the installer's publisher.
+/// Err when a check fails: the signature over SHA256SUMS.txt (RELEASE_KEY) or its version line, the checksum, or -
+/// when this program is validly signed - the installer's publisher.
 pub fn download(r: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String> {
-    let (Some(name), Some(url), Some(sums_url)) = (&r.installer, &r.installer_url, &r.sums_url) else {
+    download_with(r, RELEASE_KEY, progress)
+}
+
+/// download(), the checksums' signature checked with this public key (hex) - the tests' own key.
+pub fn download_with(r: &Release, key: &str, progress: &dyn Fn(f64)) -> Result<PathBuf, String> {
+    let (Some(name), Some(url), Some(_)) = (&r.installer, &r.installer_url, &r.sums_url) else {
         return Err("this release has no installer for this system".into());
     };
     if name.is_empty() || name.contains(['/', '\\', ':']) || name.contains("..") {
         // (a file name from the network: never a path)
         return Err(format!("the installer's name is not a file name: {name}"));
     }
-    let sums = fetch::get_text(sums_url, Some(ACCEPT), Duration::from_secs(10))
-        .map_err(|e| format!("could not download SHA256SUMS.txt: {e}"))?;
-    let want = expected_sha(&sums, name).ok_or("the installer is not in SHA256SUMS.txt")?;
+    if name.to_lowercase() != format!("{}-setup-{}.exe", paths::APP_ID, r.version).to_lowercase() {
+        return Err(format!("the installer is not this release's ({}): {name}", r.version));
+    }
+    // (checksums only from a file whose signature and version line hold - never from an unsigned one)
+    let sums = signed_sums(r, key, Duration::from_secs(10))?;
+    let want = listed(&sums, name)?;
     let dir = fresh_temp_dir().map_err(|e| format!("could not make a temp folder: {e}"))?;
     let path = dir.join(name);
     fetch::download(url, &path, &|done, total| {
@@ -320,6 +442,20 @@ pub fn install(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hex() {
+        assert_eq!(unhex("00fFa1"), Some(vec![0, 255, 0xa1]));
+        assert_eq!(unhex(""), Some(vec![]));
+        assert!(unhex("abc").is_none() && unhex("zz").is_none() && unhex("+1").is_none());
+    }
+
+    #[test]
+    fn the_release_key_is_a_key() {
+        // (a typo in the built-in key would refuse every update)
+        let k = unhex(RELEASE_KEY).and_then(|k| <[u8; 32]>::try_from(k).ok()).expect("64 hex digits");
+        assert!(VerifyingKey::from_bytes(&k).is_ok_and(|k| !k.is_weak()));
+    }
 
     #[test]
     fn lines_as_python() {
