@@ -184,7 +184,8 @@ devices (at most 8), each
 | `effects` | the preset's | how it sounds: "Sound effects" |
 
 A speaker with `via` and no `position`, `azimuth` or `gain` is heard only through its devices (a walkie-talkie
-across the map). A talker's loudness carries through (a whisper into a walkie-talkie comes out quiet, a shout
+across the map). A speaker's `gain`, `position` and `effects` are its direct voice only: `gain: 0` silences that, never
+its devices (each has its own `gain` and `effects`). A talker's loudness carries through (a whisper into a walkie-talkie comes out quiet, a shout
 distorts). Test voices take `via` too, so a game can try its devices with no second player. Devices are the game's to
 show: `talking` says when a player is heard, and the text bubbles of what they said (`speech`, shared by the game as
 usual) belong at the devices as well as over the talker.
