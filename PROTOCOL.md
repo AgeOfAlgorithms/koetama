@@ -40,7 +40,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `name` | `""` | this player's name (shown in the other players' Koetama windows) |
 | `room_seed` | none | the session's voice room, as any string of 1 to 256 characters every player of the session has (a lobby id and its password, a server's address and world): each Koetama makes the same room and key from it. Anyone who knows the seed can listen: put something private in it ("Real voices") |
 | `room`, `key` | none | instead of `room_seed`: the room and key themselves, 32 and 64 lower-case hex digits (the ones Koetama offers in a `room` object, shared by the game: "Real voices"). Neither: no voices sent or heard |
-| `listener` | none | where this player hears from: `{"position": [x,y,z], "forward": [x,y,z], "right": [x,y,z], "up": [x,y,z]}` in the game's own units and axes (the three directions settle which way is right; they need not be unit length) |
+| `listener` | none | where this player hears from: `{"position": [x,y,z], "forward": [x,y,z], "right": [x,y,z], "up": [x,y,z]}` - position the character's head (not the camera), the directions the camera's in the game's own units and axes (the three directions settle which way is right; they need not be unit length) |
 | `range` | none | how far this player's voice reaches now: `[near, far]` in the game's units - full loudness within `near`, nothing beyond `far` (a whisper `[1,4]`, talk `[8,25]`, a shout `[20,70]`). Other players' Koetamas use it for this player's loudness |
 | `to` | (with `range` and positions: everyone within `far`) | the player ids who should get this player's voice right now; empty: nobody. Left out: with `range`, `listener` and speakers' positions, Koetama sends to the speakers within `far` (and 10 % more); else nobody |
 | `transmit` | false | this player's voice is going into a device now ("Devices"): `true` - also to everyone in the voice room; a list of player ids - also to them |
@@ -131,8 +131,9 @@ first (close code 4000). `/` and `/v1` say what it is. `npm test`, `node test/sm
 ## Positions and ranges
 
 A game can give Koetama positions instead of doing the sound's maths itself:
-- **`listener`**: this player's ears - `position`, and the directions `forward`, `right` and `up` (the camera's, or
-  the head's), in the game's units and axes. Giving all three settles left-handed against right-handed axes.
+- **`listener`**: this player's ears - `position`: the character's head (not the camera: in third person it can be
+  metres away, and distances would not match what the game shows), and the directions `forward`, `right` and `up`
+  (the camera's, so a voice pans with where the player looks), in the game's units and axes. Giving all three settles left-handed against right-handed axes.
 - each speaker's **`position`**: Koetama works out the direction (azimuth, elevation) from the listener, and the
   loudness from the distance: 1 within that player's `near`, falling to 0 at their `far` (the square of the way
   left: `((far - d) / (far - near))²`). Their range is the one their own Koetama announces (their feed's `range`,
