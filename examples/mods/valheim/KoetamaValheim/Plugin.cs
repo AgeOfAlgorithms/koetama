@@ -1,12 +1,15 @@
 // Koetama for Valheim: a demo of Koetama's game API (PROTOCOL.md) in a Unity game.
 //   - speech to chat: what the player says (push to talk, B) is said in Valheim's chat as them; the words so far show
 //     at the bottom of the screen while they talk; a line ending in "!" is shouted;
-//   - proximity voice: Koetama plays the other players' voices, as loud and from where the game says; one voice room
-//     per world (VoiceRoom.cs); whisper / talk / shout (N) sets how far this player's voice carries;
+//   - proximity voice: the game tells Koetama where everyone is (the listener, each player's head) and how far this
+//     player's voice carries (whisper / talk / shout, N); Koetama works out loudness, direction and who gets the
+//     voice. The game adds only muffle (a raycast: walls, hills). One voice room per world (VoiceRoom.cs); a speaking
+//     icon over each talking player's head, and "Speaking" on the HUD while this player's voice goes out;
 //   - translation: other players' chat lines are translated, the translation shown under the line.
 // Needs Koetama running with the profile examples/profiles/valheim-koetama.json (port 47131).
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -24,8 +27,8 @@ namespace KoetamaValheim
         public enum ListenMode { Off, Always, PushToTalk }
         public enum VoiceMode { Whisper, Talk, Shout }
 
-        /// <summary>The ZDO field where each player's own mod publishes how far their voice carries (a VoiceMode).</summary>
-        private const string ModeField = "koetama_voice_mode";
+        /// <summary>A voice is at full loudness within this part of its range (Koetama fades it to 0 at the range).</summary>
+        private const float NearPart = 0.3f;
 
         private static ManualLogSource logger;
 
@@ -52,8 +55,8 @@ namespace KoetamaValheim
         // chat entries waiting for their translation, by line id
         private readonly Dictionary<long, string> translating = new Dictionary<long, string>();
         private readonly Dictionary<string, string> translationStates = new Dictionary<string, string>();
-        private readonly List<long> playerIds = new List<long>();
         private int obstacleMask;
+        private GUIStyle iconStyle;
 
         public static void LogError(string s) { logger?.LogError(s); }
 
@@ -94,7 +97,10 @@ namespace KoetamaValheim
             koetama.HelloReceived += h => Logger.LogInfo("Koetama " + h.Version + ", protocol " + h.Protocol + ": " + string.Join(", ", h.Features.ToArray()));
             koetama.SpeechReceived += OnSpeech;
             koetama.RoomReceived += r => voiceRoom.Offer(r.Id, r.Key);
-            koetama.VoiceStateChanged += v => Hud("Voice chat: " + v.State);
+            koetama.VoiceStateChanged += v => Hud(v.State == "id_taken"
+                ? "Voice chat: another player's id clashes with yours in this room (no voice until the next world)"
+                : "Voice chat: " + v.State + (v.State == "connected" ? " (" + v.Players.Count + " other" + (v.Players.Count == 1 ? "" : "s") + " in the room)" : ""));
+            koetama.StatusChanged += OnStatus;
             koetama.TranslationReceived += OnTranslation;
             koetama.TranslationsStatusReceived += OnTranslationsStatus;
             koetama.Start();
@@ -153,54 +159,90 @@ namespace KoetamaValheim
             return m == VoiceMode.Whisper ? whisperRange.Value : m == VoiceMode.Shout ? shoutRange.Value : talkRange.Value;
         }
 
-        /// <summary>The room, this player's id, who gets their voice, and how each other player sounds.</summary>
+        /// <summary>The room, this player's id, where they hear from and how far their voice carries, and where each
+        /// other player is (Koetama does the loudness, the direction and who gets the voice).</summary>
         private void UpdateVoices(Feed f, Player me)
         {
             f.Speakers.Clear();
-            f.To.Clear();
             f.Room = voiceRoom.Room;
             f.Key = voiceRoom.Key;
-            f.Me = 0;
-            if (me == null || voiceRoom.Room == null) return;
+            f.Me = null;
+            f.Listener = null;
+            f.Range = null;
+            Camera cam = Utils.GetMainCamera();
+            if (me == null || voiceRoom.Room == null || cam == null) return;
 
             // Ids: every player's 64-bit peer id (ZNet.GetUID: the owner part of their character's ZDOID, and the
-            // sender of their RPCs) -> 1..65535, the same on every PC (PlayerIds.Assign over the session's players).
-            playerIds.Clear();
-            playerIds.Add(ZNet.GetUID());
-            foreach (ZNet.PlayerInfo info in ZNet.instance.GetPlayerList())
-                if (!info.m_characterID.IsNone()) playerIds.Add(info.m_characterID.UserID);
-            foreach (Player p in Player.GetAllPlayers())
-                if (!p.GetZDOID().IsNone()) playerIds.Add(p.GetZDOID().UserID);
-            Dictionary<long, int> small = PlayerIds.Assign(playerIds);
-            f.Me = small[ZNet.GetUID()];
-
-            // (tell the others how far our voice carries: they set our gain by it)
-            ZNetView view = me.GetComponent<ZNetView>();
-            if (view != null && view.IsValid() && view.IsOwner() && view.GetZDO().GetInt(ModeField, (int)VoiceMode.Talk) != (int)voiceMode)
-                view.GetZDO().Set(ModeField, (int)voiceMode);
-
-            Camera cam = Utils.GetMainCamera();
+            // sender of their RPCs), as a string - the same on every PC.
+            f.Me = ZNet.GetUID().ToString(CultureInfo.InvariantCulture);
+            f.Name = me.GetPlayerName();
             Vector3 myHead = me.GetHeadPoint();
-            float myRange = Range(voiceMode);
+            Transform c = cam.transform;
+            // (Unity's axes are left-handed: giving all three directions says so)
+            f.Listener = new Listener { Position = V(myHead), Forward = V(c.forward), Right = V(c.right), Up = V(c.up) };
+            float far = Range(voiceMode);
+            f.Range = new VoiceRange(far * NearPart, far);
+
+            float reach = Range(VoiceMode.Shout) * 1.1f; // (no one hears anyone beyond a shout: no raycast needed)
             foreach (Player p in Player.GetAllPlayers())
             {
-                if (p == me || p == null) continue;
-                ZNetView pv = p.GetComponent<ZNetView>();
-                if (pv == null || !pv.IsValid() || p.GetZDOID().IsNone()) continue;
-                int id = small[p.GetZDOID().UserID];
+                if (p == me || p == null || p.GetZDOID().IsNone()) continue;
                 Vector3 head = p.GetHeadPoint();
-                float d = Vector3.Distance(myHead, head);
-                if (d <= myRange) f.To.Add(id);
-
-                var theirMode = (VoiceMode)Mathf.Clamp(pv.GetZDO().GetInt(ModeField, (int)VoiceMode.Talk), 0, 2);
-                double gain = Spatial.Gain(d, Range(theirMode));
-                if (gain <= 0 || cam == null) continue;
-                Vector3 local = cam.transform.InverseTransformDirection(head - myHead);
-                Spatial.Angles(local.x, local.y, local.z, out double azimuth, out double elevation);
                 // (a wall, a hill or a house between: muffled)
-                bool blocked = Physics.Linecast(myHead, head, obstacleMask);
-                f.Speakers.Add(new Speaker { Id = id, Gain = gain, Azimuth = azimuth, Elevation = elevation, Muffle = blocked ? 0.6 : 0 });
+                bool blocked = Vector3.Distance(myHead, head) < reach && Physics.Linecast(myHead, head, obstacleMask);
+                f.Speakers.Add(new Speaker
+                {
+                    Id = p.GetZDOID().UserID.ToString(CultureInfo.InvariantCulture),
+                    Name = p.GetPlayerName(),
+                    Position = V(head),
+                    Muffle = blocked ? 0.6 : 0,
+                });
             }
+        }
+
+        private static Vec3 V(Vector3 v) { return new Vec3(v.x, v.y, v.z); }
+
+        // ---------------------------------------------------------------- who is talking
+
+        private void OnStatus(Status st)
+        {
+            if (st.Ready) Hud("Koetama ready");
+            else if (st.Microphone == "none") Hud("Koetama: no microphone found");
+            else if (st.Speech == "loading") Hud("Koetama: loading the speech models");
+            else if (st.Speech == "error") Hud("Koetama: speech to text failed (see Koetama's window)");
+        }
+
+        /// <summary>A speaking icon over each player whose voice is heard now, and "Speaking" while ours goes out.</summary>
+        private void DrawTalking()
+        {
+            if (koetama == null || koetama.TalkingNow.Count == 0) return;
+            Camera cam = Utils.GetMainCamera();
+            if (cam == null) return;
+            if (iconStyle == null)
+            {
+                iconStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontSize = 18, fontStyle = FontStyle.Bold };
+                iconStyle.normal.textColor = new Color(0.55f, 1f, 0.6f);
+            }
+            string me = koetama.Feed.Me;
+            foreach (Player p in Player.GetAllPlayers())
+            {
+                if (p == null || p.GetZDOID().IsNone() || p == Player.m_localPlayer) continue;
+                if (!koetama.TalkingNow.Contains(p.GetZDOID().UserID.ToString(CultureInfo.InvariantCulture))) continue;
+                Vector3 s = cam.WorldToScreenPoint(p.GetHeadPoint() + Vector3.up * 0.7f);
+                if (s.z <= 0) continue; // (behind the camera)
+                Shadowed(new Rect(s.x - 60, Screen.height - s.y - 14, 120, 28), "((( talking )))", iconStyle);
+            }
+            if (me != null && koetama.TalkingNow.Contains(me))
+                Shadowed(new Rect(20, Screen.height * 0.62f, 200, 28), "((( Speaking", iconStyle);
+        }
+
+        private static void Shadowed(Rect r, string text, GUIStyle style)
+        {
+            Color c = style.normal.textColor;
+            style.normal.textColor = Color.black;
+            GUI.Label(new Rect(r.x + 2, r.y + 2, r.width, r.height), text, style);
+            style.normal.textColor = c;
+            GUI.Label(r, text, style);
         }
 
         // ---------------------------------------------------------------- speech to chat
@@ -229,6 +271,7 @@ namespace KoetamaValheim
 
         private void OnGUI()
         {
+            DrawTalking();
             if (liveText.Length == 0 || Time.time > liveUntil) return;
             if (liveStyle == null)
             {
@@ -236,13 +279,8 @@ namespace KoetamaValheim
                 liveStyle.normal.textColor = new Color(1f, 0.92f, 0.7f);
             }
             float w = Screen.width * 0.6f;
-            var r = new Rect((Screen.width - w) / 2, Screen.height * 0.78f, w, 60);
             // (a shadow, so it reads over snow too)
-            Color c = liveStyle.normal.textColor;
-            liveStyle.normal.textColor = Color.black;
-            GUI.Label(new Rect(r.x + 2, r.y + 2, r.width, r.height), liveText, liveStyle);
-            liveStyle.normal.textColor = c;
-            GUI.Label(r, liveText, liveStyle);
+            Shadowed(new Rect((Screen.width - w) / 2, Screen.height * 0.78f, w, 60), liveText, liveStyle);
         }
 
         // ---------------------------------------------------------------- translation

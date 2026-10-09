@@ -8,6 +8,15 @@
 //     wins: a claim carries the world time when it was made (the server's clock, the same on every PC), ties broken
 //     by the room's text. A player who joins later hears the room within a few seconds and makes no claim of their own.
 // Everyone repeats the room they hold every few seconds, so a newcomer learns it without anyone asking.
+//
+// Why not a room_seed (each Koetama making the room from a string every player's game has)? Whoever knows the seed can
+// listen, and on a dedicated server everything a client mod can see is known to more people than the players online
+// now: the server's address and name are public, and the world's name, seed and uid are sent to every client that ever
+// joined (they generate the terrain), and never change - a kicked or banned player could listen forever. The server's
+// password would make it private, but the game gives a client mod no copy of it (it lives in the server's settings;
+// at best a mod could catch what its player typed into the login box), and many servers have none. A fresh room from
+// Koetama, passed only over the world's own RPCs to whoever is in it now, is private by construction and new every
+// session.
 using System;
 using System.Text.RegularExpressions;
 using UnityEngine;

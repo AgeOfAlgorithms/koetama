@@ -55,6 +55,26 @@ namespace Koetama.Tests
             Check(st != null && st.Count == 1 && st[0].State == "downloading" && st[0].Progress == 0.42, "translations_status");
             Check(Messages.Parse("{\"type\":\"something_new\",\"x\":1}") == null, "an unknown type is null (ignored)");
             Check(Messages.Parse("{\"type\":\"room\",\"room\":\"ab\",\"key\":\"cd\"}") is Room r && r.Id == "ab" && r.Key == "cd", "room");
+
+            // protocol 2's newer objects
+            var v = Messages.Parse("{\"type\":\"voice\",\"state\":\"connected\",\"players\":[\"76561198000000002\",12,\"ana\",1.5,null]}") as VoiceState;
+            Check(v != null && v.State == "connected" && v.Players.SequenceEqual(new[] { "76561198000000002", "12", "ana" }),
+                "voice: state and players (string and number ids as strings, others skipped): " + (v == null ? "" : string.Join(",", v.Players)));
+            var v0 = Messages.Parse("{\"type\":\"voice\",\"state\":\"id_taken\"}") as VoiceState;
+            Check(v0 != null && v0.State == "id_taken" && v0.Players.Count == 0, "voice: id_taken, no players");
+            var tk = Messages.Parse("{\"type\":\"talking\",\"id\":\"-4611686018427387904\",\"talking\":true}") as Talking;
+            Check(tk != null && tk.Id == "-4611686018427387904" && tk.IsTalking, "talking: a string id (a Valheim peer id), true");
+            var tk2 = Messages.Parse("{\"type\":\"talking\",\"id\":7,\"talking\":false}") as Talking;
+            Check(tk2 != null && tk2.Id == "7" && !tk2.IsTalking, "talking: a number id, false");
+            var stt = Messages.Parse("{\"type\":\"status\",\"speech\":\"ready\",\"microphone\":\"open\"}") as Status;
+            Check(stt != null && stt.Ready && stt.Speech == "ready" && stt.Microphone == "open", "status ready + open: Ready");
+            var st2 = Messages.Parse("{\"type\":\"status\",\"speech\":\"loading\",\"microphone\":\"open\"}") as Status;
+            var st3 = Messages.Parse("{\"type\":\"status\",\"speech\":\"ready\",\"microphone\":\"none\"}") as Status;
+            Check(st2 != null && !st2.Ready && st3 != null && !st3.Ready, "status loading, or no microphone: not Ready");
+            var tf = Messages.Parse("{\"type\":\"translation\",\"id\":7,\"text\":\"Hello\",\"from\":\"es\",\"to\":\"en\"}") as Translation;
+            Check(tf != null && tf.From == "es" && tf.To == "en" && tf.Text == "Hello", "translation with from / to");
+            Check(t.From == "" && t.To == "", "translation without from / to: \"\"");
+            Check(Json.Id(12.0) == "12" && Json.Id("x") == "x" && Json.Id(1.5) == null && Json.Id(null) == null && Json.Id(true) == null, "Json.Id");
         }
     }
 
@@ -64,56 +84,54 @@ namespace Koetama.Tests
         {
             Console.WriteLine("-- helpers");
             // a feed line, read back by an independent parser
-            var f = new Feed { Listen = Listen.PushToTalk, TalkKey = true, Lang = "ja", Volume = 0.756, Room = new string('a', 32), Key = new string('b', 64), Me = 7 };
-            f.Speakers.Add(new Speaker { Id = 2, Gain = 0.8123, Azimuth = -179.6, Elevation = 10.4, Muffle = 0.6 });
-            f.To.Add(2);
+            var f = new Feed { Listen = Listen.PushToTalk, TalkKey = true, Lang = "ja", Volume = 0.756, Room = new string('a', 32), Key = new string('b', 64),
+                               Me = "-4611686018427387904", Name = "Ana" };
+            f.Speakers.Add(new Speaker { Id = "1234567890123", Name = "Ben", Position = new Vec3(3.004, 1.7, -8.126), Muffle = 0.6 });
+            f.Speakers.Add(new Speaker { Id = "radio", Gain = 0.8123, Azimuth = -179.6, Elevation = 10.4 });
+            f.Listener = new Listener { Position = new Vec3(0, 1.7, 0), Forward = new Vec3(0, 0, 1), Right = new Vec3(1, 0, 0), Up = new Vec3(0, 1, 0) };
+            f.Range = new VoiceRange(7.5, 25);
             f.Translations.Add(new LanguagePair("ja", "en"));
             string line = f.ToJson(new List<PendingLine> { new PendingLine { Id = 9, Text = "こんにちは \"you\"" } });
             var doc = System.Text.Json.JsonDocument.Parse(line).RootElement;
             Check(doc.GetProperty("type").GetString() == "feed" && doc.GetProperty("listen").GetString() == "push_to_talk"
                   && doc.GetProperty("talk_key").GetBoolean() && doc.GetProperty("volume").GetDouble() == 0.76, "feed basics: " + line);
+            Check(doc.GetProperty("me").GetString() == "-4611686018427387904" && doc.GetProperty("name").GetString() == "Ana", "me as a string id, name");
             var sp = doc.GetProperty("speakers")[0];
-            Check(sp.GetProperty("id").GetInt32() == 2 && sp.GetProperty("gain").GetDouble() == 0.81 && sp.GetProperty("azimuth").GetDouble() == -180
-                  && sp.GetProperty("elevation").GetDouble() == 10, "speaker rounded (gain 1/100, angles whole degrees)");
-            Check(doc.GetProperty("me").GetInt32() == 7 && doc.GetProperty("to")[0].GetInt32() == 2 && doc.GetProperty("room").GetString().Length == 32,
-                "room, key, me, to");
+            Check(sp.GetProperty("id").GetString() == "1234567890123" && sp.GetProperty("name").GetString() == "Ben"
+                  && sp.GetProperty("position")[0].GetDouble() == 3 && sp.GetProperty("position")[2].GetDouble() == -8.13
+                  && !sp.TryGetProperty("gain", out _) && !sp.TryGetProperty("azimuth", out _) && sp.GetProperty("muffle").GetDouble() == 0.6,
+                "a speaker by position: no gain or angles sent, position to 1/100");
+            var sp2 = doc.GetProperty("speakers")[1];
+            Check(sp2.GetProperty("gain").GetDouble() == 0.81 && sp2.GetProperty("azimuth").GetDouble() == -180 && sp2.GetProperty("elevation").GetDouble() == 10
+                  && !sp2.TryGetProperty("position", out _), "a speaker by gain and angles still works (gain 1/100, whole degrees)");
+            var li = doc.GetProperty("listener");
+            Check(li.GetProperty("position")[1].GetDouble() == 1.7 && li.GetProperty("forward")[2].GetDouble() == 1 && li.GetProperty("right")[0].GetDouble() == 1
+                  && li.GetProperty("up")[1].GetDouble() == 1, "listener: position, forward, right, up");
+            Check(doc.GetProperty("range")[0].GetDouble() == 7.5 && doc.GetProperty("range")[1].GetDouble() == 25, "range [near, far]");
+            Check(doc.GetProperty("room").GetString().Length == 32 && doc.GetProperty("key").GetString().Length == 64 && !doc.TryGetProperty("room_seed", out _),
+                "room and key");
+            Check(!doc.TryGetProperty("to", out _), "to left out (null): Koetama sends to whoever is in range");
             Check(doc.GetProperty("to_translate")[0].GetProperty("text").GetString() == "こんにちは \"you\"", "to_translate text survives");
-            f.Me = 0;
-            Check(!System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement.TryGetProperty("room", out _),
+            f.To = new List<string>();
+            Check(System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement.GetProperty("to").GetArrayLength() == 0, "to empty: nobody");
+            f.To = new List<string> { "1234567890123" };
+            Check(System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement.GetProperty("to")[0].GetString() == "1234567890123", "to: string ids");
+            f.RoomSeed = "world 42 + a secret";
+            var seeded = System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement;
+            Check(seeded.GetProperty("room_seed").GetString() == "world 42 + a secret" && !seeded.TryGetProperty("room", out _), "room_seed wins over room and key");
+            f.Me = null;
+            var noMe = System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement;
+            Check(!noMe.TryGetProperty("room", out _) && !noMe.TryGetProperty("room_seed", out _) && !noMe.TryGetProperty("me", out _),
                 "no room sent without a player id");
+            var bare = System.Text.Json.JsonDocument.Parse(new Feed().ToJson(new List<PendingLine>())).RootElement;
+            Check(!bare.TryGetProperty("listener", out _) && !bare.TryGetProperty("range", out _) && !bare.TryGetProperty("name", out _),
+                "a feed without positions sends no listener, range or name");
 
             Check(KoetamaClient.Utf8Prefix("abc", 400) == "abc", "Utf8Prefix keeps a short line");
             string cut = KoetamaClient.Utf8Prefix(new string('é', 300), 400);
             Check(cut.Length == 200, "Utf8Prefix: 400 bytes of 2-byte characters is 200 of them");
             string emoji = KoetamaClient.Utf8Prefix("a" + string.Concat(Enumerable.Repeat("😀", 200)), 400);
             Check(System.Text.Encoding.UTF8.GetByteCount(emoji) == 397 && !char.IsHighSurrogate(emoji[emoji.Length - 1]), "Utf8Prefix never splits a surrogate pair");
-
-            // player ids
-            Check(PlayerIds.Small(1234567890123L) == PlayerIds.Small(1234567890123L), "Small is stable");
-            var rnd = new Random(1);
-            var big = Enumerable.Range(0, 2000).Select(_ => (long)(rnd.NextDouble() * long.MaxValue) * (rnd.Next(2) == 0 ? 1 : -1)).ToList();
-            var a = PlayerIds.Assign(big);
-            var shuffled = big.OrderBy(_ => rnd.Next()).ToList();
-            var b = PlayerIds.Assign(shuffled);
-            Check(a.Count == 2000 && a.Values.Distinct().Count() == 2000 && a.Values.All(v => v >= 1 && v <= 65535), "Assign: 2000 players, all different, 1..65535");
-            Check(big.All(x => a[x] == b[x]), "Assign gives the same ids in any order (every PC agrees)");
-            int moved = big.Count(x => a[x] != PlayerIds.Small(x));
-            Check(moved > 0 && moved < 60, "collisions only move a few (" + moved + " of 2000)");
-
-            // spatial
-            void Angles(double x, double y, double z, double az, double el, string what)
-            {
-                Spatial.Angles(x, y, z, out double a1, out double e1);
-                Check(Math.Abs(a1 - az) < 1e-6 && Math.Abs(e1 - el) < 1e-6, what + " -> " + a1.ToString("0.#") + ", " + e1.ToString("0.#"));
-            }
-            Angles(0, 0, 5, 0, 0, "ahead");
-            Angles(3, 0, 0, 90, 0, "right");
-            Angles(-3, 0, 0, -90, 0, "left");
-            Angles(0, 0, -2, 180, 0, "behind");
-            Angles(1, 1, 0, 90, 45, "right and up");
-            Angles(0, 0, 0, 0, 0, "on top of the listener");
-            Check(Spatial.Gain(0, 25) == 1 && Spatial.Gain(25, 25) == 0 && Math.Abs(Spatial.Gain(12.5, 25) - 0.75) < 1e-9 && Spatial.Gain(30, 25) == 0,
-                "gain: 1 close, 0.75 halfway, 0 at the range");
         }
     }
 }

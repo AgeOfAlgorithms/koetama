@@ -215,11 +215,11 @@ fn downloads() {
     assert!(!old.exists(), "the older version is deleted");
     assert!(root.join("ja-en").join("notes.txt").exists(), "only version folders are");
 
-    // (again: everything is there - nothing downloaded, progress at once complete)
+    // (again: everything is there - nothing downloaded, no progress told: the rule shows "loading", not "downloading")
     let again = RefCell::new(0u64);
     fetch_route(&root, &route, &|d, _| *again.borrow_mut() = d, &|u, p, f| cdn.download(u, p, f), &|_| {}).unwrap();
     assert_eq!(cdn.got.borrow().len(), 7, "reused");
-    assert_eq!(*again.borrow(), total);
+    assert_eq!(*again.borrow(), 0);
 }
 
 #[test]

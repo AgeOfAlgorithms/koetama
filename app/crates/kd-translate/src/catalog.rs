@@ -314,7 +314,8 @@ pub type Download<'a> = &'a dyn Fn(&str, &Path, &dyn Fn(u64, u64)) -> io::Result
 
 /// The folders of these directions with all their files there: the missing ones downloaded (`download`: url, dest,
 /// progress(done, total of that file)), each checked against its sha256; then the other versions of each direction
-/// deleted. progress(done, total): bytes across all the directions' files (those already there count as done).
+/// deleted. progress(done, total): bytes across all the directions' files (those already there count as done), told
+/// only while something downloads.
 pub fn fetch_route(
     root: &Path,
     dirs: &[Direction],
@@ -332,7 +333,6 @@ pub fn fetch_route(
             let dest = folder.join(&f.name);
             if std::fs::metadata(&dest).is_ok_and(|m| m.is_file() && m.len() == f.size) {
                 done += f.size;
-                progress(done, total);
                 continue;
             }
             let tmp = folder.join(format!("{}.dl", f.name));

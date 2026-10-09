@@ -1,7 +1,11 @@
 ## The Godot client against a running Koetama, headless (no game, no window):
-##     koetama.exe --cli --game godot-example --type ...      (lines typed into it come back as speech)
+##     koetama.exe --cli --game godot-example --type ...          (lines typed into it come back as speech)
+##     koetama.exe --cli --game godot-example --mic-wav x.wav ... (a recording as the microphone: speech, and the voice)
 ##     godot --headless --script test_koetama.gd -- <seconds>
-## Prints each object as it arrives, asks for es -> en and one line translated, and says how long each took.
+## Prints each object as it arrives, asks for es -> en and one line translated, and says how long each took. The
+## feed also names a voice room (a room_seed made from the time), this player's string id, where they hear from, a
+## range, and one other player by position: the voice chat connects, and with --mic-wav this player's own voice going
+## out comes back as talking (id = me).
 extends SceneTree
 
 var k: Node
@@ -17,10 +21,19 @@ func _initialize() -> void:
 	k = load("res://koetama.gd").new()
 	k.port = 47150
 	k.feed.listen = "always"
-	k.feed.session = 1
+	k.feed.me = "godot-tester"
+	k.feed.name = "Tester"
+	k.feed.room_seed = "koetama godot test %d" % int(Time.get_unix_time_from_system())
+	k.feed.range = [8, 25]
+	# (Godot's camera looks down -z)
+	k.feed.listener = {"position": [0, 1.7, 0], "forward": [0, 0, -1], "right": [1, 0, 0], "up": [0, 1, 0]}
+	k.feed.speakers = [{"id": "godot-friend", "name": "Friend", "position": [2, 1.7, -3]}]
 	k.hello.connect(func(f): _say("hello, features %s" % [f]))
+	k.status.connect(func(speech, mic): _say("status: speech %s, microphone %s" % [speech, mic]))
+	k.voice.connect(func(state, players): _say("voice %s, players %s" % [state, players]))
+	k.talking.connect(func(id, on): _say("talking %s %s (now: %s)" % [id, on, k.talking_now.keys()]))
 	k.speech.connect(func(kind, utt, text, _o): _say("speech %s %d: %s" % [kind, utt, text]))
-	k.translation.connect(func(id, text): _say("translation %d: %s" % [id, text]))
+	k.translation.connect(func(id, text, from, to): _say("translation %d (%s -> %s): %s" % [id, from, to, text]))
 	k.translations_status.connect(func(ts): _say("translations %s" % [ts]))
 	root.add_child(k)
 	t0 = Time.get_ticks_msec() / 1000.0

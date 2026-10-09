@@ -6,6 +6,6 @@
   "url": "https://github.com/AgeOfAlgorithms/koetama/tree/main/examples/mods/tabletop-simulator",
   "author": "AgeOfAlgorithms",
   "locate": {"steam_app": 286160},
-  "uses": ["speech", "translate"],
+  "uses": ["speech", "voices", "translate"],
   "connector": {"type": "http", "port": 47160}
 }

@@ -5,6 +5,6 @@
   "mod": "Koetama for Godot",
   "url": "https://github.com/AgeOfAlgorithms/koetama/tree/main/examples/mods/godot",
   "author": "AgeOfAlgorithms",
-  "uses": ["speech", "translate"],
+  "uses": ["speech", "voices", "translate"],
   "connector": {"type": "socket", "port": 47150}
 }

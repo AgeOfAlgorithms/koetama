@@ -53,6 +53,9 @@ namespace Koetama
         public event Action<Speech> SpeechReceived;
         public event Action<Room> RoomReceived;
         public event Action<VoiceState> VoiceStateChanged;
+        /// <summary>A player's voice started or stopped being heard (or this player's own being sent).</summary>
+        public event Action<Talking> TalkingChanged;
+        public event Action<Status> StatusChanged;
         public event Action<Translation> TranslationReceived;
         public event Action<List<TranslationState>> TranslationsStatusReceived;
 
@@ -63,6 +66,10 @@ namespace Koetama
         public bool IsConnected { get; private set; }
         /// <summary>The last hello (null before the first one).</summary>
         public Hello Hello { get; private set; }
+        /// <summary>The last status (null before the first one on this connection).</summary>
+        public Status Status { get; private set; }
+        /// <summary>The players whose voice is heard now (and this player's own while it is sent), by id.</summary>
+        public readonly HashSet<string> TalkingNow = new HashSet<string>();
 
         private readonly string host;
         private readonly int port;
@@ -203,6 +210,8 @@ namespace Koetama
                     else
                     {
                         Log?.Invoke("Koetama: disconnected" + (ev.Why != null ? " (" + ev.Why + ")" : ""));
+                        Status = null;
+                        TalkingNow.Clear();
                         Disconnected?.Invoke();
                     }
                     break;
@@ -214,6 +223,14 @@ namespace Koetama
                 case Speech s: SpeechReceived?.Invoke(s); break;
                 case Room r: RoomReceived?.Invoke(r); break;
                 case VoiceState v: VoiceStateChanged?.Invoke(v); break;
+                case Talking tk:
+                    if (tk.IsTalking) TalkingNow.Add(tk.Id); else TalkingNow.Remove(tk.Id);
+                    TalkingChanged?.Invoke(tk);
+                    break;
+                case Status st:
+                    Status = st;
+                    StatusChanged?.Invoke(st);
+                    break;
                 case Translation t:
                     int i = pending.FindIndex(p => p.Id == t.Id);
                     if (i >= 0) { pending.RemoveAt(i); pendingVersion++; }

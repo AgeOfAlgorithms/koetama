@@ -5,6 +5,12 @@
 ##     Koetama.feed.listen = "push_to_talk"       # every field of PROTOCOL.md "Game -> Koetama: the feed"
 ##     Koetama.feed.talk_key = Input.is_action_pressed("talk")
 ##     Koetama.speech.connect(func(kind, utt, text, obj): if kind == "final": chat.say(text))
+##     Koetama.talking.connect(func(id, on): heads[id].speaking_icon.visible = on)
+##
+## Voices: give the feed this player's id ("me": a number or a string, a Steam id), a room ("room_seed"), where they
+## hear from ("listener": position, forward, right, up - Godot's camera looks down -z, so give all three) and how far
+## their voice reaches ("range": [near, far]), and each other player's "position" in "speakers": Koetama works out
+## loudness, direction and who gets the voice. The game adds only "muffle" (its raycast: walls).
 ##
 ## The node connects to 127.0.0.1 (and again whenever Koetama restarts), sends the feed when it changes and at
 ## least once a second, and turns each line Koetama sends into a signal. Godot 3 / Webfishing: the same with
@@ -20,10 +26,17 @@ signal hello(features: Array)
 signal speech(kind: String, utt: int, text: String, obj: Dictionary)
 ## a new voice room for the session (the host keeps the first and shares it with every player)
 signal room(room: String, key: String)
-## the voice chat's link: "off", "connecting", "connected", "unreachable"
-signal voice(state: String)
-## the translation of line `id` ("": nothing to show)
-signal translation(id: int, text: String)
+## the voice chat: state "off", "connecting", "connected", "unreachable" or "id_taken" (another player's id clashes
+## with this one in this room: no voice this session); players: the other players' ids whose Koetama is in the room
+signal voice(state: String, players: Array)
+## a player's voice started (true) or stopped (false) being heard here - or this player's own (id = feed.me) being
+## sent: for speaking icons. Ids are Strings here (a number id as its digits)
+signal talking(id: String, talking: bool)
+## speech to text: "off", "loading", "ready", "error"; the microphone: "closed", "open", "none". Lines said before
+## "ready" and "open" are not heard
+signal status(speech: String, microphone: String)
+## the translation of line `id` ("": nothing to show), and the translation used (from -> to; "" when not said)
+signal translation(id: int, text: String, from: String, to: String)
 ## each translation's state: [{from, to, state, progress?}]
 signal translations_status(translations: Array)
 
@@ -31,6 +44,10 @@ signal translations_status(translations: Array)
 var feed: Dictionary = {"type": "feed", "listen": "off", "lang": "en", "live": true, "speakers": []}
 ## what the hello said (empty: not connected yet)
 var features: Array = []
+## the players whose voice is heard now (and this player's own while it is sent): id -> true
+var talking_now: Dictionary = {}
+## the last status: {"speech": .., "microphone": ..} (empty: none yet)
+var last_status: Dictionary = {}
 
 var _tcp := StreamPeerTCP.new()
 var _buf := PackedByteArray()
@@ -49,6 +66,8 @@ func _process(_delta: float) -> void:
 	match _tcp.get_status():
 		StreamPeerTCP.STATUS_NONE, StreamPeerTCP.STATUS_ERROR:
 			features = []
+			talking_now.clear()
+			last_status = {}
 			if now >= _retry_at:                         # (Koetama may start after the game: try every 2 s)
 				_retry_at = now + 2.0
 				_tcp = StreamPeerTCP.new()
@@ -92,9 +111,30 @@ func _dispatch(o: Dictionary) -> void:
 		"room":
 			room.emit(o.get("room", ""), o.get("key", ""))
 		"voice":
-			voice.emit(o.get("state", ""))
+			var players: Array = []
+			for p in o.get("players", []):
+				players.append(_id(p))
+			voice.emit(o.get("state", ""), players)
+		"talking":
+			var id := _id(o.get("id", ""))
+			var on := bool(o.get("talking", false))
+			if on:
+				talking_now[id] = true
+			else:
+				talking_now.erase(id)
+			talking.emit(id, on)
+		"status":
+			last_status = {"speech": o.get("speech", ""), "microphone": o.get("microphone", "")}
+			status.emit(last_status.speech, last_status.microphone)
 		"translation":
-			translation.emit(int(o.get("id", 0)), o.get("text", ""))
+			translation.emit(int(o.get("id", 0)), o.get("text", ""), o.get("from", ""), o.get("to", ""))
 		"translations_status":
 			translations_status.emit(o.get("translations", []))
 		# (another type: a newer Koetama's - ignored)
+
+
+## A player id as a String: JSON numbers arrive as floats in Godot (12 -> "12").
+func _id(v) -> String:
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return str(int(v))
+	return str(v)

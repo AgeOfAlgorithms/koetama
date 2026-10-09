@@ -415,7 +415,7 @@ impl Worker {
                 }
                 Ok(Msg::Progress { job, frac }) => {
                     if let Some(s) =
-                        self.slots.iter_mut().find(|s| s.job == job && matches!(s.state, State::Downloading(_)))
+                        self.slots.iter_mut().find(|s| s.job == job && matches!(s.state, State::Downloading(_) | State::Loading))
                     {
                         s.state = State::Downloading(frac);
                     }
@@ -465,7 +465,8 @@ impl Worker {
         let job = self.next_job;
         let s = &mut self.slots[i];
         s.job = job;
-        s.state = State::Downloading(0.0);
+        // (loading until bytes actually come down: models already here never show "downloading")
+        s.state = State::Loading;
         s.failed_at = None;
         let (provider, tx, from, to) = (self.provider.clone(), self.tx.clone(), s.from.clone(), s.to.clone());
         let tx2 = tx.clone();
@@ -498,7 +499,7 @@ impl Worker {
             self.slots.push(Slot {
                 from: from.clone(),
                 to: to.clone(),
-                state: if unavailable { State::Unavailable } else { State::Downloading(0.0) },
+                state: if unavailable { State::Unavailable } else { State::Loading },
                 job: 0,
                 route: Vec::new(),
                 failed_at: None,

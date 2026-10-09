@@ -80,6 +80,14 @@ namespace Koetama
             return o.TryGetValue(key, out object v) && v is bool b ? b : def;
         }
 
+        /// <summary>A player id as the protocol gives it, a string or a whole number, as a string (null: neither).</summary>
+        public static string Id(object v)
+        {
+            if (v is string s) return s;
+            if (v is double d && Math.Abs(d) < 9007199254740992.0 && d == Math.Floor(d)) return ((long)d).ToString(CultureInfo.InvariantCulture);
+            return null;
+        }
+
         public static List<object> GetArray(IDictionary<string, object> o, string key)
         {
             return o.TryGetValue(key, out object v) && v is List<object> a ? a : new List<object>();

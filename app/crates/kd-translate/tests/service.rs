@@ -309,7 +309,9 @@ fn states_downloading_loading_ready() {
     assert_eq!(r.replies(1), vec!["en(こんにちは)".to_string()], "answered once they are ready");
     assert_eq!(r.ask(2, "こんにちは"), "en(こんにちは)");
     let seen: Vec<String> = r.statuses().iter().map(|s| kd_translate::service::status_text(s)).collect();
-    assert_eq!(seen.first().map(String::as_str), Some("ja>en=downloading 0"));
+    // (loading until the first bytes come: models already here never show "downloading")
+    assert_eq!(seen.first().map(String::as_str), Some("ja>en=loading"));
+    assert!(seen.iter().any(|s| s.starts_with("ja>en=downloading")), "{seen:?}");
     assert!(seen.contains(&"ja>en=loading".to_string()), "{seen:?}");
     assert_eq!(seen.last().map(String::as_str), Some("ja>en=ready"));
     // (fifty progress steps in a moment: told at most every 0.5 s, plus the last one)

@@ -133,9 +133,11 @@ namespace Koetama.Tests
             client.HelloReceived += h => { hello = h; events.Add("hello"); };
             client.SpeechReceived += s => events.Add("speech " + s.Kind + " " + s.Utt + " " + s.Text);
             client.RoomReceived += r => events.Add("room " + r.Id);
-            client.VoiceStateChanged += v => events.Add("voice " + v.State);
+            client.VoiceStateChanged += v => events.Add("voice " + v.State + " [" + string.Join(",", v.Players) + "]");
+            client.TalkingChanged += tk => events.Add("talking " + tk.Id + " " + tk.IsTalking + " now " + string.Join(",", client.TalkingNow));
+            client.StatusChanged += st => events.Add("status " + st.Speech + "/" + st.Microphone + (st.Ready ? " ready" : "") + (client.Status == st ? " kept" : ""));
             client.TranslationReceived += t => { translation = t; events.Add("translation " + t.Id + " " + t.Text); };
-            client.TranslationsStatusReceived += st => events.Add("status " + st[0].State);
+            client.TranslationsStatusReceived += st => events.Add("translations " + st[0].State);
             client.Feed.Listen = Listen.Always;
             client.Start();
 
@@ -183,7 +185,7 @@ namespace Koetama.Tests
                 Frames(client, () =>
                 {
                     client.Feed.Speakers.Clear();
-                    client.Feed.Speakers.Add(new Speaker { Id = 2, Gain = 1, Azimuth = (Now - t0) * 200 });
+                    client.Feed.Speakers.Add(new Speaker { Id = "2", Gain = 1, Azimuth = (Now - t0) * 200 });
                     return false;
                 }, 1.0);
                 int moving = conn.Feeds().Count - b2;
@@ -196,17 +198,21 @@ namespace Koetama.Tests
                 Check(tt.GetProperty("id").GetInt64() == id && tt.GetProperty("text").GetString() == "こんにちは", "... with its id and text");
                 conn.Send("{\"type\":\"speech\",\"kind\":\"start\",\"utt\":4}\n{\"type\":\"speech\",\"kind\":\"live\",\"utt\":4,\"text\":\"hello\",\"times\":[0.1],\"ago\":1.0}\n");
                 conn.Send("{\"type\":\"speech\",\"kind\":\"final\",\"utt\":4,\"text\":\"hello there\"}\nnot json at all\n{\"type\":\"a_new_thing\"}\n");
-                conn.Send("{\"type\":\"room\",\"room\":\"" + new string('1', 32) + "\",\"key\":\"" + new string('2', 64) + "\"}\n{\"type\":\"voice\",\"state\":\"connected\"}\n");
+                conn.Send("{\"type\":\"status\",\"speech\":\"loading\",\"microphone\":\"open\"}\n{\"type\":\"status\",\"speech\":\"ready\",\"microphone\":\"open\"}\n");
+                conn.Send("{\"type\":\"room\",\"room\":\"" + new string('1', 32) + "\",\"key\":\"" + new string('2', 64) + "\"}\n{\"type\":\"voice\",\"state\":\"connected\",\"players\":[\"-77\",9]}\n");
+                conn.Send("{\"type\":\"talking\",\"id\":\"-77\",\"talking\":true}\n{\"type\":\"talking\",\"id\":9,\"talking\":true}\n{\"type\":\"talking\",\"id\":\"-77\",\"talking\":false}\n");
                 byte[] tr = Encoding.UTF8.GetBytes("{\"type\":\"translation\",\"id\":" + id + ",\"text\":\"Hello – 你好\"}\n");
                 int cut = Array.IndexOf(tr, (byte)0xE2) + 1; // (inside the dash's three bytes)
                 conn.SendBytes(tr.Take(cut).ToArray());
                 Thread.Sleep(50);
                 conn.SendBytes(tr.Skip(cut).ToArray());
                 conn.Send("{\"type\":\"translations_status\",\"translations\":[{\"from\":\"ja\",\"to\":\"en\",\"state\":\"ready\"}]}\n");
-                Check(Frames(client, () => events.Any(e => e.StartsWith("status")), 2), "all of Koetama's objects arrived");
+                Check(Frames(client, () => events.Any(e => e.StartsWith("translations")), 2), "all of Koetama's objects arrived");
                 var got = events.SkipWhile(e => !e.StartsWith("speech")).ToList();
-                var want = new[] { "speech Start 4 ", "speech Live 4 hello", "speech Final 4 hello there", "room " + new string('1', 32),
-                                   "voice connected", "translation " + id + " Hello – 你好", "status ready" };
+                var want = new[] { "speech Start 4 ", "speech Live 4 hello", "speech Final 4 hello there",
+                                   "status loading/open kept", "status ready/open ready kept", "room " + new string('1', 32),
+                                   "voice connected [-77,9]", "talking -77 True now -77", "talking 9 True now -77,9", "talking -77 False now 9",
+                                   "translation " + id + " Hello – 你好", "translations ready" };
                 Check(got.SequenceEqual(want), "events in order, the bad and unknown lines skipped: " + string.Join(" | ", got));
                 Check(translation != null && translation.Original == "こんにちは", "the translation carries its original line");
                 Check(logs.Any(l => l.Contains("not JSON")), "the bad line was logged");
@@ -236,6 +242,7 @@ namespace Koetama.Tests
                 Check(Frames(client, () => conn2.All().Count >= 2, 2) && conn2.All()[0].line.Contains("\"hello\"") && conn2.Feeds().Count >= 1,
                     "... with its hello, then the feed at once");
                 Check(events.Take(2).SequenceEqual(new[] { "disconnected", "connected" }), "Disconnected, then Connected: " + string.Join(",", events));
+                Check(client.TalkingNow.Count == 0 && client.Status == null, "a new connection forgets who was talking and the status");
 
                 // the game asks for a new session (a new voice room): Reconnect
                 client.Reconnect();

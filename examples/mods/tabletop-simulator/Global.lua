@@ -1,20 +1,28 @@
 --[[ Koetama Table Talk: Tabletop Simulator's Global script, linked to Koetama by HTTP (PROTOCOL.md "Transport: HTTP").
 
-What it does (on the HOST's PC only: TTS runs every script on the host, and only the host can make web requests):
-  - the host's speech as text: each finished line is printed into chat as the host ("Name: what they said");
-  - push to talk on a scripting button (numpad 1 by default) held by the host, or "!talk always";
-  - chat translation: "!translate es en" (up to two pairs: "!translate ja en ko en", "!translate off"); every chat
-    line is sent to the host's Koetama, and its translation is printed under it in another colour.
+TTS runs every script on the HOST's PC only, and only the host can make web requests: the other players' games tell
+their Koetamas nothing. So the host's Koetama works as a hub (PROTOCOL.md "Hub"): the host's feed lists every other
+seated player, Koetama answers a join code for each, and this script shows each player their code privately. A player
+types it into their own Koetama ("Join a game with a code"), and from then on their microphone, speech to text and
+translations are theirs, on their PC, with what they say arriving here tagged with them.
 
-No proximity voice: a TTS table has no distances worth mixing by (everyone sits at one table), TTS already has its own
-global voice chat, and the voice room needs every player's Koetama to get the room and their player ids - which
-TTS cannot give them, since no script runs on their PCs.
+What it does:
+  - speech as text: each finished line, the host's or a joined player's, is printed into chat as them, in their colour;
+  - push to talk on a scripting button (numpad 1 by default), each player their own, or "!talk always";
+  - chat translation, per player: "!translate es en" (up to two pairs: "!translate ja en ko en", "!translate off");
+    every chat line goes to each player who asked (not to its writer), and the translation is printed to that player
+    only, under the line;
+  - "Name joined with their Koetama" / "... left" for everyone;
+  - "!voice on" (the host): a voice room for the table, everyone hearing everyone at full volume (no distances worth
+    mixing by at one table; TTS has its own voice chat too, so it is off by default). Its seed is made here at load
+    and only ever travels to the Koetamas, so nobody else can work out the room.
 
-Chat commands (the host's only; hidden from chat):
-  !talk ptt | always | off     how the microphone listens (default: push to talk on the scripting button)
-  !lang en                     the language the host speaks (Koetama's codes, or "auto")
-  !translate es en [ja en]     translations into the host's language; "!translate off"
-  !koetama                     the link's state
+Chat commands (hidden from chat; each player's own):
+  !talk ptt | always | off     how your microphone listens (default: push to talk on scripting button 1)
+  !lang en                     the language you speak (Koetama's codes, or "auto")
+  !translate es en [ja en]     translations of the others' chat lines; "!translate off"
+  !koetama                     the link's state, and your join code again
+  !voice on | off              (the host only) the table's voice room
 
 Install: in Koetama "Add game mod..." -> examples/profiles/tabletop-simulator-koetama.json, pick it; in TTS:
 Modding > Scripting > Global, paste this file, Save & Play. Lua here is MoonSharp (Lua 5.2-ish): no goto, no utf8
@@ -26,10 +34,29 @@ local URL = "http://127.0.0.1:" .. PORT .. "/"
 local TALK_BUTTON = 1              -- scripting button 1 = numpad 1
 local WAIT = 1                     -- long poll: the answer waits up to 1 s for an object
 local LINE_TTL = 10                -- seconds a chat line waits for its translation
-local MAX_LINES = 16               -- lines in one feed (the protocol's limit)
+local MAX_LINES = 16               -- lines in one player's feed (the protocol's limit)
 local MAX_BYTES = 400              -- bytes of one line (the protocol's limit)
 local TRANSLATION_COLOR = {0.65, 0.85, 1.0}
 local INFO_COLOR = {0.6, 0.6, 0.6}
+local CODE_COLOR = {1.0, 0.85, 0.4}
+
+-- What Koetama is told for one player (the host's at the top of the feed, each other's in "players").
+local function new_state(id)
+    return {
+        id = id,              -- steam_id (a string), nil for the host until known
+        name = "",
+        listen = "push_to_talk",
+        talk_key = false,
+        lang = "en",
+        translations = {},    -- {{from=, to=}, ...}
+        states = {},          -- "from>to" -> state ("ready", "downloading", ...)
+        last_progress = {},   -- "from>to" -> the last download percentage shown
+        retry = {},           -- lines answered "" while a model was not ready: sent again once ready
+        status = "",          -- the last status shown ("speech/microphone")
+        voice = "",           -- the voice chat's state
+        voice_players = {},   -- the players whose Koetama is in the room, as this player's Koetama last said
+    }
+end
 
 local kt = {
     session = 0,          -- made at load: a new session for Koetama (its numbers start over)
@@ -39,15 +66,14 @@ local kt = {
     urgent_again = false, -- something changed while it was: send another when it lands
     online = nil,         -- nil: not asked yet; true/false: the last request's outcome
     features = {},
-    listen = "push_to_talk",
-    talk_key = false,
-    lang = "en",
-    translations = {},    -- {{from=, to=}, ...}
-    states = {},          -- "from>to" -> state ("ready", "downloading", ...)
-    lines = {},           -- id -> {text=, name=, at=, retried=}: waiting for their translation
-    retry = {},           -- lines answered "" while a model was not ready: sent again once ready
+    host = new_state(nil),
+    players = {},         -- steam_id -> state, everyone seated now or before (settings kept when they leave)
+    codes = {},           -- steam_id -> their join code
+    joined = {},          -- steam_id -> true while their Koetama is joined
+    lines = {},           -- id -> {text=, owner=state, at=, retried=}: waiting for their translation
     next_id = 1,
-    last_progress = {},   -- "from>to" -> the last download percentage shown
+    voice = false,        -- the table's voice room
+    seed = "",
 }
 
 -- ------------------------------------------------------------------ small helpers
@@ -56,24 +82,85 @@ local function now()
     return Time.time
 end
 
-local function host()
+local function all_players()
+    local all = {}
     for _, list in ipairs({Player.getPlayers(), Player.getSpectators and Player.getSpectators() or {}}) do
-        for _, p in ipairs(list) do
-            if p.host then return p end
-        end
+        for _, p in ipairs(list) do all[#all + 1] = p end
+    end
+    return all
+end
+
+local function host()
+    for _, p in ipairs(all_players()) do
+        if p.host then return p end
     end
     return nil
 end
 
-local function tell_host(msg)
-    local h = host()
-    if h then h.print("[Koetama] " .. msg, INFO_COLOR) else print("[Koetama] " .. msg) end
+local function player_by_id(id)
+    for _, p in ipairs(all_players()) do
+        if tostring(p.steam_id) == id then return p end
+    end
+    return nil
+end
+
+-- The state of a TTS player (the host's, or another's, made the first time).
+local function state_of(p)
+    if p.host then
+        kt.host.id, kt.host.name = tostring(p.steam_id), p.steam_name or ""
+        return kt.host
+    end
+    local id = tostring(p.steam_id)
+    local st = kt.players[id]
+    if not st then
+        st = new_state(id)
+        kt.players[id] = st
+    end
+    st.name = p.steam_name or ""
+    return st
+end
+
+-- The state an object of Koetama's is for: its "player", or the host's (none).
+local function state_for(id)
+    if id == nil then return kt.host end
+    return kt.players[tostring(id)]
+end
+
+local function player_of(st)
+    if st == kt.host then return host() end
+    return player_by_id(st.id)
+end
+
+local function name_of(st)
+    local p = player_of(st)
+    if p and p.steam_name then return p.steam_name end
+    if st.name ~= "" then return st.name end
+    return st == kt.host and "Host" or "a player"
+end
+
+-- To one player only (their chat).
+local function to_player(st, msg, color)
+    local p = player_of(st)
+    if p then p.print(msg, color or INFO_COLOR) elseif st == kt.host then print(msg) end
+end
+
+local function tell(st, msg)
+    to_player(st, "[Koetama] " .. msg, INFO_COLOR)
 end
 
 local function color_of(p)
     local ok, c = pcall(function() return Color.fromString(p.color) end)
     if ok and c then return c end
     return {1, 1, 1}
+end
+
+-- The other players for the hub: seated (not spectating), not the host.
+local function others()
+    local list = {}
+    for _, p in ipairs(Player.getPlayers()) do
+        if not p.host and p.steam_id and p.color ~= "Grey" then list[#list + 1] = p end
+    end
+    return list
 end
 
 -- A whole number as JSON (MoonSharp has only doubles; "%d" of a big one is not safe everywhere).
@@ -105,51 +192,137 @@ local function cut_utf8(s, n)
     return s:sub(1, i)
 end
 
+-- ------------------------------------------------------------------ the feed
+
+local function lines_json(st)
+    local ids, out = {}, {}
+    for id, line in pairs(kt.lines) do
+        if line.owner == st then ids[#ids + 1] = id end
+    end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+        if #out >= MAX_LINES then break end
+        out[#out + 1] = '{"id":' .. int(id) .. ',"text":' .. jstr(kt.lines[id].text) .. '}'
+    end
+    return "[" .. table.concat(out, ",") .. "]"
+end
+
+-- One player's fields. everyone: {id, name} of each player at the table (for the voice room).
+local function fields(st, everyone)
+    local parts = {
+        '"listen":' .. jstr(st.listen),
+        '"talk_key":' .. tostring(st.talk_key),
+        '"lang":' .. jstr(st.lang),
+        '"live":false',
+        '"name":' .. jstr(st.name),
+    }
+    local tr = {}
+    for _, t in ipairs(st.translations) do
+        tr[#tr + 1] = '{"from":' .. jstr(t.from) .. ',"to":' .. jstr(t.to) .. '}'
+    end
+    parts[#parts + 1] = '"translations":[' .. table.concat(tr, ",") .. ']'
+    parts[#parts + 1] = '"to_translate":' .. lines_json(st)
+    if kt.voice and st.id then
+        -- (one table: everyone hears everyone, as loud as each other)
+        local sp, to = {}, {}
+        for _, e in ipairs(everyone) do
+            if e.id ~= st.id then
+                sp[#sp + 1] = '{"id":' .. jstr(e.id) .. ',"name":' .. jstr(e.name) .. ',"gain":1}'
+                to[#to + 1] = jstr(e.id)
+            end
+        end
+        parts[#parts + 1] = '"speakers":[' .. table.concat(sp, ",") .. ']'
+        parts[#parts + 1] = '"to":[' .. table.concat(to, ",") .. ']'
+    end
+    return table.concat(parts, ",")
+end
+
 -- The feed, written by hand: TTS's JSON.encode cannot say "empty list" vs "empty object", and Koetama wants whole
 -- numbers for session/ack/id ("3.0" is refused).
 local function feed_json(wait)
+    local h = host()
+    if h then state_of(h) end
+    local everyone, seated = {}, {}
+    if kt.host.id then everyone[1] = {id = kt.host.id, name = kt.host.name} end
+    for _, p in ipairs(others()) do
+        local st = state_of(p)
+        seated[#seated + 1] = st
+        everyone[#everyone + 1] = {id = st.id, name = st.name}
+    end
     local parts = {
         '"type":"feed"',
         '"session":' .. int(kt.session),
         '"ack":' .. int(kt.ack),
         '"wait":' .. (wait > 0 and int(wait) or "0"),
-        '"listen":' .. jstr(kt.listen),
-        '"talk_key":' .. tostring(kt.talk_key),
-        '"lang":' .. jstr(kt.lang),
-        '"live":false',
     }
-    local tr = {}
-    for _, t in ipairs(kt.translations) do
-        tr[#tr + 1] = '{"from":' .. jstr(t.from) .. ',"to":' .. jstr(t.to) .. '}'
+    if kt.host.id then parts[#parts + 1] = '"me":' .. jstr(kt.host.id) end
+    if kt.voice then parts[#parts + 1] = '"room_seed":' .. jstr(kt.seed) end
+    parts[#parts + 1] = fields(kt.host, everyone)
+    local ps = {}
+    for _, st in ipairs(seated) do
+        ps[#ps + 1] = '{"id":' .. jstr(st.id) .. "," .. fields(st, everyone) .. "}"
     end
-    parts[#parts + 1] = '"translations":[' .. table.concat(tr, ",") .. ']'
-    local lines, ids = {}, {}
-    for id, _ in pairs(kt.lines) do ids[#ids + 1] = id end
-    table.sort(ids)
-    for _, id in ipairs(ids) do
-        if #lines >= MAX_LINES then break end
-        lines[#lines + 1] = '{"id":' .. int(id) .. ',"text":' .. jstr(kt.lines[id].text) .. '}'
-    end
-    parts[#parts + 1] = '"to_translate":[' .. table.concat(lines, ",") .. ']'
+    parts[#parts + 1] = '"players":[' .. table.concat(ps, ",") .. ']'
     return "{" .. table.concat(parts, ",") .. "}"
 end
 
 -- ------------------------------------------------------------------ Koetama's objects
 
-local function all_ready()
-    for _, t in ipairs(kt.translations) do
-        if kt.states[t.from .. ">" .. t.to] ~= "ready" then return false end
+local function all_ready(st)
+    for _, t in ipairs(st.translations) do
+        if st.states[t.from .. ">" .. t.to] ~= "ready" then return false end
     end
     return true
 end
 
 local send_urgent -- (below)
 
-local function queue_line(text, name)
+local function queue_line(text, owner)
     local id = kt.next_id
     kt.next_id = kt.next_id + 1
-    kt.lines[id] = {text = cut_utf8(text, MAX_BYTES), name = name, at = now(), retried = false}
+    kt.lines[id] = {text = cut_utf8(text, MAX_BYTES), owner = owner, at = now(), retried = false}
     return id
+end
+
+local function show_code(st)
+    local code = kt.codes[st.id or ""]
+    local p = player_of(st)
+    if not code or not p then return end
+    broadcastToColor("Your Koetama code: " .. code .. "  (in Koetama: Join a game with a code)", p.color, CODE_COLOR)
+end
+
+local function on_translations_status(st, list)
+    for _, s in ipairs(list or {}) do
+        local key = s.from .. ">" .. s.to
+        local was = st.states[key]
+        st.states[key] = s.state
+        if s.state == "downloading" then
+            local pct = math.floor((s.progress or 0) * 100)
+            if not st.last_progress[key] or pct >= st.last_progress[key] + 25 then
+                st.last_progress[key] = pct
+                tell(st, "translation " .. s.from .. " -> " .. s.to .. ": downloading " .. pct .. "%")
+            end
+        elseif s.state ~= was then
+            tell(st, "translation " .. s.from .. " -> " .. s.to .. ": " .. s.state)
+        end
+    end
+    if all_ready(st) and #st.retry > 0 then
+        for _, line in ipairs(st.retry) do
+            local id = queue_line(line.text, st)
+            kt.lines[id].retried = true
+        end
+        st.retry = {}
+        send_urgent()
+    end
+end
+
+-- What a status object means for the player (nil: nothing worth saying).
+local function status_text(speech, mic)
+    if speech == "ready" and mic == "open" then return "Koetama ready" end
+    if mic == "none" then return "Koetama: no microphone found" end
+    if speech == "loading" then return "Koetama: the speech models are loading" end
+    if speech == "error" then return "Koetama: speech to text failed (see Koetama's window)" end
+    return nil
 end
 
 local function on_object(o)
@@ -157,51 +330,56 @@ local function on_object(o)
     if t == "hello" then
         kt.features = {}
         for _, f in ipairs(o.features or {}) do kt.features[f] = true end
-        tell_host("linked (Koetama " .. tostring(o.version) .. ", protocol " .. tostring(o.protocol) .. ")")
-    elseif t == "speech" then
+        tell(kt.host, "linked (Koetama " .. tostring(o.version) .. ", protocol " .. tostring(o.protocol) .. ")")
+        return
+    end
+    local st = state_for(o.player)
+    if not st then return end -- (a player this table never had)
+    if t == "speech" then
         if o.kind == "final" and o.text and o.text ~= "" then
-            local h = host()
-            local name = h and h.steam_name or "Host"
-            printToAll(name .. ": " .. o.text, h and color_of(h) or {1, 1, 1})
-            if kt.on_said then kt.on_said(o.text) end -- (tests)
+            local p = player_of(st)
+            printToAll(name_of(st) .. ": " .. o.text, p and color_of(p) or {1, 1, 1})
+            if kt.on_said then kt.on_said(o.text, st) end -- (tests)
         end
     elseif t == "translation" then
         local line = kt.lines[o.id]
+        if not line or line.owner ~= st then return end
         kt.lines[o.id] = nil
-        if not line then return end
         if o.text ~= "" then
-            printToAll("    > " .. o.text, TRANSLATION_COLOR)
-            if kt.on_translated then kt.on_translated(line.text, o.text) end -- (tests)
-        elseif not all_ready() and not line.retried then
+            to_player(st, "    > " .. o.text, TRANSLATION_COLOR)
+            if kt.on_translated then kt.on_translated(line.text, o.text, st) end -- (tests)
+        elseif not all_ready(st) and not line.retried then
             -- ("" also means "the models are not ready": ask again once they are, under a new id)
             line.retried = true
-            kt.retry[#kt.retry + 1] = line
+            st.retry[#st.retry + 1] = line
         end
     elseif t == "translations_status" then
-        for _, s in ipairs(o.translations or {}) do
-            local key = s.from .. ">" .. s.to
-            local was = kt.states[key]
-            kt.states[key] = s.state
-            if s.state == "downloading" then
-                local pct = math.floor((s.progress or 0) * 100)
-                if not kt.last_progress[key] or pct >= kt.last_progress[key] + 25 then
-                    kt.last_progress[key] = pct
-                    tell_host("translation " .. s.from .. " -> " .. s.to .. ": downloading " .. pct .. "%")
-                end
-            elseif s.state ~= was then
-                tell_host("translation " .. s.from .. " -> " .. s.to .. ": " .. s.state)
-            end
+        on_translations_status(st, o.translations)
+    elseif t == "join_code" then
+        kt.codes[st.id] = o.code
+        show_code(st)
+    elseif t == "player" then
+        kt.joined[st.id] = o.joined == true or nil
+        printToAll("[Koetama] " .. name_of(st) .. (o.joined and " joined with their Koetama" or "'s Koetama left"), INFO_COLOR)
+        if o.joined then send_urgent() end -- (their lines to translate can go now)
+    elseif t == "status" then
+        local key = tostring(o.speech) .. "/" .. tostring(o.microphone)
+        if key ~= st.status then
+            st.status = key
+            local text = status_text(o.speech, o.microphone)
+            if text then tell(st, text) end
         end
-        if all_ready() and #kt.retry > 0 then
-            for _, line in ipairs(kt.retry) do
-                local id = queue_line(line.text, line.name)
-                kt.lines[id].retried = true
-            end
-            kt.retry = {}
-            send_urgent()
+    elseif t == "voice" then
+        st.voice_players = o.players or {}
+        if o.state ~= st.voice then
+            local first = st.voice == ""
+            st.voice = o.state
+            if first and o.state == "off" then return end
+            tell(st, "voice chat: " .. tostring(o.state) ..
+                (o.state == "id_taken" and " (another player's id clashes with yours: no voice this session)" or ""))
         end
     end
-    -- room / voice: this mod does not use voices (no "voices" in the profile), so they never come.
+    -- room: this mod gives a room_seed, so no offer is needed; talking: TTS shows its own speaking icons.
 end
 
 -- ------------------------------------------------------------------ the link
@@ -220,9 +398,9 @@ end
 local function on_answer(req)
     if req.is_error or (req.response_code and req.response_code ~= 200) then
         if req.response_code == 400 then
-            tell_host("Koetama refused the feed: " .. tostring(req.text))
+            tell(kt.host, "Koetama refused the feed: " .. tostring(req.text))
         elseif kt.online ~= false then
-            tell_host("Koetama is not answering on port " .. PORT .. " (start it and pick Tabletop Simulator)")
+            tell(kt.host, "Koetama is not answering on port " .. PORT .. " (start it and pick Tabletop Simulator)")
         end
         kt.online = false
         return false
@@ -261,8 +439,8 @@ poll = function()
     end)
 end
 
--- Something changed now (the talk key, a chat line to translate): a second, wait-0 request, so it does not sit
--- behind the long poll for up to a second.
+-- Something changed now (a talk key, a chat line to translate): a second, wait-0 request, so it does not sit behind
+-- the long poll for up to a second.
 send_urgent = function()
     if kt.online == false then return end
     if kt.urgent then kt.urgent_again = true return end
@@ -280,59 +458,85 @@ end
 
 function onLoad(_)
     -- a session per load (a game's level): seconds since 1970 x 1000 + a random part, well inside 2^53
-    math.randomseed(os.time())
+    math.randomseed(os.time() + math.floor((os.clock() % 1) * 1e6))
     kt.session = os.time() * 1000 + math.random(0, 999)
     kt.ack = 0
+    -- the voice room's seed: random, made here and never shown, so only the Koetamas have it
+    local r = {}
+    for i = 1, 6 do r[i] = string.format("%06x", math.random(0, 0xffffff)) end
+    kt.seed = "tts table " .. int(kt.session) .. " " .. table.concat(r) .. " " .. tostring({}):gsub("^table: ", "")
     poll()
 end
 
-local function set_talk(on)
-    if kt.talk_key ~= on then
-        kt.talk_key = on
+local function state_of_color(color)
+    for _, p in ipairs(all_players()) do
+        if p.color == color then return state_of(p) end
+    end
+    return nil
+end
+
+function onScriptingButtonDown(index, color)
+    local st = state_of_color(color)
+    if index == TALK_BUTTON and st and st.listen == "push_to_talk" and not st.talk_key then
+        st.talk_key = true
         send_urgent()
     end
 end
 
-function onScriptingButtonDown(index, color)
-    local h = host()
-    if index == TALK_BUTTON and h and h.color == color and kt.listen == "push_to_talk" then set_talk(true) end
+function onScriptingButtonUp(index, color)
+    local st = state_of_color(color)
+    if index == TALK_BUTTON and st and st.talk_key then
+        st.talk_key = false
+        send_urgent()
+    end
 end
 
-function onScriptingButtonUp(index, color)
-    local h = host()
-    if index == TALK_BUTTON and h and h.color == color then set_talk(false) end
+function onPlayerChangeColor(_)
+    send_urgent() -- (a player sat down or stood up: the hub's list changes)
 end
 
 local LISTEN = {ptt = "push_to_talk", always = "always", off = "off"}
 
-local function command(words)
+local function command(st, words)
     local cmd = words[1]
     if cmd == "!talk" then
         local l = LISTEN[words[2] or ""]
-        if not l then tell_host("!talk ptt | always | off") return end
-        kt.listen, kt.talk_key = l, false
-        tell_host("microphone: " .. l .. (l == "push_to_talk" and " (hold scripting button " .. TALK_BUTTON .. ")" or ""))
+        if not l then tell(st, "!talk ptt | always | off") return true end
+        st.listen, st.talk_key = l, false
+        tell(st, "microphone: " .. l .. (l == "push_to_talk" and " (hold scripting button " .. TALK_BUTTON .. ")" or ""))
     elseif cmd == "!lang" and words[2] then
-        kt.lang = words[2]
-        tell_host("you speak: " .. kt.lang)
+        st.lang = words[2]
+        tell(st, "you speak: " .. st.lang)
     elseif cmd == "!translate" then
-        kt.translations, kt.states, kt.last_progress = {}, {}, {}
+        st.translations, st.states, st.last_progress, st.retry = {}, {}, {}, {}
         if words[2] ~= "off" then
             local i = 2
-            while words[i] and words[i + 1] and #kt.translations < 2 do
-                kt.translations[#kt.translations + 1] = {from = words[i], to = words[i + 1]}
+            while words[i] and words[i + 1] and #st.translations < 2 do
+                st.translations[#st.translations + 1] = {from = words[i], to = words[i + 1]}
                 i = i + 2
             end
         end
-        if #kt.translations == 0 then tell_host("translation off") end
-        if not kt.features["translate"] and kt.online then tell_host("this Koetama profile does not translate") end
+        if #st.translations == 0 then tell(st, "translation off") end
+        if not kt.features["translate"] and kt.online then tell(st, "this Koetama profile does not translate") end
+        if st ~= kt.host and #st.translations > 0 and not kt.joined[st.id] then
+            tell(st, "translations need your Koetama joined: type your code into it")
+        end
+    elseif cmd == "!voice" and st == kt.host and (words[2] == "on" or words[2] == "off") then
+        if words[2] == "on" and not kt.features["voices"] and kt.online then
+            tell(st, "this Koetama profile has no voices")
+        end
+        kt.voice = words[2] == "on"
+        printToAll("[Koetama] the table's voice room is " .. (kt.voice and "on" or "off"), INFO_COLOR)
     elseif cmd == "!koetama" then
         local tr = {}
-        for _, t in ipairs(kt.translations) do
-            tr[#tr + 1] = t.from .. "->" .. t.to .. " " .. tostring(kt.states[t.from .. ">" .. t.to] or "?")
+        for _, t in ipairs(st.translations) do
+            tr[#tr + 1] = t.from .. "->" .. t.to .. " " .. tostring(st.states[t.from .. ">" .. t.to] or "?")
         end
-        tell_host((kt.online and "linked" or "not linked") .. ", mic " .. kt.listen .. ", lang " .. kt.lang ..
-            ", translate: " .. (#tr > 0 and table.concat(tr, ", ") or "off") .. ", last object " .. int(kt.ack))
+        local link = st == kt.host and (kt.online and "linked" or "not linked")
+            or (kt.joined[st.id] and "joined" or "not joined")
+        tell(st, link .. ", mic " .. st.listen .. ", lang " .. st.lang .. ", translate: " ..
+            (#tr > 0 and table.concat(tr, ", ") or "off") .. ", voice " .. (kt.voice and st.voice or "off"))
+        if st ~= kt.host then show_code(st) end
     else
         return false
     end
@@ -341,16 +545,25 @@ local function command(words)
 end
 
 function onChat(message, player)
+    local from = state_of(player)
     if message:sub(1, 1) == "!" then
         local words = {}
         for w in message:gmatch("%S+") do words[#words + 1] = w:lower() end
-        local h = host()
-        if h and player.color == h.color and command(words) then return false end
+        if command(from, words) then return false end
     end
-    if #kt.translations > 0 and kt.online then
-        queue_line(message, player.steam_name)
-        send_urgent()
+    -- the line, to everyone who translates (whose Koetama is there), but not its writer
+    local queued = false
+    local readers = {kt.host}
+    for id, st in pairs(kt.players) do
+        if kt.joined[id] then readers[#readers + 1] = st end
     end
+    for _, st in ipairs(readers) do
+        if st ~= from and #st.translations > 0 and kt.online then
+            queue_line(message, st)
+            queued = true
+        end
+    end
+    if queued then send_urgent() end
     return true
 end
 

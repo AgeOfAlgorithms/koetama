@@ -8,6 +8,12 @@ lands in a file that the frame loop looks for, then the callback runs on the "ma
 JSON is rxi/json.lua (MIT, vendored here only). Wait.time, Time.time, Player, printToAll, Color as TTS has them.
 Koetama is started by the harness with --type, its stdin a pipe: a line written there is "said" by the host, so the
 time from writing it to its line in "chat" is the full round trip.
+
+The hub (PROTOCOL.md "Hub"): Blue is seated, so the host's feed lists them and Koetama answers a join code, which the
+mod must show Blue only. A SECOND Koetama is then started with --join <that code> --type (Blue's, over the live
+relay): a line typed into it must print as Blue, in Blue's colour; Blue's own translation (their Koetama's models)
+must come back to Blue only; and with "!voice on" both Koetamas must meet in the table's seeded voice room.
+KT_NO_HUB=1 skips that part, KT_NO_DOWNLOAD=1 the French model download.
 ]]
 local ffi = require("ffi")
 ffi.cdef [[
@@ -41,20 +47,27 @@ local function to_chat(msg, color)
     log("CHAT  %s", msg)
 end
 
-local host_player = {color = "White", steam_name = "HostPlayer", host = true}
-local blue_player = {color = "Blue", steam_name = "BluePlayer", host = false}
-local function player_print(self, msg, color)
-    if self ~= host_player and self ~= blue_player then msg, color = self, msg end -- (p.print(...) or p:print(...))
-    log("HOST  %s", msg)
-    chat[#chat + 1] = {at = t(), text = msg, color = color, private = true}
+local host_player = {color = "White", steam_name = "HostPlayer", steam_id = "76561198000000001", host = true, seated = true}
+local blue_player = {color = "Blue", steam_name = "BluePlayer", steam_id = "76561198000000002", host = false, seated = true}
+-- (TTS: p.print(msg, color); this works called with a dot or a colon)
+for _, p in ipairs({host_player, blue_player}) do
+    p.print = function(a, b, c)
+        local msg, color = a, b
+        if a == p then msg, color = b, c end
+        log("%-5s %s", p.color:upper(), msg)
+        chat[#chat + 1] = {at = t(), text = msg, color = color, private = true, to = p.color}
+    end
 end
-host_player.print, blue_player.print = player_print, player_print
 
 Player = {getPlayers = function() return {host_player, blue_player} end}
 Color = {fromString = function(s) return {name = s} end}
 Time = {time = 0}
 printToAll = to_chat
 broadcastToAll = to_chat
+function broadcastToColor(msg, color, tint)
+    log("BCAST %s: %s", color, msg)
+    chat[#chat + 1] = {at = t(), text = msg, color = tint, private = true, to = color, broadcast = true}
+end
 local answered = {}      -- translation id -> {text=, at=} (each object seen on the wire, duplicates counted)
 JSON = {encode = rxi.encode, decode = function(s)
     if os.getenv("KT_TRACE") or s:find("translation", 1, true) then log("ANSWER %s", s) end
@@ -142,6 +155,7 @@ end
 
 -- ------------------------------------------------------------------ the scenario (a coroutine, one step a frame)
 local koetama -- the pipe into Koetama's stdin
+local joined  -- the pipe into Blue's Koetama's stdin (joined with the code)
 local failures = {}
 local function check(cond, what)
     log("%s  %s", cond and "PASS" or "FAIL", what)
@@ -163,6 +177,11 @@ end
 local function chat_line(pred, from)
     for i = from or 1, #chat do
         if pred(chat[i].text) then return chat[i], i end
+    end
+end
+local function chat_entry(pred, from) -- (pred gets the whole entry: text, color, to)
+    for i = from or 1, #chat do
+        if pred(chat[i]) then return chat[i], i end
     end
 end
 local function stats_of(xs)
@@ -187,6 +206,18 @@ local scenario = coroutine.create(function()
     check(waitfor(function() return kt.features.speech end, 20), "hello arrives (features: speech, translate)")
     log("linked %.2f s after Koetama started (the retry is every 2 s)", t() - t_start)
 
+    -- the hub: Blue is seated, so the feed lists them, and their join code is shown to Blue only
+    local body = stats.bodies[#stats.bodies]
+    check(body:find('"me":"76561198000000001"', 1, true) and body:find('"players":[{"id":"76561198000000002"', 1, true) ~= nil,
+        "the feed: the host's steam id as me, Blue in players")
+    local code_line = waitfor(function()
+        return chat_entry(function(c) return c.broadcast and c.text:find("Your Koetama code: ", 1, true) end)
+    end, 10)
+    local code = code_line and code_line.text:match("code: (%w%w%w%w%-%w%w%w%w)")
+    check(code ~= nil and code_line.to == "Blue", "Blue's join code is shown to Blue only (" .. tostring(code) .. ")")
+    check(not chat_entry(function(c) return not c.private and c.text:find(tostring(code), 1, true) end),
+        "... and nowhere in the public chat")
+
     -- translation: enabled and used in the same frame, so the first line meets a model that is not "ready" yet
     player_chat(host_player, "!translate es en")
     check(not chat_line(function(s) return s:find("!translate", 1, true) end), "a command is hidden from chat")
@@ -204,10 +235,15 @@ local scenario = coroutine.create(function()
     onScriptingButtonUp(1, "White")
     sleep(0.3)
     check(stats.urgent - u0 >= 2, "push to talk: the key down and up each sent a feed at once")
-    check(held and held:find('"talk_key":true', 1, true) ~= nil, "push to talk: talk_key true while held")
+    check(held and held:match('^{[^%[]*"talk_key":true') ~= nil, "push to talk: the host's talk_key true while held")
     onScriptingButtonDown(1, "Blue")
-    check(kt.talk_key == false, "another player's scripting button is not the host's talk key")
+    sleep(0.2)
+    local blue_held = stats.bodies[#stats.bodies]
     onScriptingButtonUp(1, "Blue")
+    check(kt.host.talk_key == false and blue_held:match('^{[^%[]*"talk_key":false') ~= nil,
+        "Blue's scripting button is not the host's talk key")
+    check(blue_held:find('"players":[{"id":"76561198000000002","listen":"push_to_talk","talk_key":true', 1, true) ~= nil,
+        "... it is Blue's own, in Blue's feed")
 
     -- speech: lines "said" (typed into Koetama) at random points of the long poll; time to their chat line
     local said = {"hello there everyone", "roll the dice please", "I will trade two wheat for one ore",
@@ -258,6 +294,74 @@ local scenario = coroutine.create(function()
     check(not chat_line(function(s) return s:find("^    > ") end, mark), "a line with no Spanish: nothing printed")
     check(next(kt.lines) == nil, "no line left waiting for a translation")
 
+    -- the hub: Blue's Koetama joins with the code; what Blue says prints as Blue
+    if os.getenv("KT_NO_HUB") == nil and code then
+        log("start Blue's Koetama: --join %s", code)
+        local t_join = t()
+        joined = assert(io.popen('""' .. KOETAMA_EXE .. '" --cli --join ' .. code .. ' --type --volume 0 --seconds ' ..
+            SECONDS .. ' > "' .. WORK .. '\\joined.log" 2>&1"', "w"))
+        local j = waitfor(function()
+            return chat_line(function(s) return s == "[Koetama] BluePlayer joined with their Koetama" end)
+        end, 40)
+        check(j ~= nil, "everyone is told Blue's Koetama joined")
+        if j then log("Blue's Koetama joined %.1f s after it started (the relay included)", j.at - t_join) end
+        check(waitfor(function() return kt.joined["76561198000000002"] end, 1), "the mod knows Blue is joined")
+        local said_blue = {"hello from blue", "I have the longest road", "can someone trade me sheep"}
+        local bl = {}
+        for _, line in ipairs(said_blue) do
+            sleep(0.3 + math.random() * 1.0)
+            local mark = #chat + 1
+            local t_said = t()
+            joined:write(line .. "\n")
+            joined:flush()
+            local c = waitfor(function()
+                return chat_entry(function(e) return e.text == "BluePlayer: " .. line and not e.private end, mark)
+            end, 10)
+            if c then
+                bl[#bl + 1] = c.at - t_said
+                check(type(c.color) == "table" and c.color.name == "Blue", "\"" .. line .. "\" prints as Blue, in Blue's colour")
+            end
+        end
+        check(#bl == #said_blue, "every line Blue says (typed into Blue's Koetama) prints as Blue (" .. #bl .. "/" .. #said_blue .. ")")
+        if #bl > 0 then log("LATENCY Blue's speech (typed into the joined Koetama -> host's chat, over the relay): %s", stats_of(bl)) end
+        check(not chat_line(function(s) return s:find("HostPlayer: hello from blue", 1, true) end),
+            "Blue's lines are never the host's")
+        local st = waitfor(function()
+            return chat_entry(function(e) return e.to == "Blue" and e.text:find("^%[Koetama%] Koetama") end)
+        end, 10)
+        check(st ~= nil, "Blue is told their Koetama's status (" .. (st and st.text or "nothing") .. ")")
+
+        -- Blue's own translation, made by Blue's Koetama, shown to Blue only
+        player_chat(blue_player, "!translate es en")
+        sleep(1.5)
+        local m2 = #chat + 1
+        local t_es = t()
+        player_chat(host_player, "¿Alguien tiene madera para cambiar?")
+        local tb = waitfor(function()
+            return chat_entry(function(e) return e.to == "Blue" and e.text:find("^    > ") end, m2)
+        end, 60)
+        check(tb ~= nil, "Blue's translation of the host's Spanish line reaches Blue")
+        if tb then log("Blue's translation: %q, %.0f ms after the line", tb.text, (tb.at - t_es) * 1000) end
+        check(not chat_entry(function(e) return e.to ~= "Blue" and e.text:find("^    > ") end, m2),
+            "... and only Blue (the host does not translate their own line)")
+
+        -- the table's voice room: both Koetamas meet in the room made from the seed
+        player_chat(host_player, "!voice on")
+        local blue = kt.players["76561198000000002"]
+        local function has(list, id)
+            for _, x in ipairs(list or {}) do if tostring(x) == id then return true end end
+            return false
+        end
+        local v = waitfor(function()
+            return kt.host.voice == "connected" and has(kt.host.voice_players, "76561198000000002")
+                and has(blue.voice_players, "76561198000000001")
+        end, 40)
+        check(v ~= nil, "!voice on: the host's and Blue's Koetamas meet in the table's room (voice " ..
+            kt.host.voice .. " / " .. blue.voice .. ")")
+        player_chat(host_player, "!voice off")
+        mark = #chat + 1
+    end
+
     -- a pair whose model is not on this PC yet (fr -> en, ~35 MB the first time): the line sent at once comes back
     -- "" while it downloads; the mod sends it again under a new id once translations_status says ready
     if os.getenv("KT_NO_DOWNLOAD") == nil then
@@ -295,6 +399,10 @@ while coroutine.status(scenario) ~= "dead" do
     local ok, err = coroutine.resume(scenario)
     if not ok then failures[#failures + 1] = "scenario error: " .. tostring(err) log("ERROR %s", err) break end
     ffi.C.Sleep(16)
+end
+if joined then
+    os.execute([[wmic process where "name='koetama.exe' and commandline like '%%--join%%'" call terminate >nul 2>&1]])
+    joined:close()
 end
 if koetama then
     -- (only the Koetama this test started: its command line names this profile)
