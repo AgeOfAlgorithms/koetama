@@ -62,6 +62,8 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 2
 .c-both .wire { background: linear-gradient(90deg, var(--audio) 0 50%%, var(--text) 50%% 100%%); color: var(--text); }
 .c-both .chip { background: var(--tr-soft); color: var(--tr); }
 .far { opacity: .45; }
+.quiet .spoken { opacity: .6; font-size: 16px; }
+.quiet .wave i { transform: scaleY(.6); }
 .nothing { font-size: 14px; color: var(--muted); font-style: italic; }
 .door { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--door); }
 .note { margin: 0; font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
@@ -131,6 +133,7 @@ DEV = person('#c68642', '#20160f', '#6b4fa0', 'cap')
 EMI = person('#f3d2b3', '#2a2a2a', '#b03a74', 'long')
 FAR = person('#d9a679', '#5a4632', '#7a8794', 'short')
 IVAN = person('#efc7a2', '#c9a467', '#264e70', 'short', True)
+MAYA = person('#a86b45', '#2b1a12', '#3f8a6e', 'bun', True)
 
 
 def who(av, label, said):
@@ -158,7 +161,9 @@ CARDS = [
     ('1-voice', 'Voice to voice', 'Player 1 talks; Player 2 hears them.',
      who(avatar(ANA, 'mic'), 'Player 1, on mic', spoken('"How is your mother?"')),
      channel('audio', 'audio'),
-     who(avatar(BEN, 'ear'), 'Player 2, nearby', spoken('hears "How is your mother?"')),
+     '<div class="stack">%s<div class="quiet">%s</div></div>' % (
+         who(avatar(BEN, 'ear'), 'Player 2, 4 m away', spoken('hears "How is your mother?"')),
+         who(avatar(MAYA, 'ear'), 'Player 3, 20 m away', spoken('hears "How is your mother?"'))),
      'Heard from where Player 1 stands: louder when close, quieter with distance, muffled behind walls.'),
     ('2-captions', 'Voice to text', 'Player 1 talks; a deaf player reads it.',
      who(avatar(ANA, 'mic'), 'Player 1, on mic', spoken('"How is your mother?"')),

@@ -45,7 +45,7 @@ game can show your words in text to other players. By extension, your game or mo
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/1-voice-dark.png">
-  <img src="docs/comms/1-voice-light.png" width="760" alt="Voice to voice: Player 1 says &quot;How is your mother?&quot; on mic, and Player 2 nearby hears it">
+  <img src="docs/comms/1-voice-light.png" width="760" alt="Voice to voice: Player 1 says &quot;How is your mother?&quot; on mic, Player 2 (4 m away) hears it, and Player 3 (20 m away) hears it more quietly">
 </picture>
 
 <picture>
