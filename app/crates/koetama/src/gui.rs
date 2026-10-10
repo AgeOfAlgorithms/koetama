@@ -620,20 +620,25 @@ impl App {
                     }
                 });
                 ui.label(RichText::new("A game mod made for Koetama comes with a profile file (.json): add it here.").size(12.0).color(theme::MUTED));
-                ui.separator();
-                ui.label(RichText::new("JOIN A HOSTED GAME").size(11.5).family(theme::semibold()).color(theme::MUTED));
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.join_input).hint_text("K7QF-4MXA").desired_width(130.0));
-                    let ok = kd_voice::hub::normalize_code(&self.join_input).is_some();
-                    if ui.add_enabled(ok, egui::Button::new("Join")).clicked() {
-                        join = Some(self.join_input.trim().to_uppercase());
-                    }
-                });
-                ui.label(
-                    RichText::new("For a game whose mod runs only on the host's PC (Tabletop Simulator): its game shows you a code.")
-                        .size(12.0)
-                        .color(theme::MUTED),
-                );
+                // (joining with a code: only for the games whose profile says their mod runs on the host alone)
+                let mut hosted: Vec<String> = kd_games::games().iter().filter(|g| g.profile.hosted).map(|g| g.name.clone()).collect();
+                hosted.dedup();
+                if !hosted.is_empty() {
+                    ui.separator();
+                    ui.label(RichText::new("JOIN A HOSTED GAME").size(11.5).family(theme::semibold()).color(theme::MUTED));
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.join_input).hint_text("K7QF-4MXA").desired_width(130.0));
+                        let ok = kd_voice::hub::normalize_code(&self.join_input).is_some();
+                        if ui.add_enabled(ok, egui::Button::new("Join")).clicked() {
+                            join = Some(self.join_input.trim().to_uppercase());
+                        }
+                    });
+                    ui.label(
+                        RichText::new(format!("For {}: the host's game shows you a code.", hosted.join(", ")))
+                            .size(12.0)
+                            .color(theme::MUTED),
+                    );
+                }
             });
             let (text, colour) = match &self.status {
                 Some(st) if !st.error.is_empty() => (st.error.clone(), theme::BAD),

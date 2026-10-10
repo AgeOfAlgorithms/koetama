@@ -324,3 +324,12 @@ fn the_example_profile() {
     assert_eq!((p.id.as_str(), p.game.as_str()), ("example-game-example-mod", "Example Game"));
     assert!(matches!(p.connector, Connector::Socket(ref c) if c.port == 47120));
 }
+
+/// "hosted": the mod runs on the host alone (players join with a code) - only with something Koetama does.
+#[test]
+fn hosted_games() {
+    let p = parse(&with(socket_profile(), "/uses", Some(json!(["speech", "translate", "hosted"])))).unwrap();
+    assert!(p.hosted && p.speech && p.translate && !p.voices);
+    assert!(!parse(&socket_profile()).unwrap().hosted, "not unless the profile says so");
+    assert!(err(&with(socket_profile(), "/uses", Some(json!(["hosted"])))).contains("at least one"));
+}

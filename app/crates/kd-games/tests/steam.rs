@@ -105,7 +105,9 @@ fn voices_as_python() {
 #[test]
 fn the_game_list() {
     let all = games();
-    assert_eq!(all.len(), 1);
+    // (built in: Teardown alone; profiles this PC has installed come after it)
+    assert_eq!(all.iter().filter(|g| g.builtin).count(), 1);
+    assert!(all[0].builtin);
     assert_eq!(by_id("teardown-proximity-babble-chat").name, "Teardown");
     assert_eq!(by_id("no such game").id, all[0].id);
     for g in &all {

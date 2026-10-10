@@ -309,6 +309,9 @@ pub struct Profile {
     pub speech: bool,
     /// Koetama translates the chat lines the game sends ("uses": "translate"; off unless listed)
     pub translate: bool,
+    /// the mod runs only on the host's PC: the other players join with a code ("uses": "hosted"; PROTOCOL.md "Hub") -
+    /// the window offers "Join a hosted game" only when a profile says so
+    pub hosted: bool,
     pub test_voices: Vec<TestVoice>,
     pub speaker_names: BTreeMap<i64, String>,
     pub connector: Connector,
@@ -464,19 +467,27 @@ impl Profile {
                 lf.int("steam_app", 1, u32::MAX as i64, "a Steam app id")?.map(|n| n as u32)
             }
         };
-        let (voices, speech, translate) = match f.get("uses") {
-            None => (true, true, false),
+        let (voices, speech, translate, hosted) = match f.get("uses") {
+            None => (true, true, false, false),
             Some(Value::Array(a)) if !a.is_empty() => {
-                let (mut v, mut s, mut t) = (false, false, false);
+                let (mut v, mut s, mut t, mut h) = (false, false, false, false);
                 for x in a {
                     match x.as_str() {
                         Some("voices") => v = true,
                         Some("speech") => s = true,
                         Some("translate") => t = true,
-                        _ => return Err(format!("\"uses\": unknown {x} (known: \"voices\", \"speech\", \"translate\")")),
+                        Some("hosted") => h = true,
+                        _ => {
+                            return Err(format!(
+                                "\"uses\": unknown {x} (known: \"voices\", \"speech\", \"translate\", \"hosted\")"
+                            ))
+                        }
                     }
                 }
-                (v, s, t)
+                if !(v || s || t) {
+                    return Err("\"uses\": list at least one of \"voices\", \"speech\", \"translate\"".into());
+                }
+                (v, s, t, h)
             }
             Some(_) => {
                 return Err("\"uses\": must be a list of at least one of \"voices\", \"speech\", \"translate\"".into());
@@ -520,6 +531,7 @@ impl Profile {
             voices,
             speech,
             translate,
+            hosted,
             test_voices,
             speaker_names,
             connector,
