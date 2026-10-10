@@ -87,81 +87,6 @@ bytes it cannot listen to, and only to the players close enough to hear you.
   to 1.5 GB for several. It runs on the CPU, below the game's priority, and stays idle while you are silent.
 - **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
 
-## What's new
-
-### 0.5.0: translation, set once in Koetama
-
-- **Translate chat into: one setting in Koetama's window**, the same in every game. Lines in the languages you
-  speak are left alone; anything else is translated into the language you picked. Off until you choose one.
-- **No pairs to set up.** The model for a language downloads the first time someone writes in it (or turn
-  downloads off and use only what is on your PC). Up to four languages stay loaded at once.
-- **Better on short lines.** Accented letters and common little words now decide what language a short line is in,
-  so "¿Dónde estás?" is no longer taken for English, while "ok" and "gg" stay yours.
-- **For mod makers:** games no longer send translation settings. They send the chat lines they show (`to_translate`)
-  and may pause translation with `"translate": false`; `translations_status` says which language the player reads
-  (`into`). See [PROTOCOL.md](PROTOCOL.md). Joined players in hosted games use their own setting.
-
-### 0.4.0: translation, more games, walkie-talkies
-
-- **Chat translation.** Lines in another language are translated on your own PC (Mozilla's offline models,
-  downloaded the first time a language needs them), so you can read players you share no language with.
-- **Built for more games.** One simple JSON API for every game, over a local socket, HTTP (for games whose mods can
-  only make web requests) or files. Example mods for Valheim, Godot and Tabletop Simulator show how
-  ([PROTOCOL.md](PROTOCOL.md)).
-- **Positions instead of maths.** A game can give player positions and voice ranges; Koetama works out direction,
-  loudness and who hears whom. Player ids can be Steam ids or names, and a shared `room_seed` makes the voice room.
-- **Hosted games.** For games whose mods run only on the host, each player joins with a short code the game shows
-  them, and their Koetama works through the host's.
-- **Walkie-talkies, loudspeakers and PA systems.** A voice can also come out of devices, each with a realistic sound
-  (static and squelch, a horn's ring, a hall's echo), and games choose their own effects: pitch, wobble, robot,
-  echo, reverb and more.
-- **For game screens.** Games are told who is talking, who is in the voice chat, and whether speech is ready.
-- **Safer.** Updates must carry a signature from the release key; nobody can push a player out of a voice room by
-  taking their number; join codes work once; plus the fixes from a full security audit.
-- **Fixed:** on Windows, a voice connection could drop for a second at random.
-
-### 0.3.1: Koetama
-
-The app is now called **Koetama** (声魂, "voice spirit"). It was Kotodama ("word spirit"), a name other voice apps
-already use.
-
-- **Smoother voices.** Each voice starts playing with a small cushion, so a packet that arrives a little late no
-  longer leaves a gap, and your voice is sent in smaller steps (20 ms instead of 50), so it leaves sooner.
-- **Check for updates** says when it finds no releases at all, instead of "you have the latest version".
-
-### 0.3.0: real voice chat
-
-You can now hear the other players, not just their words. Your voice goes to the players close enough to hear you,
-through a small relay server, encrypted end to end.
-
-- **Real voices.** Koetama sends your voice (Opus, about 3 KB/s while you talk) to the players in range of your
-  speaking mode, and plays theirs where they stand. Whispers reach only the players near you.
-- **Push to talk.** Hold the game's talk key to talk (the Teardown mod: B, rebindable), or choose always on. The
-  first syllable is not cut off, and a line ends a quarter second after you let go.
-- **Voice rooms.** Each game session gets its own room and key, made by Koetama from your PC's secure random
-  numbers. The host can choose the region the room lives in (Auto: near the first player to join).
-- **Status for the game.** Koetama tells the game which feed versions it reads, so a mod can ask an outdated
-  Koetama to update, and whether the voice server can be reached.
-- **Uninstalling** asks whether to remove the downloaded speech models and your settings too (yes by default).
-- **Self-test** now also sends a packet through the voice relay.
-
-### 0.2.0: the Rust app
-
-A rewrite of the whole app in Rust: a smaller download, no Python, and a window that works on any PC.
-
-- **Languages I speak.** Tick the languages you speak; only their speech models load (about 0.9 GB of memory for
-  one language). The list shows which languages are fully supported, in beta or experimental.
-- **Game mod profiles.** Games connect through profile files anyone can write (files or a local socket), added from
-  the window after a safety preview. Mods can use voices, speech to text, or both.
-- **A smaller language detector:** 43 MB instead of 86, with the same results.
-- **The Ember look:** a dark theme, the voice-wave icon, and an installer to match.
-
-### 0.1.0: the first version
-
-The first app, in Python, made for Teardown's Proximity Babble Chat mod: a window with a game picker, live words
-while you talk and the finished line when you stop, word times so a player who walks up mid-sentence sees only what
-they heard, test voices placed around you in the game, and a Windows installer with an updater.
-
 ## Install
 
 **Windows:** download [`Koetama-Setup.exe`](https://github.com/AgeOfAlgorithms/koetama/releases/latest/download/Koetama-Setup.exe)
@@ -262,3 +187,78 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed with their licenses in
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
+## What's new
+
+### 0.5.0: translation, set once in Koetama
+
+- **Translate chat into: one setting in Koetama's window**, the same in every game. Lines in the languages you
+  speak are left alone; anything else is translated into the language you picked. Off until you choose one.
+- **No pairs to set up.** The model for a language downloads the first time someone writes in it (or turn
+  downloads off and use only what is on your PC). Up to four languages stay loaded at once.
+- **Better on short lines.** Accented letters and common little words now decide what language a short line is in,
+  so "¿Dónde estás?" is no longer taken for English, while "ok" and "gg" stay yours.
+- **For mod makers:** games no longer send translation settings. They send the chat lines they show (`to_translate`)
+  and may pause translation with `"translate": false`; `translations_status` says which language the player reads
+  (`into`). See [PROTOCOL.md](PROTOCOL.md). Joined players in hosted games use their own setting.
+
+### 0.4.0: translation, more games, walkie-talkies
+
+- **Chat translation.** Lines in another language are translated on your own PC (Mozilla's offline models,
+  downloaded the first time a language needs them), so you can read players you share no language with.
+- **Built for more games.** One simple JSON API for every game, over a local socket, HTTP (for games whose mods can
+  only make web requests) or files. Example mods for Valheim, Godot and Tabletop Simulator show how
+  ([PROTOCOL.md](PROTOCOL.md)).
+- **Positions instead of maths.** A game can give player positions and voice ranges; Koetama works out direction,
+  loudness and who hears whom. Player ids can be Steam ids or names, and a shared `room_seed` makes the voice room.
+- **Hosted games.** For games whose mods run only on the host, each player joins with a short code the game shows
+  them, and their Koetama works through the host's.
+- **Walkie-talkies, loudspeakers and PA systems.** A voice can also come out of devices, each with a realistic sound
+  (static and squelch, a horn's ring, a hall's echo), and games choose their own effects: pitch, wobble, robot,
+  echo, reverb and more.
+- **For game screens.** Games are told who is talking, who is in the voice chat, and whether speech is ready.
+- **Safer.** Updates must carry a signature from the release key; nobody can push a player out of a voice room by
+  taking their number; join codes work once; plus the fixes from a full security audit.
+- **Fixed:** on Windows, a voice connection could drop for a second at random.
+
+### 0.3.1: Koetama
+
+The app is now called **Koetama** (声魂, "voice spirit"). It was Kotodama ("word spirit"), a name other voice apps
+already use.
+
+- **Smoother voices.** Each voice starts playing with a small cushion, so a packet that arrives a little late no
+  longer leaves a gap, and your voice is sent in smaller steps (20 ms instead of 50), so it leaves sooner.
+- **Check for updates** says when it finds no releases at all, instead of "you have the latest version".
+
+### 0.3.0: real voice chat
+
+You can now hear the other players, not just their words. Your voice goes to the players close enough to hear you,
+through a small relay server, encrypted end to end.
+
+- **Real voices.** Koetama sends your voice (Opus, about 3 KB/s while you talk) to the players in range of your
+  speaking mode, and plays theirs where they stand. Whispers reach only the players near you.
+- **Push to talk.** Hold the game's talk key to talk (the Teardown mod: B, rebindable), or choose always on. The
+  first syllable is not cut off, and a line ends a quarter second after you let go.
+- **Voice rooms.** Each game session gets its own room and key, made by Koetama from your PC's secure random
+  numbers. The host can choose the region the room lives in (Auto: near the first player to join).
+- **Status for the game.** Koetama tells the game which feed versions it reads, so a mod can ask an outdated
+  Koetama to update, and whether the voice server can be reached.
+- **Uninstalling** asks whether to remove the downloaded speech models and your settings too (yes by default).
+- **Self-test** now also sends a packet through the voice relay.
+
+### 0.2.0: the Rust app
+
+A rewrite of the whole app in Rust: a smaller download, no Python, and a window that works on any PC.
+
+- **Languages I speak.** Tick the languages you speak; only their speech models load (about 0.9 GB of memory for
+  one language). The list shows which languages are fully supported, in beta or experimental.
+- **Game mod profiles.** Games connect through profile files anyone can write (files or a local socket), added from
+  the window after a safety preview. Mods can use voices, speech to text, or both.
+- **A smaller language detector:** 43 MB instead of 86, with the same results.
+- **The Ember look:** a dark theme, the voice-wave icon, and an installer to match.
+
+### 0.1.0: the first version
+
+The first app, in Python, made for Teardown's Proximity Babble Chat mod: a window with a game picker, live words
+while you talk and the finished line when you stop, word times so a player who walks up mid-sentence sees only what
+they heard, test voices placed around you in the game, and a Windows installer with an updater.
