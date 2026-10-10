@@ -1,16 +1,22 @@
-//! The translator (PROTOCOL.md "Translation"): the game's rules and the lines it wants translated, on a
+//! The translator (PROTOCOL.md "Translation"): the player's setting and the lines the game wants translated, on a
 //! thread of its own.
 //!
-//! Up to MAX_TRANSLATIONS rules "from A into B". A new rule's models are got ready at once on a helper thread (Mozilla's
-//! list, the downloads: Provider::prepare), then loaded on the translator's thread; a model no rule uses any more is
-//! let go. Each rule has a state (ready, downloading N %, loading, unavailable, error) - told on each change through
-//! Event::Status (a download's progress at most every STATUS_EVERY).
+//! The setting (set_target) is the player's, from Koetama's window: the language chat is translated INTO (None: off),
+//! the languages the player speaks (left alone), and whether models may be downloaded. The game only sends lines.
 //!
-//! A request (id, line): the line's stretches (detect.rs); each stretch in a rule's source language is translated
-//! through the rule's model(s) (two through English), the others are kept as they are, and the result keeps their
-//! order. Exactly one Event::Reply per id: "" when nothing in the line matched a ready rule (or the translation is the
-//! line itself). Ids are the game's, unique in its session: an id already queued or answered is ignored, and a new
-//! session (new_session) forgets them and drops what is still queued from the old one.
+//! A request (id, line): the line's stretches (detect.rs, short or unsure ones told among the player's languages and
+//! the target first: "ok" and "lol" stay the player's). Each stretch in a language the player does not speak, and that
+//! is not the target, is translated into the target through that language's PAIR (one model, two through English);
+//! the others are kept as they are, and the result keeps their order. A pair is made the first time its language
+//! appears: its models got ready on a helper thread (Mozilla's list, the downloads: Provider::prepare; nothing
+//! downloaded when downloads are off), then loaded on the translator's thread; the line waits for them (HOLD_MAX).
+//! At most MAX_PAIRS pairs keep models: a new one lets go of the least recently used. Each pair has a state (ready,
+//! downloading N %, loading, unavailable, error) - told with the target on each change through Event::Status (a
+//! download's progress at most every STATUS_EVERY).
+//!
+//! Exactly one Event::Reply per id: "" when nothing in the line was translated (or the translation is the line
+//! itself). Ids are the game's, unique in its session: an id already queued or answered is ignored, and a new session
+//! (new_session) forgets them and drops what is still queued from the old one.
 use crate::catalog::{self, Catalog};
 use crate::detect;
 use kd_common::Log;
@@ -22,12 +28,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-/// the most rules a player has (PROTOCOL.md)
-pub const MAX_TRANSLATIONS: usize = 2;
+/// the most pairs whose models are kept (each ~20-55 MB in memory, a pair without English two): a new language past
+/// these lets go of the least recently used pair
+pub const MAX_PAIRS: usize = 4;
 /// a download's progress is told at most this often
 pub const STATUS_EVERY: Duration = Duration::from_millis(500);
-/// a rule whose models failed (no internet, a broken file) is tried again after this
+/// a pair whose models failed (no internet, a broken file) is tried again after this
 pub const RETRY_AFTER: Duration = Duration::from_secs(60);
+/// the longest a line waits for its pairs' models (a first download on a slow connection)
+pub const HOLD_MAX: Duration = Duration::from_secs(120);
 /// the ids remembered per session (a game keeps a line until its reply arrives: answered ones come back for a while)
 const SEEN_MAX: usize = 4096;
 
@@ -50,22 +59,24 @@ impl Engine for Loaded {
     }
 }
 
-/// What getting a rule's models ready came to.
+/// What getting a pair's models ready came to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prepared {
     /// [(the direction's id - "ja-en/2.1", its folder)], in the order a line goes through them
     Ready(Vec<(String, PathBuf)>),
     /// no model for it (why)
     Unavailable(String),
+    /// its models are not on this PC and downloads are off (why)
+    NotDownloaded(String),
     /// it failed (why): tried again after RETRY_AFTER
     Error(String),
 }
 
-/// Where a rule's models come from (Mozilla; tests: fakes).
+/// Where a pair's models come from (Mozilla; tests: fakes).
 pub trait Provider: Send + Sync {
-    /// The directions the rule from -> to (Koetama's codes) needs, their files there (downloaded when missing:
-    /// progress(bytes done, bytes total)). Blocking - a helper thread runs it.
-    fn prepare(&self, from: &str, to: &str, progress: &dyn Fn(u64, u64)) -> Prepared;
+    /// The directions the pair from -> to (Koetama's codes) needs, their files there - downloaded when missing if
+    /// `download` (progress(bytes done, bytes total)), else NotDownloaded. Blocking - a helper thread runs it.
+    fn prepare(&self, from: &str, to: &str, download: bool, progress: &dyn Fn(u64, u64)) -> Prepared;
     /// One direction's model from its folder (blocking).
     fn load(&self, id: &str, dir: &Path) -> Result<Arc<dyn Engine>, String>;
 }
@@ -76,7 +87,7 @@ pub struct Mozilla {
     log: Log,
     /// the list, and when it was read
     list: Mutex<Option<(Instant, Arc<Catalog>)>>,
-    /// one rule's downloads at a time (two rules may share a direction)
+    /// one pair's downloads at a time (two pairs may share a direction)
     busy: Mutex<()>,
 }
 
@@ -85,30 +96,42 @@ impl Mozilla {
         Mozilla { root, log, list: Mutex::new(None), busy: Mutex::new(()) }
     }
 
-    fn catalog(&self) -> Result<Arc<Catalog>, String> {
+    /// The list: fetched again once a day when downloads are on; else the one kept on this PC, however old.
+    fn catalog(&self, download: bool) -> Result<Arc<Catalog>, String> {
         let mut list = lock(&self.list);
         if let Some((t, c)) = list.as_ref() {
-            if t.elapsed() < catalog::LIST_MAX_AGE {
+            if !download || t.elapsed() < catalog::LIST_MAX_AGE {
                 return Ok(c.clone());
             }
         }
-        let c = Arc::new(catalog::load_list(&self.root, catalog::LIST_MAX_AGE, &catalog::get_list, &*self.log)?);
+        let c = if download {
+            catalog::load_list(&self.root, catalog::LIST_MAX_AGE, &catalog::get_list, &*self.log)?
+        } else {
+            let offline = |_: &str| -> std::io::Result<String> { Err(std::io::Error::other("downloads are off")) };
+            catalog::load_list(&self.root, Duration::MAX, &offline, &|_| {})?
+        };
+        let c = Arc::new(c);
         *list = Some((Instant::now(), c.clone()));
         Ok(c)
     }
 }
 
 impl Provider for Mozilla {
-    fn prepare(&self, from: &str, to: &str, progress: &dyn Fn(u64, u64)) -> Prepared {
+    fn prepare(&self, from: &str, to: &str, download: bool, progress: &dyn Fn(u64, u64)) -> Prepared {
         let _one = lock(&self.busy);
-        let cat = match self.catalog() {
+        let cat = match self.catalog(download) {
             Ok(c) => c,
+            Err(_) if !download => return Prepared::NotDownloaded("no list of Mozilla's models on this PC".into()),
             Err(e) => return Prepared::Error(e),
         };
         let dirs = match cat.route(from, to) {
             Ok(d) => d,
             Err(why) => return Prepared::Unavailable(why),
         };
+        if !download && !dirs.iter().all(|d| d.present(&self.root)) {
+            let keys: Vec<String> = dirs.iter().map(|d| d.key()).collect();
+            return Prepared::NotDownloaded(format!("{from} > {to}: the {} model is not on this PC", keys.join(" + ")));
+        }
         match catalog::fetch_route(&self.root, &dirs, progress, &catalog::download_file, &*self.log) {
             Ok(paths) => Prepared::Ready(dirs.iter().map(|d| d.id()).zip(paths).collect()),
             Err(e) => Prepared::Error(e),
@@ -120,15 +143,17 @@ impl Provider for Mozilla {
     }
 }
 
-/// A rule's state.
+/// A pair's state.
 #[derive(Clone, Debug, PartialEq)]
 pub enum State {
     Ready,
-    /// 0..1 of the rule's files
+    /// 0..1 of the pair's files
     Downloading(f64),
     Loading,
-    /// Mozilla has no model for it (or it is not a rule: the same language twice, a language Koetama does not have)
+    /// Mozilla has no model for it (or it cannot be one: a language Koetama does not have, Cantonese as the target)
     Unavailable,
+    /// its models are not on this PC and downloads are off (the game reads "unavailable")
+    NotDownloaded,
     Error,
 }
 
@@ -136,23 +161,25 @@ impl State {
     /// As the game reads it: "ready", "downloading 42", "loading", "unavailable", "error".
     pub fn wire(&self) -> String {
         match self {
-            State::Ready => "ready".into(),
             State::Downloading(f) => format!("downloading {}", percent(*f)),
-            State::Loading => "loading".into(),
-            State::Unavailable => "unavailable".into(),
-            State::Error => "error".into(),
+            s => s.word().into(),
         }
     }
 
-    /// The state's name without the progress ("downloading").
+    /// The state's name without the progress ("downloading"), as the game reads it.
     pub fn word(&self) -> &'static str {
         match self {
             State::Ready => "ready",
             State::Downloading(_) => "downloading",
             State::Loading => "loading",
-            State::Unavailable => "unavailable",
+            State::Unavailable | State::NotDownloaded => "unavailable",
             State::Error => "error",
         }
+    }
+
+    /// Its models are on their way (a line in its language waits for them).
+    pub fn getting_ready(&self) -> bool {
+        matches!(self, State::Downloading(_) | State::Loading)
     }
 }
 
@@ -165,15 +192,15 @@ pub fn percent(f: f64) -> u32 {
     }
 }
 
-/// One rule and its state.
+/// One pair in use and its state.
 #[derive(Clone, Debug, PartialEq)]
-pub struct RuleStatus {
+pub struct PairStatus {
     pub from: String,
     pub to: String,
     pub state: State,
 }
 
-impl RuleStatus {
+impl PairStatus {
     /// "ja>en=downloading 42"
     pub fn wire(&self) -> String {
         format!("{}>{}={}", self.from, self.to, self.state.wire())
@@ -195,24 +222,53 @@ impl RuleStatus {
     }
 }
 
-/// The rules' states as the game reads them (message kind 'd'): each rule's wire(), comma-separated ("" for none).
-pub fn status_text(rules: &[RuleStatus]) -> String {
-    rules.iter().map(RuleStatus::wire).collect::<Vec<_>>().join(",")
+/// The pairs' states in one line (message kind 'd', the status line): each pair's wire(), comma-separated ("" for
+/// none).
+pub fn status_text(pairs: &[PairStatus]) -> String {
+    pairs.iter().map(PairStatus::wire).collect::<Vec<_>>().join(",")
+}
+
+/// The translation as the game and the window see it: the target and the pairs in use this session.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Status {
+    /// the language chat is translated into; "": off
+    pub into: String,
+    pub pairs: Vec<PairStatus>,
+}
+
+impl Status {
+    /// "en:ja>en=ready,ko>en=downloading 42" ("" off): what tells a change
+    pub fn wire(&self) -> String {
+        if self.into.is_empty() && self.pairs.is_empty() {
+            String::new()
+        } else {
+            format!("{}:{}", self.into, status_text(&self.pairs))
+        }
+    }
 }
 
 /// What the translator tells the program.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    /// the reply to request `id` ("" = nothing to show)
+    /// the reply to request `id` ("" = nothing to show), and the pair used (the first, for a line with stretches in
+    /// two languages)
     Reply { id: i64, text: String, rule: Option<(String, String)> },
-    /// the rules' states changed
-    Status(Vec<RuleStatus>),
+    /// the target or a pair's state changed
+    Status(Status),
 }
 
 pub type OnEvent = Arc<dyn Fn(Event) + Send + Sync>;
 
+/// The player's setting.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Target {
+    into: Option<String>,
+    known: Vec<String>,
+    downloads: bool,
+}
+
 enum Msg {
-    Rules(Vec<(String, String)>),
+    Target(Target),
     Request { session: u64, id: i64, text: String },
     Progress { job: u64, frac: f64 },
     Prepared { job: u64, result: Prepared },
@@ -246,9 +302,9 @@ struct Inner {
     tx: Mutex<Sender<Msg>>,
     seen: Mutex<Seen>,
     session: AtomicU64,
-    /// the rules as last handed over (set_rules is called with every feed: only a change goes to the thread)
-    rules: Mutex<Vec<(String, String)>>,
-    status: Mutex<Vec<RuleStatus>>,
+    /// the setting as last handed over (set_target is called a few times a second: only a change goes to the thread)
+    target: Mutex<Target>,
+    status: Mutex<Status>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -259,16 +315,16 @@ pub struct Translator {
 }
 
 impl Translator {
-    /// Starts the thread. on_event: each reply and status change (called on the translator's threads: it must not
-    /// wait on them).
+    /// Starts the thread, translation off until set_target. on_event: each reply and status change (called on the
+    /// translator's threads: it must not wait on them).
     pub fn start(provider: Arc<dyn Provider>, on_event: OnEvent, log: Log) -> Translator {
         let (tx, rx) = mpsc::channel();
         let inner = Arc::new(Inner {
             tx: Mutex::new(tx.clone()),
             seen: Mutex::new(Seen::default()),
             session: AtomicU64::new(0),
-            rules: Mutex::new(Vec::new()),
-            status: Mutex::new(Vec::new()),
+            target: Mutex::new(Target::default()),
+            status: Mutex::new(Status::default()),
             thread: Mutex::new(None),
         });
         let weak = Arc::downgrade(&inner);
@@ -281,10 +337,12 @@ impl Translator {
                     log,
                     tx,
                     inner: weak,
+                    target: Target::default(),
                     slots: Vec::new(),
                     models: HashMap::new(),
                     next_job: 0,
-                    told: Vec::new(),
+                    clock: 0,
+                    told: Status::default(),
                     told_at: None,
                     last_error: String::new(),
                     held: VecDeque::new(),
@@ -305,14 +363,18 @@ impl Translator {
         let _ = lock(&self.inner.tx).send(m);
     }
 
-    /// The game's rules (the first MAX_TRANSLATIONS): a change gets the new ones' models ready and lets go of the old ones'.
-    /// Cheap when nothing changed (every feed calls it).
-    pub fn set_rules(&self, rules: &[(String, String)]) {
-        let rules: Vec<(String, String)> = rules.iter().take(MAX_TRANSLATIONS).cloned().collect();
-        let mut kept = lock(&self.inner.rules);
-        if *kept != rules {
-            kept.clone_from(&rules);
-            self.send(Msg::Rules(rules));
+    /// The player's setting: the language chat is translated into (None or "": off), the languages the player speaks
+    /// (stretches in them are left alone), whether missing models may be downloaded. Another target lets go of every
+    /// pair; a language now spoken lets go of its pair. Cheap when nothing changed (call it as often as you like).
+    pub fn set_target(&self, into: Option<String>, known: Vec<String>, allow_downloads: bool) {
+        let mut known = known;
+        known.sort();
+        known.dedup();
+        let t = Target { into: into.filter(|s| !s.is_empty()), known, downloads: allow_downloads };
+        let mut kept = lock(&self.inner.target);
+        if *kept != t {
+            kept.clone_from(&t);
+            self.send(Msg::Target(t));
         }
     }
 
@@ -334,8 +396,8 @@ impl Translator {
         self.inner.session.fetch_add(1, Ordering::SeqCst);
     }
 
-    /// The rules' states as last told.
-    pub fn status(&self) -> Vec<RuleStatus> {
+    /// The target and the pairs' states as last told.
+    pub fn status(&self) -> Status {
         lock(&self.inner.status).clone()
     }
 
@@ -358,22 +420,35 @@ impl Drop for Inner {
     }
 }
 
-/// A rule on the thread.
+/// A pair on the thread: a language the player does not speak, into the target.
 struct Slot {
     from: String,
     to: String,
     state: State,
-    /// the helper getting its models ready (its messages carry this; a dropped rule's are ignored)
+    /// the helper getting its models ready (its messages carry this; a dropped pair's are ignored)
     job: u64,
     /// the direction ids it goes through, once ready
     route: Vec<String>,
     failed_at: Option<Instant>,
+    /// when it was last needed (the worker's clock): the least recently used goes first
+    used: u64,
 }
 
 impl Slot {
-    fn status(&self) -> RuleStatus {
-        RuleStatus { from: self.from.clone(), to: self.to.clone(), state: self.state.clone() }
+    fn status(&self) -> PairStatus {
+        PairStatus { from: self.from.clone(), to: self.to.clone(), state: self.state.clone() }
     }
+
+}
+
+/// A line waiting for its pairs' models.
+struct Held {
+    session: u64,
+    id: i64,
+    text: String,
+    since: Instant,
+    /// the languages whose pairs it needs
+    langs: Vec<&'static str>,
 }
 
 struct Worker {
@@ -382,23 +457,29 @@ struct Worker {
     log: Log,
     tx: Sender<Msg>,
     inner: std::sync::Weak<Inner>,
+    target: Target,
+    /// the pairs in use, in the order they came
     slots: Vec<Slot>,
-    /// direction id -> its model (shared by the rules through it)
+    /// direction id -> its model (shared by the pairs through it)
     models: HashMap<String, Arc<dyn Engine>>,
     next_job: u64,
-    /// the states as last told, and when
-    told: Vec<RuleStatus>,
+    /// counts each use of a pair (Slot::used)
+    clock: u64,
+    /// the status as last told, and when
+    told: Status,
     told_at: Option<Instant>,
     /// the last translation error logged (each new one once)
     last_error: String,
-    /// lines that came while a translation's models were getting ready: answered once they are (or after HOLD_MAX)
-    held: VecDeque<(u64, i64, String, Instant)>,
+    /// the lines in the order they came: answered once their pairs are ready (or after HOLD_MAX)
+    held: VecDeque<Held>,
 }
 
-/// the longest a line waits for its translation's models (a first download on a slow connection)
-pub const HOLD_MAX: Duration = Duration::from_secs(120);
+/// Chinese and Cantonese are one for the player (one script; detect.rs tells them apart by a few characters only).
+fn same_language(a: &str, b: &str) -> bool {
+    a == b || matches!((a, b), ("zh", "yue") | ("yue", "zh"))
+}
 
-/// A rule Koetama can never have a model for (no need to ask Mozilla's list).
+/// A pair Koetama can never have a model for (no need to ask Mozilla's list).
 fn never(from: &str, to: &str) -> bool {
     from == to || catalog::mozilla_code(from, true).is_none() || catalog::mozilla_code(to, false).is_none()
 }
@@ -408,15 +489,10 @@ impl Worker {
         loop {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(Msg::Rules(r)) => self.set_rules(r),
-                Ok(Msg::Request { session, id, text }) => {
-                    // (models on their way: the line waits for them rather than getting "" now)
-                    self.held.push_back((session, id, text, Instant::now()));
-                }
+                Ok(Msg::Target(t)) => self.set_target(t),
+                Ok(Msg::Request { session, id, text }) => self.arrived(session, id, text),
                 Ok(Msg::Progress { job, frac }) => {
-                    if let Some(s) =
-                        self.slots.iter_mut().find(|s| s.job == job && matches!(s.state, State::Downloading(_) | State::Loading))
-                    {
+                    if let Some(s) = self.slots.iter_mut().find(|s| s.job == job && s.state.getting_ready()) {
                         s.state = State::Downloading(frac);
                     }
                 }
@@ -431,38 +507,138 @@ impl Worker {
         }
     }
 
-    /// Is a translation still getting its models (downloading, loading)?
-    fn getting_ready(&self) -> bool {
-        self.slots.iter().any(|s| matches!(s.state, State::Downloading(_) | State::Loading))
+    /// A stretch in this language is left as it is: translation off, the target, or a language the player speaks.
+    fn left_alone(&self, lang: &str) -> bool {
+        match &self.target.into {
+            None => true,
+            Some(into) => same_language(lang, into) || self.target.known.iter().any(|k| same_language(k, lang)),
+        }
     }
 
-    /// The held lines answered, in order, unless models are still on their way (a line held HOLD_MAX is answered
-    /// anyway). False: the translator is gone.
+    /// The languages a line is most likely in: the player's own and the target - and English when none of those is
+    /// written in Latin letters ("ok", "lol" in a Japanese speaker's chat: English, not a language picked at random
+    /// from three letters).
+    fn likely(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self.target.known.iter().map(String::as_str).collect();
+        out.extend(self.target.into.as_deref());
+        if !out.iter().any(|l| detect::latin(l)) {
+            out.push("en");
+        }
+        out
+    }
+
+    /// The line's stretches with the languages to translate (those not left alone).
+    fn stretches(&self, line: &str) -> Vec<(detect::Stretch, bool)> {
+        detect::stretches_preferring(line, &self.likely())
+            .into_iter()
+            .map(|st| {
+                let wanted = st.lang.is_some_and(|l| !self.left_alone(l)) && !st.text(line).trim().is_empty();
+                (st, wanted)
+            })
+            .collect()
+    }
+
+    fn set_target(&mut self, t: Target) {
+        let old = std::mem::replace(&mut self.target, t);
+        if old.into != self.target.into {
+            if !self.slots.is_empty() {
+                (self.log)("translation: another target language - every pair let go");
+            }
+            self.slots.clear();
+        } else {
+            // (a language the player speaks now: its pair goes)
+            let gone: Vec<usize> = (0..self.slots.len()).filter(|&i| self.left_alone(&self.slots[i].from)).collect();
+            for i in gone.into_iter().rev() {
+                self.slots.remove(i);
+            }
+            if self.target.downloads && !old.downloads {
+                // (downloads allowed now: the pairs that lacked models are made again the next time they are needed)
+                self.slots.retain(|s| s.state != State::NotDownloaded);
+            }
+        }
+        match &self.target.into {
+            Some(into) => (self.log)(&format!(
+                "translation: into {into}, leaving alone {} (downloads {})",
+                if self.target.known.is_empty() { "nothing else".to_string() } else { self.target.known.join(", ") },
+                if self.target.downloads { "on" } else { "off" }
+            )),
+            None if old.into.is_some() => (self.log)("translation: off"),
+            None => {}
+        }
+        self.unload_unused();
+    }
+
+    /// A line came: the pairs its languages need are made (their models start to come) and it waits its turn.
+    fn arrived(&mut self, session: u64, id: i64, text: String) {
+        let mut langs: Vec<&'static str> = Vec::new();
+        for (st, wanted) in self.stretches(&text) {
+            if let (true, Some(l)) = (wanted, st.lang) {
+                if !langs.contains(&l) {
+                    langs.push(l);
+                }
+            }
+        }
+        for l in &langs {
+            self.pair_for(l);
+        }
+        self.held.push_back(Held { session, id, text, since: Instant::now(), langs });
+    }
+
+    /// The pair from `lang` into the target, made when it is not there yet (its models fetched). Marked used.
+    fn pair_for(&mut self, lang: &str) {
+        let Some(into) = self.target.into.clone() else { return };
+        self.clock += 1;
+        if let Some(s) = self.slots.iter_mut().find(|s| s.from == lang) {
+            s.used = self.clock;
+            return;
+        }
+        let unavailable = never(lang, &into);
+        self.slots.push(Slot {
+            from: lang.to_string(),
+            to: into.clone(),
+            state: if unavailable { State::Unavailable } else { State::Loading },
+            job: 0,
+            route: Vec::new(),
+            failed_at: None,
+            used: self.clock,
+        });
+        if unavailable {
+            (self.log)(&format!("translation: {lang} > {into} is not available (no model for it)"));
+        } else {
+            let i = self.slots.len() - 1;
+            self.fetch(i);
+        }
+    }
+
+    /// The held lines answered, in order, unless the front one's pairs are still getting their models (a line held
+    /// HOLD_MAX is answered anyway). False: the translator is gone.
     fn answer_held(&mut self) -> bool {
-        while let Some((_, _, _, since)) = self.held.front() {
-            if self.getting_ready() && since.elapsed() < HOLD_MAX {
+        while let Some(h) = self.held.front() {
+            let waiting = h.langs.iter().any(|l| self.slots.iter().any(|s| s.from == *l && s.state.getting_ready()));
+            if waiting && h.since.elapsed() < HOLD_MAX {
                 break;
             }
             let Some(inner) = self.inner.upgrade() else {
                 return false;
             };
-            let (session, id, text, _) = self.held.pop_front().unwrap();
+            let Some(h) = self.held.pop_front() else { break };
             // (a line from a session gone: its id may be a new line's now - never answered)
-            if session == inner.session.load(Ordering::SeqCst) {
-                let (text, rule) = self.translate_line(&text);
+            if h.session == inner.session.load(Ordering::SeqCst) {
+                let (text, rule) = self.translate_line(&h.text);
                 // (the session may have ended while it was translated)
-                if session == inner.session.load(Ordering::SeqCst) {
-                    (self.on_event)(Event::Reply { id, text, rule });
+                if h.session == inner.session.load(Ordering::SeqCst) {
+                    (self.on_event)(Event::Reply { id: h.id, text, rule });
                 }
             }
         }
         true
     }
 
-    /// Starts a helper getting a rule's models ready.
+    /// Starts a helper getting a pair's models ready.
     fn fetch(&mut self, i: usize) {
         self.next_job += 1;
         let job = self.next_job;
+        let download = self.target.downloads;
         let s = &mut self.slots[i];
         s.job = job;
         // (loading until bytes actually come down: models already here never show "downloading")
@@ -475,7 +651,7 @@ impl Worker {
                 let frac = if total > 0 { done as f64 / total as f64 } else { 0.0 };
                 let _ = tx2.send(Msg::Progress { job, frac });
             };
-            let result = provider.prepare(&from, &to, &progress);
+            let result = provider.prepare(&from, &to, download, &progress);
             let _ = tx.send(Msg::Prepared { job, result });
         });
         if let Err(e) = spawned {
@@ -485,36 +661,7 @@ impl Worker {
         }
     }
 
-    fn set_rules(&mut self, rules: Vec<(String, String)>) {
-        let mut old = std::mem::take(&mut self.slots);
-        for (from, to) in rules {
-            if self.slots.iter().any(|s| s.from == from && s.to == to) {
-                continue;
-            }
-            if let Some(i) = old.iter().position(|s| s.from == from && s.to == to) {
-                self.slots.push(old.remove(i));
-                continue;
-            }
-            let unavailable = never(&from, &to);
-            self.slots.push(Slot {
-                from: from.clone(),
-                to: to.clone(),
-                state: if unavailable { State::Unavailable } else { State::Loading },
-                job: 0,
-                route: Vec::new(),
-                failed_at: None,
-            });
-            if unavailable {
-                (self.log)(&format!("translation: {from} > {to} is not available (no model for it)"));
-            } else {
-                let i = self.slots.len() - 1;
-                self.fetch(i);
-            }
-        }
-        self.unload_unused();
-    }
-
-    /// Lets go of the models no rule goes through.
+    /// Lets go of the models no pair goes through.
     fn unload_unused(&mut self) {
         let used: HashSet<&String> = self.slots.iter().flat_map(|s| s.route.iter()).collect();
         let gone: Vec<String> = self.models.keys().filter(|k| !used.contains(k)).cloned().collect();
@@ -524,11 +671,31 @@ impl Worker {
         }
     }
 
+    /// Before a pair's models load: the least recently used ready pairs (not job's) let go of until fewer than
+    /// MAX_PAIRS are left (a pair without models - unavailable, failed, still coming - counts for nothing).
+    fn make_room(&mut self, job: u64) {
+        loop {
+            let ready: Vec<usize> =
+                (0..self.slots.len()).filter(|&i| self.slots[i].state == State::Ready && self.slots[i].job != job).collect();
+            if ready.len() < MAX_PAIRS {
+                break;
+            }
+            let Some(&i) = ready.iter().min_by_key(|&&i| self.slots[i].used) else { break };
+            let s = self.slots.remove(i);
+            (self.log)(&format!("translation: let go of {} > {} (the least recently used)", s.from, s.to));
+        }
+        self.unload_unused();
+    }
+
     fn prepared(&mut self, job: u64, result: Prepared) {
-        let Some(i) = self.slots.iter().position(|s| s.job == job) else {
-            return; // (the rule is gone)
-        };
-        let rule = format!("{} > {}", self.slots[i].from, self.slots[i].to);
+        if !self.slots.iter().any(|s| s.job == job) {
+            return; // (the pair is gone)
+        }
+        if matches!(result, Prepared::Ready(_)) {
+            self.make_room(job);
+        }
+        let Some(i) = self.slots.iter().position(|s| s.job == job) else { return };
+        let pair = format!("{} > {}", self.slots[i].from, self.slots[i].to);
         match result {
             Prepared::Ready(dirs) => {
                 self.slots[i].state = State::Loading;
@@ -546,7 +713,7 @@ impl Worker {
                                 self.models.insert(id.clone(), m);
                             }
                             Err(e) => {
-                                (self.log)(&format!("translation: {rule}: the {id} model could not be loaded: {e}"));
+                                (self.log)(&format!("translation: {pair}: the {id} model could not be loaded: {e}"));
                                 self.slots[i].state = State::Error;
                                 self.slots[i].failed_at = Some(Instant::now());
                                 self.unload_unused();
@@ -558,41 +725,50 @@ impl Worker {
                 }
                 self.slots[i].route = ids;
                 self.slots[i].state = State::Ready;
-                (self.log)(&format!("translation: {rule} ready"));
+                (self.log)(&format!("translation: {pair} ready"));
                 self.unload_unused();
             }
             Prepared::Unavailable(why) => {
                 self.slots[i].state = State::Unavailable;
                 (self.log)(&format!("translation: not available: {why}"));
             }
+            Prepared::NotDownloaded(why) => {
+                self.slots[i].state = State::NotDownloaded;
+                (self.log)(&format!("translation: {why}, and downloads are off"));
+            }
             Prepared::Error(e) => {
                 self.slots[i].state = State::Error;
                 self.slots[i].failed_at = Some(Instant::now());
-                (self.log)(&format!("translation: {rule}: {e} (tried again in {} s)", RETRY_AFTER.as_secs()));
+                (self.log)(&format!("translation: {pair}: {e} (tried again in {} s)", RETRY_AFTER.as_secs()));
             }
         }
     }
 
     fn retry_failed(&mut self) {
         for i in 0..self.slots.len() {
-            if self.slots[i].state == State::Error
-                && self.slots[i].failed_at.is_some_and(|t| t.elapsed() >= RETRY_AFTER)
+            if self.slots[i].state == State::Error && self.slots[i].failed_at.is_some_and(|t| t.elapsed() >= RETRY_AFTER)
             {
                 self.fetch(i);
             }
         }
     }
 
-    /// Tells the states when they changed (a download's progress alone: at most every STATUS_EVERY).
+    /// Tells the status when it changed (a download's progress alone: at most every STATUS_EVERY).
     fn tell(&mut self) {
-        let now: Vec<RuleStatus> = self.slots.iter().map(Slot::status).collect();
-        let wire = |v: &[RuleStatus]| status_text(v);
-        if wire(&now) == wire(&self.told) {
+        let now = Status {
+            into: self.target.into.clone().unwrap_or_default(),
+            pairs: self.slots.iter().map(Slot::status).collect(),
+        };
+        // (compared whole, not on the wire: NotDownloaded and Unavailable read the same there, the window tells them apart)
+        if now == self.told {
             return;
         }
-        let words =
-            |v: &[RuleStatus]| v.iter().map(|r| (r.from.clone(), r.to.clone(), r.state.word())).collect::<Vec<_>>();
-        let progress_only = words(&now) == words(&self.told);
+        let shape = |s: &Status| {
+            let pairs: Vec<_> =
+                s.pairs.iter().map(|p| (p.from.clone(), p.to.clone(), std::mem::discriminant(&p.state))).collect();
+            (s.into.clone(), pairs)
+        };
+        let progress_only = shape(&now) == shape(&self.told);
         if progress_only && self.told_at.is_some_and(|t| t.elapsed() < STATUS_EVERY) {
             return;
         }
@@ -604,20 +780,7 @@ impl Worker {
         (self.on_event)(Event::Status(now));
     }
 
-    /// The ready rule a stretch in `lang` goes through: the first rule from that language; Chinese and Cantonese
-    /// stand in for each other when only the other has a rule (the same script: detect.rs tells them apart only by
-    /// a few characters).
-    fn rule_for(&self, lang: &str) -> Option<&Slot> {
-        let exact = self.slots.iter().find(|s| s.from == lang);
-        let near = || match lang {
-            "zh" => self.slots.iter().find(|s| s.from == "yue"),
-            "yue" => self.slots.iter().find(|s| s.from == "zh"),
-            _ => None,
-        };
-        exact.or_else(near).filter(|s| s.state == State::Ready)
-    }
-
-    /// One piece through a rule's model(s).
+    /// One piece through a pair's model(s).
     fn through(&self, s: &Slot, text: &str) -> Result<String, String> {
         let mut t = text.to_string();
         for id in &s.route {
@@ -627,28 +790,32 @@ impl Worker {
         Ok(t)
     }
 
-    /// A line's translation ("" when nothing in it was translated), and the rule used (the first, for a line with
-    /// stretches in two source languages).
+    /// A line's translation ("" when nothing in it was translated), and the pair used (the first, for a line with
+    /// stretches in two languages).
     fn translate_line(&mut self, line: &str) -> (String, Option<(String, String)>) {
+        if self.target.into.is_none() {
+            return (String::new(), None);
+        }
         let mut rule: Option<(String, String)> = None;
         // (piece, translated)
         let mut pieces: Vec<(String, bool)> = Vec::new();
-        // (the line is most likely in a translation's language, or English: short lines are told among those first)
-        let mut likely: Vec<&str> = vec!["en"];
-        for s in &self.slots {
-            likely.push(&s.from);
-            likely.push(&s.to);
-        }
-        for st in detect::stretches_preferring(line, &likely) {
+        let mut used: Vec<usize> = Vec::new();
+        for (st, wanted) in self.stretches(line) {
             let text = st.text(line);
-            let done = match st.lang.and_then(|l| self.rule_for(l)) {
-                Some(s) if !text.trim().is_empty() => match self.through(s, text.trim()) {
+            let slot = st
+                .lang
+                .filter(|_| wanted)
+                .and_then(|l| self.slots.iter().position(|s| s.from == l && s.state == State::Ready));
+            let done = match slot {
+                Some(i) => match self.through(&self.slots[i], text.trim()) {
                     Ok(t) => {
+                        let s = &self.slots[i];
                         rule.get_or_insert_with(|| (s.from.clone(), s.to.clone()));
+                        used.push(i);
                         Some(t)
                     }
                     Err(e) => {
-                        let msg = format!("translation: {} > {}: {e}", s.from, s.to);
+                        let msg = format!("translation: {} > {}: {e}", self.slots[i].from, self.slots[i].to);
                         if msg != self.last_error {
                             (self.log)(&msg);
                             self.last_error = msg;
@@ -656,12 +823,16 @@ impl Worker {
                         None
                     }
                 },
-                _ => None,
+                None => None,
             };
             match done {
                 Some(t) => pieces.push((t.trim().to_string(), true)),
                 None => pieces.push((text.to_string(), false)),
             }
+        }
+        for i in used {
+            self.clock += 1;
+            self.slots[i].used = self.clock;
         }
         if !pieces.iter().any(|p| p.1) {
             return (String::new(), None);
@@ -705,7 +876,7 @@ mod tests {
 
     #[test]
     fn wire() {
-        let r = |f: &str, t: &str, s: State| RuleStatus { from: f.into(), to: t.into(), state: s };
+        let r = |f: &str, t: &str, s: State| PairStatus { from: f.into(), to: t.into(), state: s };
         assert_eq!(
             status_text(&[r("ja", "en", State::Ready), r("ko", "en", State::Downloading(0.429))]),
             "ja>en=ready,ko>en=downloading 42"
@@ -715,12 +886,16 @@ mod tests {
             "mt>en=unavailable,ja>ko=loading"
         );
         assert_eq!(status_text(&[r("de", "en", State::Error)]), "de>en=error");
+        assert_eq!(status_text(&[r("de", "en", State::NotDownloaded)]), "de>en=unavailable", "the game reads unavailable");
         assert_eq!(status_text(&[]), "");
         let all =
             [r("ja", "en", State::Ready), r("ko", "en", State::Downloading(0.429)), r("mt", "en", State::Unavailable)];
-        let common: Vec<_> = all.iter().map(RuleStatus::common).collect();
+        let common: Vec<_> = all.iter().map(PairStatus::common).collect();
         assert_eq!(kd_common::feed::translations_wire(&common), status_text(&all), "the connectors write the same");
         assert_eq!((percent(1.0), percent(0.999), percent(-1.0), percent(f64::NAN)), (100, 99, 0, 0));
+        assert_eq!(Status::default().wire(), "");
+        assert_eq!(Status { into: "en".into(), pairs: vec![] }.wire(), "en:");
+        assert_eq!(Status { into: "en".into(), pairs: all[..1].to_vec() }.wire(), "en:ja>en=ready");
     }
 
     #[test]
@@ -742,5 +917,11 @@ mod tests {
             s.add(i);
         }
         assert!(s.set.len() <= SEEN_MAX && s.add(1), "the oldest are forgotten");
+    }
+
+    #[test]
+    fn languages() {
+        assert!(same_language("zh", "yue") && same_language("ja", "ja") && !same_language("ja", "ko"));
+        assert!(never("ja", "ja") && never("en", "yue") && never("xx", "en") && !never("yue", "en"));
     }
 }

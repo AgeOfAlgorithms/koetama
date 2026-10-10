@@ -26,7 +26,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
      "me":"76561198000000001","room_seed":"lobby 1234 + its password","range":[10,30],
      "listener":{"position":[0,1.7,0],"forward":[0,0,1],"right":[1,0,0],"up":[0,1,0]},
      "speakers":[{"id":"76561198000000002","name":"Ana","position":[3,1.7,8],"muffle":0.1}],
-     "translations":[{"from":"ja","to":"en"}],"to_translate":[{"id":7,"text":"こんにちは"}]}
+     "to_translate":[{"id":7,"text":"こんにちは"}]}
 
 | field | default | meaning |
 |---|---|---|
@@ -45,7 +45,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `to` | (with `range` and positions: everyone within `far`) | the player ids who should get this player's voice right now; empty: nobody. Left out: with `range`, `listener` and speakers' positions, Koetama sends to the speakers within `far` (and 10 % more); else nobody |
 | `transmit` | false | this player's voice is going into a device now ("Devices"): `true` - also to everyone in the voice room; a list of player ids - also to them |
 | `region` | `""` | where the voice room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; `""` (or anything else): wherever the first player is. Every player of a session sends the same one |
-| `translations` | none | up to two `{"from", "to"}` (language codes): "Translation" |
+| `translate` | true | false: stop translating for a while (Koetama answers nothing new until it is true again). What is translated into what is the player's setting in Koetama's window, not the game's: "Translation" |
 | `to_translate` | none | the chat lines to translate: `{"id", "text"}`, at most 16, each at most 400 bytes of UTF-8. Ids are the game's (1 to 15 digits, unique in the session). Keep a line in every feed until its `translation` arrives (drop it after ~10 s without one) |
 
 Bad values are skipped or replaced by the default (a bad room, key or `me`: no room). Numbers may be written as
@@ -67,8 +67,8 @@ Each object has a `"type"` first.
 | `{"type":"voice","state":"connected","players":["7656...02"]}` | the voice chat changed: `state` `off`, `connecting`, `connected`, `unreachable` (the last tries failed; it keeps trying) or `id_taken` (another player's id clashes with this one in this room: no voice this session - "Real voices"); `players`: the other players whose Koetama is in the room (their ids as the game gives them) |
 | `{"type":"talking","id":"7656...02","talking":true}` | a player's voice started (`true`) or stopped (`false`) being heard here - and this player's own (`id` = `me`) being sent. For speaking icons over heads |
 | `{"type":"status","speech":"ready","microphone":"open"}` | after the hello, and when it changes: `speech` `off` (the game does not ask for it, or this Koetama listens to no microphone: started to take typed lines only), `loading` (the models load; the first time they are downloaded), `ready` or `error`; `microphone` `closed`, `open` or `none` (no microphone). Lines said before `ready` and `open` are not heard |
-| `{"type":"translation","id":7,"text":"Hello","from":"es","to":"en"}` | the translation of line `id`, exactly one per id; `from` / `to`: the translation that was used (left out with `""`). `""`: nothing to show (nothing in a source language, the same as the line, or a bad line). A line that comes while a translation's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
-| `{"type":"translations_status","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}` | each translation's state, when one changes (at most every 0.5 s while downloading): `ready`, `downloading` (with `progress` 0..1), `loading`, `unavailable` (no model for it) or `error` (tried again after a minute) |
+| `{"type":"translation","id":7,"text":"Hello","from":"es","to":"en"}` | the translation of line `id`, exactly one per id; `from` / `to`: the pair that was used (left out with `""`). `""`: nothing to show (translation off, nothing in a language the player doesn't speak, no model for it, the same as the line, or a bad line). A line that comes while its language's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
+| `{"type":"translations_status","into":"en","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}` | the player's translation: `into`, the language their chat is translated into (`""`: off), and each pair in use this session with its state - after the hello and when one changes (at most every 0.5 s while downloading): `ready`, `downloading` (with `progress` 0..1), `loading`, `unavailable` (no model for it, or not on this PC with downloads off) or `error` (tried again after a minute) |
 | `{"type":"join_code","player":"7656...02","code":"K7QF-4MXA"}` | a hub only ("Hub"): the code that player types into their Koetama to join |
 | `{"type":"player","player":"7656...02","joined":true}` | a hub only: that player's Koetama joined (or left) |
 
@@ -236,14 +236,14 @@ games tell their Koetamas nothing. The host's Koetama then works as a **hub** fo
 
 1. The host's feed adds **`players`**: a list of feeds, one per other player, each with that player's `id` (as in
    `me`) and anything a feed holds for them - `listen`, `talk_key`, `lang`, `name`, `listener`, `speakers`, `range`,
-   `to`, `translations`, `to_translate`. The room (`room_seed`, or `room` and `key`) and `region` are the host's
+   `to`, `translate`, `to_translate`. The room (`room_seed`, or `room` and `key`) and `region` are the host's
    unless a player's feed gives its own. The host's own fields stay at the top, as usual.
 2. For each player the hub answers a **`join_code`** (`K7QF-4MXA`: 8 characters, about 40 bits), once per game
    session. The game shows each player their own code, privately (TTS: `broadcastToColor`). **A code works once.**
 3. The player types it into their Koetama ("Join a hosted game" in the window; `koetama --cli --join K7QF-4MXA`).
    Their Koetama and the hub pair through the relay (below) and from then on it works as if that player's feed came
    from a game on their own PC: their microphone, speech to text, their voice in the session's room, their
-   translations. The hub sends it that player's feed whenever it changes (at least once a second).
+   translation (with their own Koetama's setting: nothing of it comes from the host). The hub sends it that player's feed whenever it changes (at least once a second).
 4. Whatever that player's Koetama would tell a game, the hub tells the host's game, with **`"player": <id>`** added:
    `speech`, `talking`, `translation`, `translations_status`, `status`, `voice`. A `player` object says when a
    player's Koetama joins (only once the paired link is up) or leaves.
@@ -278,17 +278,25 @@ relay id 1, player 2.
 
 ## Translation
 
-A player has up to two **translations**, each "from language A into language B" (Japanese → English, Korean →
-English). The game sends Koetama the full chat lines it shows (typed lines, and spoken lines once finished - never
-live words) in `to_translate`; Koetama translates them on the player's PC with Mozilla's Firefox Translations models
-(MPL-2.0, ~20-55 MB a direction, downloaded the first time a translation needs them; a pair without English goes
-through English: two models) and answers each with a `translation`.
+Translation is the **player's setting, in Koetama's window**: "Translate chat into" (Off - the default, so nothing
+downloads until the player chooses - or a language) and "Download translation models when needed" (on by default).
+The game only sends the full chat lines it shows (typed lines, and spoken lines once finished - never live words) in
+`to_translate`; Koetama translates them on the player's PC with Mozilla's Firefox Translations models (MPL-2.0, ~20-55
+MB a direction) and answers each with a `translation`. A game sends `"translate": false` to stop it for a while.
 
-- **Mixed-language lines** are split into stretches by script and language; the stretches in a translation's source
-  language are translated, the rest kept, the order kept. A line with nothing in a source language: `""`.
-- A translation whose two languages are the same, or with a language Mozilla has no model for, is `unavailable`.
-  Cantonese (`yue`) only as a source (through the Traditional Chinese model); Maltese only into English. Two with
-  the same source language: the first is used.
+- **What is translated**: every stretch of a line in a language the player does not speak (the languages they
+  ticked under "Languages I speak", else the game's `lang`) and that is not the target is translated into the target;
+  stretches in the player's own languages and in the target are left as they are, the order kept. Short or unsure
+  stretches are told among the player's languages and the target first, so "ok", "lol" or "gg" stay as they are.
+  Chinese and Cantonese count as one language here.
+- **Pairs**: one per foreign language seen ("from" that language "to" the target), made the first time the
+  language shows up: its models are fetched (downloaded if downloads are on, else only models already on this PC are
+  used) and loaded, and that line waits for them (up to 2 minutes). A pair without English goes through English (two
+  models). At most four pairs keep their models in memory; another lets go of the least recently used. The pairs in
+  use and their states are in `translations_status`.
+- A language Mozilla has no model for is `unavailable` (left untranslated). Cantonese (`yue`) only as a source
+  (through the Traditional Chinese model); Maltese only into English.
+- A hub's players (below) each use their own Koetama's setting; nothing of it comes from the host.
 
 ## Transport: socket
 
@@ -439,7 +447,7 @@ A profile using the socket connector only changes `connector`: `{"type": "socket
 | `url` | required | The mod's page, `https://...` or `http://...` (the window opens it in the browser). |
 | `author` | required | Who made the mod and the profile. |
 | `locate` | optional | `{"steam_app": N}`: the game's Steam app id. Koetama shows where it's installed, or that it's missing. |
-| `uses` | optional | Any of `"voices"`, `"speech"`, `"translate"`; the default is `["voices", "speech"]`. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `listen` is ignored, so the microphone never opens. `translate`: Koetama translates the chat lines the game sends ("Translation"); without it the feed's `translations` and `to_translate` are ignored. The `hello`'s `features` tell the mod which. |
+| `uses` | optional | Any of `"voices"`, `"speech"`, `"translate"`; the default is `["voices", "speech"]`. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `listen` is ignored, so the microphone never opens. `translate`: Koetama translates the chat lines the game sends, into the language the player chose in Koetama ("Translation"); without it the feed's `translate` and `to_translate` are ignored. The `hello`'s `features` tell the mod which. |
 | `test_voices` | optional | Up to 16 recorded voices for the mod's test speakers: `{"id": 1..999, "voice": "<Windows voice>", "rate": -10..10, "text": "..."}`. They're made once with the Windows speech voices (none on other systems), and a speaker with `"test_voice": <id>` plays one. |
 | `speaker_names` | optional | Names for the test voices in Koetama's window, by their `id`, e.g. `{"1": "the whisperer"}`. Real players need nothing: they show as "player <id>". |
 | `connector` | required | `{"type": "files", ...}`, `{"type": "socket", ...}` or `{"type": "http", ...}`, described below. |

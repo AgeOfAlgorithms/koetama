@@ -51,8 +51,13 @@ namespace Koetama.Tests
             Check(s2 != null && s2.Kind == SpeechKind.Start && s2.Times == null && double.IsNaN(s2.Ago), "speech start, no times");
             var t = Messages.Parse("{\"type\":\"translation\",\"id\":123456789012345,\"text\":\"Hello\"}") as Translation;
             Check(t != null && t.Id == 123456789012345 && t.Text == "Hello", "translation with a 15-digit id");
-            var st = Messages.Parse("{\"type\":\"translations_status\",\"translations\":[{\"from\":\"ja\",\"to\":\"en\",\"state\":\"downloading\",\"progress\":0.42}]}") as List<TranslationState>;
-            Check(st != null && st.Count == 1 && st[0].State == "downloading" && st[0].Progress == 0.42, "translations_status");
+            var st = Messages.Parse("{\"type\":\"translations_status\",\"into\":\"en\",\"translations\":[{\"from\":\"ja\",\"to\":\"en\",\"state\":\"downloading\",\"progress\":0.42}]}") as TranslationsStatus;
+            Check(st != null && st.Into == "en" && st.Translations.Count == 1 && st.Translations[0].From == "ja" && st.Translations[0].State == "downloading"
+                  && st.Translations[0].Progress == 0.42, "translations_status: into, and each pair's state");
+            var off = Messages.Parse("{\"type\":\"translations_status\",\"into\":\"\",\"translations\":[]}") as TranslationsStatus;
+            Check(off != null && off.Into == "" && off.Translations.Count == 0, "translations_status with into \"\": off, no pairs");
+            var old = Messages.Parse("{\"type\":\"translations_status\",\"translations\":[{\"from\":\"ja\",\"to\":\"en\",\"state\":\"ready\"}]}") as TranslationsStatus;
+            Check(old != null && old.Into == "" && old.Translations.Count == 1, "translations_status without into (an older Koetama): \"\"");
             Check(Messages.Parse("{\"type\":\"something_new\",\"x\":1}") == null, "an unknown type is null (ignored)");
             Check(Messages.Parse("{\"type\":\"room\",\"room\":\"ab\",\"key\":\"cd\"}") is Room r && r.Id == "ab" && r.Key == "cd", "room");
 
@@ -90,7 +95,6 @@ namespace Koetama.Tests
             f.Speakers.Add(new Speaker { Id = "radio", Gain = 0.8123, Azimuth = -179.6, Elevation = 10.4 });
             f.Listener = new Listener { Position = new Vec3(0, 1.7, 0), Forward = new Vec3(0, 0, 1), Right = new Vec3(1, 0, 0), Up = new Vec3(0, 1, 0) };
             f.Range = new VoiceRange(7.5, 25);
-            f.Translations.Add(new LanguagePair("ja", "en"));
             string line = f.ToJson(new List<PendingLine> { new PendingLine { Id = 9, Text = "こんにちは \"you\"" } });
             var doc = System.Text.Json.JsonDocument.Parse(line).RootElement;
             Check(doc.GetProperty("type").GetString() == "feed" && doc.GetProperty("listen").GetString() == "push_to_talk"
@@ -112,6 +116,12 @@ namespace Koetama.Tests
                 "room and key");
             Check(!doc.TryGetProperty("to", out _), "to left out (null): Koetama sends to whoever is in range");
             Check(doc.GetProperty("to_translate")[0].GetProperty("text").GetString() == "こんにちは \"you\"", "to_translate text survives");
+            Check(!doc.TryGetProperty("translations", out _) && !doc.TryGetProperty("translate", out _),
+                "no translations list (Koetama's own setting), translate left out (true)");
+            f.Translate = false;
+            Check(System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement.GetProperty("translate").GetBoolean() == false,
+                "Translate = false: \"translate\": false");
+            f.Translate = true;
             f.To = new List<string>();
             Check(System.Text.Json.JsonDocument.Parse(f.ToJson(new List<PendingLine>())).RootElement.GetProperty("to").GetArrayLength() == 0, "to empty: nobody");
             f.To = new List<string> { "1234567890123" };

@@ -38,7 +38,6 @@ namespace KoetamaValheim
         private ConfigEntry<string> language, region;
         private ConfigEntry<bool> liveWords, shoutOnExclamation;
         private ConfigEntry<float> volume, whisperRange, talkRange, shoutRange;
-        private ConfigEntry<string> tr1From, tr1Into, tr2From, tr2Into;
 
         private KoetamaClient koetama;
         private VoiceRoom voiceRoom;
@@ -55,6 +54,7 @@ namespace KoetamaValheim
         // chat entries waiting for their translation, by line id
         private readonly Dictionary<long, string> translating = new Dictionary<long, string>();
         private readonly Dictionary<string, string> translationStates = new Dictionary<string, string>();
+        private string translateInto;   // what Koetama last said chat is translated into ("": off; null: not yet)
         private int obstacleMask;
         private GUIStyle iconStyle;
 
@@ -77,10 +77,7 @@ namespace KoetamaValheim
             shoutRange = Config.Bind("Voice", "ShoutRange", 70f, "Metres a shout carries.");
             region = Config.Bind("Voice", "Region", "",
                 "Where the voice room lives (wnam, enam, weur, apac, ...; empty: near the first player). Everyone in a world must use the same.");
-            tr1From = Config.Bind("Translation", "Translation1From", "", "Translate other players' chat from this language (ja, ko, es, ...); empty: off.");
-            tr1Into = Config.Bind("Translation", "Translation1Into", "en", "... into this one.");
-            tr2From = Config.Bind("Translation", "Translation2From", "", "A second translation; empty: off.");
-            tr2Into = Config.Bind("Translation", "Translation2Into", "en", "... into this one.");
+            // (what other players' chat is translated into is the player's setting in Koetama's window: "Translate chat into")
 
             obstacleMask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain");
             voiceRoom = new VoiceRoom(s => Logger.LogInfo(s));
@@ -139,9 +136,6 @@ namespace KoetamaValheim
             f.Live = liveWords.Value;
             f.Volume = Mathf.Clamp01(volume.Value);
             f.Region = region.Value.Trim();
-            f.Translations.Clear();
-            if (tr1From.Value.Trim() != "") f.Translations.Add(new LanguagePair(tr1From.Value.Trim(), tr1Into.Value.Trim()));
-            if (tr2From.Value.Trim() != "") f.Translations.Add(new LanguagePair(tr2From.Value.Trim(), tr2Into.Value.Trim()));
 
             if (playing && !typing && ZInput.GetKeyDown(modeKey.Value, false))
             {
@@ -287,8 +281,9 @@ namespace KoetamaValheim
 
         private void OnOtherPlayerLine(string text, string chatEntry)
         {
-            if (koetama == null || koetama.Feed.Translations.Count == 0) return;
+            if (koetama == null || !koetama.IsConnected) return;
             if (koetama.Hello != null && !koetama.Hello.Has("translate")) return;
+            if (koetama.TranslationsStatus != null && koetama.TranslationsStatus.Into == "") return; // (off in Koetama's window)
             translating[koetama.Translate(text)] = chatEntry;
             // (a line Koetama never answers is dropped by the client after 10 s; forget the oldest entries here)
             if (translating.Count > 64)
@@ -307,9 +302,15 @@ namespace KoetamaValheim
             ChatPatches.InsertUnder(entry, "<color=#8fd3ff>    " + ChatPatches.Plain(t.Text) + "</color>");
         }
 
-        private void OnTranslationsStatus(List<TranslationState> states)
+        private void OnTranslationsStatus(TranslationsStatus ts)
         {
-            foreach (TranslationState s in states)
+            if (ts.Into != translateInto)
+            {
+                translateInto = ts.Into;
+                Hud(ts.Into == "" ? "Translation is off: choose a language in Koetama's window (Translate chat into)"
+                    : "Koetama translates chat into " + ts.Into);
+            }
+            foreach (TranslationState s in ts.Translations)
             {
                 string pair = s.From + " > " + s.To;
                 if (translationStates.TryGetValue(pair, out string old) && old == s.State) continue;

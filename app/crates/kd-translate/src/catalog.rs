@@ -1,4 +1,4 @@
-//! Mozilla's translation models (Firefox Translations): which exist, which files a rule needs, and the downloads.
+//! Mozilla's translation models (Firefox Translations): which exist, which files a pair needs, and the downloads.
 //!
 //! The list is Mozilla's Remote Settings collection `translations-models` (RECORDS_URL): one record per file, with its
 //! direction (fromLang, toLang - Mozilla's codes), version, fileType (model, lex, vocab or srcvocab + trgvocab), name
@@ -8,7 +8,7 @@
 //!
 //! Koetama's language codes are Mozilla's except zh -> zh-Hans, and yue (Cantonese has no model) -> zh-Hant, as a
 //! SOURCE only: written Cantonese is translated with the Traditional Chinese model; nothing is translated into it.
-//! Mozilla's models all have English on one side: a rule A -> B uses one direction when A or B is English, else two
+//! Mozilla's models all have English on one side: a pair A -> B uses one direction when A or B is English, else two
 //! (A -> en, en -> B); it is unavailable when a direction it needs does not exist.
 //!
 //! Files go to `<root>/<from>-<to>/<version>/<the file's own name>` (root: Koetama's data folder/translate), each
@@ -219,7 +219,21 @@ impl Catalog {
         None
     }
 
-    /// The directions a rule `from` -> `to` (Koetama's codes) needs, in order: one when either side is English, else
+    /// The languages a chat can be translated INTO (Koetama's codes, in LANGS order): English, and each language
+    /// Mozilla has an English -> it model for.
+    pub fn targets(&self) -> Vec<&'static str> {
+        crate::detect::LANGS
+            .iter()
+            .copied()
+            .filter(|&l| match mozilla_code(l, false) {
+                Some("en") => true,
+                Some(code) => self.direction("en", code).is_some(),
+                None => false,
+            })
+            .collect()
+    }
+
+    /// The directions a pair `from` -> `to` (Koetama's codes) needs, in order: one when either side is English, else
     /// two through English. Err: why it is unavailable (a sentence for the log).
     pub fn route(&self, from: &str, to: &str) -> Result<Vec<Direction>, String> {
         if from == to {
@@ -282,6 +296,25 @@ pub fn load_list(
             }
         }
     }
+}
+
+/// The languages to translate into as Mozilla's list had them when this was written (2026-10): all of Koetama's but
+/// Cantonese (written Cantonese has no model) and Maltese (only Maltese -> English exists). offered_targets' answer
+/// before any list was ever fetched.
+pub const TARGETS: [&str; 27] = [
+    "en", "es", "fr", "de", "it", "pt", "nl", "pl", "uk", "ru", "zh", "ja", "ko", "cs", "sk", "ro", "hr", "bg", "fi",
+    "sv", "hu", "da", "et", "lv", "lt", "sl", "el",
+];
+
+/// The languages to translate into for the player to choose from: from the list kept in `root` (never fetched here:
+/// choosing downloads nothing), else TARGETS.
+pub fn offered_targets(root: &Path) -> Vec<&'static str> {
+    std::fs::read_to_string(root.join(LIST_FILE))
+        .ok()
+        .and_then(|t| Catalog::parse(&t).ok())
+        .map(|c| c.targets())
+        .filter(|t| t.len() > 1)
+        .unwrap_or_else(|| TARGETS.to_vec())
 }
 
 /// The list over the internet (fetch::get_text).

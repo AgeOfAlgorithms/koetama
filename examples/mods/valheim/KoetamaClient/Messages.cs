@@ -88,11 +88,20 @@ namespace Koetama
         public double Progress;
     }
 
+    /// <summary>{"type":"translations_status"}: what chat is translated into (the player's setting in Koetama's window;
+    /// "": off) and the state of each language pair in use.</summary>
+    public sealed class TranslationsStatus
+    {
+        /// <summary>A language code (en, ja, ...), or "" when translation is off.</summary>
+        public string Into = "";
+        public readonly List<TranslationState> Translations = new List<TranslationState>();
+    }
+
     public static class Messages
     {
         /// <summary>
         /// One line from Koetama -> Hello, Speech, Room, VoiceState, Talking, Status, Translation or
-        /// List&lt;TranslationState&gt;; null for
+        /// TranslationsStatus; null for
         /// a type this client does not know (a later protocol's). Throws FormatException if the line is not JSON.
         /// </summary>
         public static object Parse(string line)
@@ -150,11 +159,11 @@ namespace Koetama
                         To = Json.GetString(o, "to"),
                     };
                 case "translations_status":
-                    var list = new List<TranslationState>();
+                    var ts = new TranslationsStatus { Into = Json.GetString(o, "into") };
                     foreach (object item in Json.GetArray(o, "translations"))
                     {
                         if (!(item is Dictionary<string, object> t)) continue;
-                        list.Add(new TranslationState
+                        ts.Translations.Add(new TranslationState
                         {
                             From = Json.GetString(t, "from"),
                             To = Json.GetString(t, "to"),
@@ -162,7 +171,7 @@ namespace Koetama
                             Progress = Json.GetNumber(t, "progress"),
                         });
                     }
-                    return list;
+                    return ts;
                 default:
                     return null;
             }

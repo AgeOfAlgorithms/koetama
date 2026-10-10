@@ -9,9 +9,10 @@ translations are theirs, on their PC, with what they say arriving here tagged wi
 What it does:
   - speech as text: each finished line, the host's or a joined player's, is printed into chat as them, in their colour;
   - push to talk on a scripting button (numpad 1 by default), each player their own, or "!talk always";
-  - chat translation, per player: "!translate es en" (up to two pairs: "!translate ja en ko en", "!translate off");
-    every chat line goes to each player who asked (not to its writer), and the translation is printed to that player
-    only, under the line;
+  - chat translation, per player: every chat line goes to each player's Koetama (not its writer's), and the
+    translation is printed to that player only, under the line. What it is translated into is the player's own
+    setting in Koetama's window ("Translate chat into"), not this script's: a player whose Koetama says it is off
+    gets no lines;
   - "Name joined with their Koetama" / "... left" for everyone;
   - "!voice on" (the host): a voice room for the table, everyone hearing everyone at full volume (no distances worth
     mixing by at one table; TTS has its own voice chat too, so it is off by default). Its seed is made here at load
@@ -20,8 +21,7 @@ What it does:
 Chat commands (hidden from chat; each player's own):
   !talk ptt | always | off     how your microphone listens (default: push to talk on scripting button 1)
   !lang en                     the language you speak (Koetama's codes, or "auto")
-  !translate es en [ja en]     translations of the others' chat lines; "!translate off"
-  !koetama                     the link's state, and your join code again
+  !koetama                     the link's state, what your chat is translated into, and your join code again
   !voice on | off              (the host only) the table's voice room
 
 Install: in Koetama "Add game mod..." -> examples/profiles/tabletop-simulator-koetama.json, pick it; in TTS:
@@ -37,6 +37,9 @@ local LINE_TTL = 10                -- seconds a chat line waits for its translat
 local MAX_LINES = 16               -- lines in one player's feed (the protocol's limit)
 local MAX_BYTES = 400              -- bytes of one line (the protocol's limit)
 local TRANSLATION_COLOR = {0.65, 0.85, 1.0}
+local LANG_NAMES = {en = "English", es = "Spanish", fr = "French", de = "German", it = "Italian", pt = "Portuguese",
+    nl = "Dutch", pl = "Polish", ru = "Russian", uk = "Ukrainian", tr = "Turkish", ja = "Japanese", ko = "Korean",
+    zh = "Chinese", ar = "Arabic", hi = "Hindi", sv = "Swedish", cs = "Czech"}
 local INFO_COLOR = {0.6, 0.6, 0.6}
 local CODE_COLOR = {1.0, 0.85, 0.4}
 
@@ -48,8 +51,8 @@ local function new_state(id)
         listen = "push_to_talk",
         talk_key = false,
         lang = "en",
-        translations = {},    -- {{from=, to=}, ...}
-        states = {},          -- "from>to" -> state ("ready", "downloading", ...)
+        into = nil,           -- what their Koetama translates chat into ("": off; nil: not said yet)
+        states = {},          -- "from>to" -> state ("ready", "downloading", ...), the pairs in use
         last_progress = {},   -- "from>to" -> the last download percentage shown
         retry = {},           -- lines answered "" while a model was not ready: sent again once ready
         status = "",          -- the last status shown ("speech/microphone")
@@ -216,11 +219,6 @@ local function fields(st, everyone)
         '"live":false',
         '"name":' .. jstr(st.name),
     }
-    local tr = {}
-    for _, t in ipairs(st.translations) do
-        tr[#tr + 1] = '{"from":' .. jstr(t.from) .. ',"to":' .. jstr(t.to) .. '}'
-    end
-    parts[#parts + 1] = '"translations":[' .. table.concat(tr, ",") .. ']'
     parts[#parts + 1] = '"to_translate":' .. lines_json(st)
     if kt.voice and st.id then
         -- (one table: everyone hears everyone, as loud as each other)
@@ -268,11 +266,23 @@ end
 
 -- ------------------------------------------------------------------ Koetama's objects
 
+-- No translation of this player's is downloading or loading (Koetama answers "" for a line that meets one).
 local function all_ready(st)
-    for _, t in ipairs(st.translations) do
-        if st.states[t.from .. ">" .. t.to] ~= "ready" then return false end
+    for _, state in pairs(st.states) do
+        if state == "downloading" or state == "loading" then return false end
     end
     return true
+end
+
+local function lang_name(code)
+    return LANG_NAMES[code] or code
+end
+
+-- What the player's Koetama translates chat into, in words.
+local function into_text(st)
+    if st.into == nil then return "not said yet" end
+    if st.into == "" then return "off (choose a language in Koetama's window: Translate chat into)" end
+    return lang_name(st.into)
 end
 
 local send_urgent -- (below)
@@ -291,10 +301,21 @@ local function show_code(st)
     broadcastToColor("Your Koetama code: " .. code .. "  (in Koetama: Join a game with a code)", p.color, CODE_COLOR)
 end
 
-local function on_translations_status(st, list)
-    for _, s in ipairs(list or {}) do
-        local key = s.from .. ">" .. s.to
-        local was = st.states[key]
+-- translations_status: the player's target language ("into") and the pairs in use now, each with its state.
+local function on_translations_status(st, o)
+    if type(o.into) == "string" and o.into ~= st.into then
+        st.into = o.into
+        if o.into == "" then
+            tell(st, "translation is off: choose a language in Koetama's window (Translate chat into)")
+        else
+            tell(st, "Koetama translates chat into " .. lang_name(o.into))
+        end
+    end
+    local was_states = st.states
+    st.states = {}
+    for _, s in ipairs(o.translations or {}) do
+        local key = tostring(s.from) .. ">" .. tostring(s.to)
+        local was = was_states[key]
         st.states[key] = s.state
         if s.state == "downloading" then
             local pct = math.floor((s.progress or 0) * 100)
@@ -354,7 +375,7 @@ local function on_object(o)
             st.retry[#st.retry + 1] = line
         end
     elseif t == "translations_status" then
-        on_translations_status(st, o.translations)
+        on_translations_status(st, o)
     elseif t == "join_code" then
         kt.codes[st.id] = o.code
         show_code(st)
@@ -507,20 +528,6 @@ local function command(st, words)
     elseif cmd == "!lang" and words[2] then
         st.lang = words[2]
         tell(st, "you speak: " .. st.lang)
-    elseif cmd == "!translate" then
-        st.translations, st.states, st.last_progress, st.retry = {}, {}, {}, {}
-        if words[2] ~= "off" then
-            local i = 2
-            while words[i] and words[i + 1] and #st.translations < 2 do
-                st.translations[#st.translations + 1] = {from = words[i], to = words[i + 1]}
-                i = i + 2
-            end
-        end
-        if #st.translations == 0 then tell(st, "translation off") end
-        if not kt.features["translate"] and kt.online then tell(st, "this Koetama profile does not translate") end
-        if st ~= kt.host and #st.translations > 0 and not kt.joined[st.id] then
-            tell(st, "translations need your Koetama joined: type your code into it")
-        end
     elseif cmd == "!voice" and st == kt.host and (words[2] == "on" or words[2] == "off") then
         if words[2] == "on" and not kt.features["voices"] and kt.online then
             tell(st, "this Koetama profile has no voices")
@@ -529,13 +536,19 @@ local function command(st, words)
         printToAll("[Koetama] the table's voice room is " .. (kt.voice and "on" or "off"), INFO_COLOR)
     elseif cmd == "!koetama" then
         local tr = {}
-        for _, t in ipairs(st.translations) do
-            tr[#tr + 1] = t.from .. "->" .. t.to .. " " .. tostring(st.states[t.from .. ">" .. t.to] or "?")
-        end
+        for key, state in pairs(st.states) do tr[#tr + 1] = key:gsub(">", "->") .. " " .. tostring(state) end
+        table.sort(tr)
         local link = st == kt.host and (kt.online and "linked" or "not linked")
             or (kt.joined[st.id] and "joined" or "not joined")
-        tell(st, link .. ", mic " .. st.listen .. ", lang " .. st.lang .. ", translate: " ..
-            (#tr > 0 and table.concat(tr, ", ") or "off") .. ", voice " .. (kt.voice and st.voice or "off"))
+        tell(st, link .. ", mic " .. st.listen .. ", lang " .. st.lang .. ", voice " .. (kt.voice and st.voice or "off"))
+        local pairs_ = #tr > 0 and " (" .. table.concat(tr, ", ") .. ")" or ""
+        if not kt.features["translate"] and kt.online then
+            tell(st, "translation: this Koetama profile does not translate")
+        elseif st.into and st.into ~= "" then
+            tell(st, "Koetama translates chat into " .. lang_name(st.into) .. pairs_)
+        else
+            tell(st, "translation: " .. into_text(st) .. pairs_)
+        end
         if st ~= kt.host then show_code(st) end
     else
         return false
@@ -551,14 +564,14 @@ function onChat(message, player)
         for w in message:gmatch("%S+") do words[#words + 1] = w:lower() end
         if command(from, words) then return false end
     end
-    -- the line, to everyone who translates (whose Koetama is there), but not its writer
+    -- the line, to everyone whose Koetama is there and translates (not off in its window), but not its writer
     local queued = false
     local readers = {kt.host}
     for id, st in pairs(kt.players) do
         if kt.joined[id] then readers[#readers + 1] = st end
     end
     for _, st in ipairs(readers) do
-        if st ~= from and #st.translations > 0 and kt.online then
+        if st ~= from and st.into ~= "" and kt.online and kt.features["translate"] then
             queue_line(message, st)
             queued = true
         end

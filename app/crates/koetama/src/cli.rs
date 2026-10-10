@@ -6,6 +6,7 @@
 //!     koetama --cli --list        sound devices;  --device NAME / --mic-device NAME pick one
 //!     koetama --cli --transcribe some.wav --lang ru   a recording through the pipeline
 //!     koetama --cli --auto-speech recorded lines as if spoken (needs the benchmark's export/)
+//!     koetama --cli --translate-into en   the game's chat translated into English
 //!
 //! Ctrl+C stops it.
 use crate::runtime::{MicSource, Options, Runtime, Status};
@@ -75,6 +76,10 @@ struct Args {
     /// join a game hosted on another PC with the code its game showed you (PROTOCOL.md "Hub")
     #[arg(long, value_name = "CODE")]
     join: Option<String>,
+    /// translate the game's chat into this language (en, ja, es, ...; "off" or none: no translation): lines in a
+    /// language you do not speak (--lang, else the game's) are translated, models downloaded when needed
+    #[arg(long = "translate-into", value_name = "CODE")]
+    translate_into: Option<String>,
 }
 
 /// A device given as a name or as its number in --list.
@@ -124,8 +129,8 @@ fn status_line(st: &Status, needs: &str) -> String {
             (sp.muffle * 100.0).round()
         ));
     }
-    if let Some(rules) = &st.translate {
-        parts.push(format!("translate: {}", crate::gui::translate_line(rules)));
+    if let Some(t) = &st.translate {
+        parts.push(format!("translate: {}", crate::gui::translate_line(t)));
     }
     if let Some(v) = &st.voice {
         parts.push(match (v.state, v.heard) {
@@ -412,6 +417,8 @@ pub fn main(argv: Vec<String>) -> i32 {
         },
         no_mic: args.no_mic || args.auto || args.type_,
         io_dir: args.io_dir.clone().map(Into::into),
+        translate_into: args.translate_into.clone().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && l != "off"),
+        translate_downloads: true,
     };
     println!("preparing...");
     let kind = match &args.join {

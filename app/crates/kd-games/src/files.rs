@@ -596,9 +596,9 @@ impl Link {
         self.write_obj(crate::api::translation(id, &cut_translation(text), rule))
     }
 
-    /// The translations' states. False if no game is listening.
-    pub fn send_translations_state(&self, states: &[feed::RuleState]) -> bool {
-        self.write_obj(crate::api::translations_status(states))
+    /// The translation's state (the target, "" off; the pairs in use). False if no game is listening.
+    pub fn send_translations_state(&self, into: &str, states: &[feed::RuleState]) -> bool {
+        self.write_obj(crate::api::translations_status(into, states))
     }
 
     /// Object n of the session (written whole: through <prefix>w<n>.tmp), kept until the game acks it: json (one
@@ -752,7 +752,7 @@ pub(crate) fn as_used(mut feed: Feed, p: &Profile) -> Feed {
         feed.speakers.clear();
     }
     if !p.translate {
-        feed.translations.clear();
+        feed.translate = false;
         feed.to_translate.clear();
     }
     feed
@@ -823,8 +823,8 @@ impl Game for FilesGame {
         self.link.send_translation(id, text, rule)
     }
 
-    fn send_translations_state(&self, rules: &[feed::RuleState]) -> bool {
-        self.link.send_translations_state(rules)
+    fn send_translations_state(&self, into: &str, pairs: &[feed::RuleState]) -> bool {
+        self.link.send_translations_state(into, pairs)
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

@@ -65,8 +65,9 @@ pub trait Game: Send + Sync {
         false
     }
 
-    /// the translations' states, sent when they change. False if no game is listening
-    fn send_translations_state(&self, _rules: &[RuleState]) -> bool {
+    /// the translation's state (PROTOCOL.md "Translation": the language the player's chat is translated into, "" for
+    /// off, and the pairs in use), sent when it changes. False if no game is listening
+    fn send_translations_state(&self, _into: &str, _pairs: &[RuleState]) -> bool {
         false
     }
 

@@ -20,6 +20,8 @@ fn the_kinds_a_player_sends_pass_tagged() {
         r#"{"type":"talking","id":"ana","talking":true}"#,
         r#"{"type":"translation","id":7,"text":"Hello","from":"es","to":"en"}"#,
         r#"{"type":"translations_status","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.4}]}"#,
+        r#"{"type":"translations_status","into":"en","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.4}]}"#,
+        r#"{"type":"translations_status","into":"","translations":[]}"#,
         r#"{"type":"status","speech":"ready","microphone":"open"}"#,
         r#"{"type":"voice","state":"connected","players":["bob",7]}"#,
     ] {
@@ -46,6 +48,8 @@ fn nothing_else_gets_through() {
         (r#"{"type":"speech","kind":"shout","utt":1,"text":"x"}"#, None),
         (r#"{"type":"status","speech":"pwned","microphone":"open"}"#, None),
         (r#"{"type":"translation","id":"7","text":"x"}"#, None),
+        (r#"{"type":"translations_status","into":"en\"x","translations":[]}"#, None),
+        (r#"{"type":"translations_status","into":5,"translations":[]}"#, None),
     ];
     for (o, want) in attempts {
         assert_eq!(from_player(o, &ana()), want, "{o}");

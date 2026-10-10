@@ -281,6 +281,10 @@ pub const MAX_OUTS: usize = 16;
 pub const SOUND_SPEED: f64 = 343.0;
 pub const MAX_DELAY: f64 = 0.5;
 
+fn yes() -> bool {
+    true
+}
+
 /// The loudness at a distance for a voice reaching (near, far): 1 within near, ((far - d) / (far - near))^2 beyond,
 /// 0 from far on (PROTOCOL.md "Positions and ranges").
 pub fn falloff(distance: f64, (near, far): (f64, f64)) -> f64 {
@@ -335,10 +339,10 @@ pub struct Feed {
     /// where the room should live (a relay region, REGIONS); "": wherever the relay puts it (near the first player)
     #[serde(default)]
     pub region: String,
-    /// the player's translations (PROTOCOL.md "Translation"): (from, to) in Koetama's language codes, at most MAX_TRANSLATIONS; empty:
-    /// translation off (translation_pairs)
-    #[serde(default)]
-    pub translations: Vec<(String, String)>,
+    /// the game lets Koetama translate its chat lines now (PROTOCOL.md "Translation"; `"translate": false` stops it
+    /// for a while). What is translated into what is the player's own setting in Koetama, not the game's.
+    #[serde(default = "yes")]
+    pub translate: bool,
     /// the lines the game wants translated (to_translate): (id, text), at most MAX_REQUESTS, each id once; a text that
     /// was not good UTF-8 of at most MAX_REQUEST_BYTES is "" (its reply: "") (translate_requests)
     #[serde(default)]
@@ -368,34 +372,15 @@ pub struct Feed {
     pub raw: String,
 }
 
-/// the most translation rules a feed has
-pub const MAX_TRANSLATIONS: usize = 2;
+/// the most translation pairs a translations_status lists (the pairs in use this session: one per foreign language
+/// seen, Koetama's 29 at most)
+pub const MAX_PAIRS_TOLD: usize = 32;
 /// the most lines to translate in one feed
 pub const MAX_REQUESTS: usize = 16;
 /// the most bytes (UTF-8) of one line to translate
 pub const MAX_REQUEST_BYTES: usize = 400;
 /// the largest request id (15 digits: exact in a Lua number)
 pub const MAX_REQUEST_ID: i64 = 999_999_999_999_999;
-
-/// A language code as a rule names it: 1 to 16 ASCII letters, digits, - or _ (which languages have models is the
-/// translator's business: a rule it has none for is reported "unavailable").
-pub fn lang_code(s: &str) -> bool {
-    (1..=16).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-}
-
-/// The rules as the feed keeps them: good codes only, each rule once, the first MAX_TRANSLATIONS.
-pub fn translation_pairs(rules: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    for r in rules {
-        if out.len() == MAX_TRANSLATIONS {
-            break;
-        }
-        if lang_code(&r.0) && lang_code(&r.1) && !out.contains(&r) {
-            out.push(r);
-        }
-    }
-    out
-}
 
 /// A line to translate as the feed keeps it: good UTF-8 of at most MAX_REQUEST_BYTES, else "" (answered "").
 pub fn request_text(bytes: &[u8]) -> String {
@@ -422,7 +407,7 @@ pub fn translate_requests(items: impl IntoIterator<Item = (Option<i64>, String)>
     out
 }
 
-/// A translation's state, for the game (PROTOCOL.md "Translation": translations_status).
+/// A translation pair's state, for the game (PROTOCOL.md "Translation": translations_status).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuleState {
     pub from: String,

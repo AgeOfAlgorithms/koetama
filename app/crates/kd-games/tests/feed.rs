@@ -83,13 +83,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
     assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
     let to: Vec<i64> = want["to"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
     assert_eq!(f.to, to, "{text}");
-    let translations: Vec<(String, String)> = want["translations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| (r[0].as_str().unwrap().to_string(), r[1].as_str().unwrap().to_string()))
-        .collect();
-    assert_eq!(f.translations, translations, "{text}");
+    assert_eq!(f.translate, want["translate"].as_bool().unwrap(), "{text}");
     let requests: Vec<(i64, String)> = want["to_translate"]
         .as_array()
         .unwrap()
@@ -143,7 +137,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 69);
+    assert_eq!(cases.len(), 70);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -193,6 +187,7 @@ fn objects_byte_identical() {
                 api::translation(a[0].as_i64().unwrap(), a[1].as_str().unwrap(), rule)
             }
             "translations_status" => api::translations_status(
+                a[1].as_str().unwrap(),
                 &a[0]
                     .as_array()
                     .unwrap()

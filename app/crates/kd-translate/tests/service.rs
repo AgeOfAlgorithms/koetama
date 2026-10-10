@@ -1,8 +1,10 @@
-//! The translator (service.rs) with a fake engine and a fake model source: rules, pivots through English, mixed
-//! lines put back together, exactly one reply per id, the rules' states and their changes, models let go.
+//! The translator (service.rs) with a fake engine and a fake model source: the player's target and own languages,
+//! a pair made the first time a language is seen (its line held while the models come), downloads off, pivots
+//! through English, mixed lines put back together, exactly one reply per id, the pairs' states and their changes, the
+//! least recently used pair let go.
 //! (The fake "translation" of a piece into `xx` is `xx(<the piece>)`: what went through which model shows.)
 use kd_common::null_log;
-use kd_translate::service::{Engine, Event, Prepared, Provider, RuleStatus, State, Translator};
+use kd_translate::service::{Engine, Event, PairStatus, Prepared, Provider, State, Status, Translator, MAX_PAIRS};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, Weak};
@@ -26,50 +28,67 @@ impl Engine for Fake {
     }
 }
 
-/// The fake model source: routes by rule; a rule's preparation can be held (gate) to see it downloading.
+/// The fake model source: routes by pair; a pair's preparation can be held (gate) to see it downloading.
 #[derive(Default)]
 struct Source {
     /// "ja>en" -> Prepared (default: one direction "<from>-<to>/1", or two through English)
     special: Mutex<HashMap<String, Prepared>>,
-    /// rules held until released
+    /// pairs held until released
     held: Mutex<Vec<String>>,
     released: Condvar,
     /// directions loaded (how many times), and the engines handed out
     loads: Mutex<Vec<String>>,
     engines: Mutex<Vec<(String, Weak<dyn Engine>)>>,
+    /// every pair asked for, and those whose models were downloaded
     prepared: Mutex<Vec<String>>,
+    downloaded: Mutex<Vec<String>>,
+    /// pairs whose models are on this PC already (the others need a download)
+    on_pc: Mutex<Vec<String>>,
     /// progress steps sent while preparing
     steps: usize,
 }
 
 impl Source {
-    fn hold(&self, rule: &str) {
-        self.held.lock().unwrap().push(rule.into());
+    fn hold(&self, pair: &str) {
+        self.held.lock().unwrap().push(pair.into());
     }
 
-    fn release(&self, rule: &str) {
-        self.held.lock().unwrap().retain(|r| r != rule);
+    fn release(&self, pair: &str) {
+        self.held.lock().unwrap().retain(|r| r != pair);
         self.released.notify_all();
     }
 
     fn alive(&self, id: &str) -> bool {
         self.engines.lock().unwrap().iter().any(|(i, w)| i == id && w.upgrade().is_some())
     }
+
+    fn prepared(&self) -> Vec<String> {
+        self.prepared.lock().unwrap().clone()
+    }
 }
 
 impl Provider for Source {
-    fn prepare(&self, from: &str, to: &str, progress: &dyn Fn(u64, u64)) -> Prepared {
-        let rule = format!("{from}>{to}");
-        self.prepared.lock().unwrap().push(rule.clone());
-        for i in 0..=self.steps {
-            progress(i as u64 * 10, self.steps.max(1) as u64 * 10);
+    fn prepare(&self, from: &str, to: &str, download: bool, progress: &dyn Fn(u64, u64)) -> Prepared {
+        let pair = format!("{from}>{to}");
+        self.prepared.lock().unwrap().push(pair.clone());
+        if let Some(p @ Prepared::Unavailable(_)) = self.special.lock().unwrap().get(&pair) {
+            return p.clone();
+        }
+        if !self.on_pc.lock().unwrap().contains(&pair) {
+            if !download {
+                return Prepared::NotDownloaded(format!("{pair}: not on this PC"));
+            }
+            self.downloaded.lock().unwrap().push(pair.clone());
+            for i in 0..=self.steps {
+                progress(i as u64 * 10, self.steps.max(1) as u64 * 10);
+            }
         }
         let mut held = self.held.lock().unwrap();
-        while held.contains(&rule) {
+        while held.contains(&pair) {
             held = self.released.wait(held).unwrap();
         }
         drop(held);
-        if let Some(p) = self.special.lock().unwrap().get(&rule) {
+        if let Some(p) = self.special.lock().unwrap().get(&pair) {
             return p.clone();
         }
         let ids: Vec<String> = if from == "en" || to == "en" {
@@ -118,11 +137,16 @@ fn rig() -> Rig {
     rig_with(Source::default())
 }
 
-fn rules(r: &[(&str, &str)]) -> Vec<(String, String)> {
-    r.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+fn langs(l: &[&str]) -> Vec<String> {
+    l.iter().map(|s| s.to_string()).collect()
 }
 
 impl Rig {
+    /// The player's setting: translate into `into` ("" off), speaking `known`, downloads on.
+    fn set(&self, into: &str, known: &[&str]) {
+        self.t.set_target(Some(into.to_string()), langs(known), true);
+    }
+
     /// Waits (at most 5 s) until the events satisfy `cond`.
     fn wait(&self, what: &str, cond: impl Fn(&[Event]) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -134,11 +158,12 @@ impl Rig {
         }
     }
 
+    /// Waits until the last status told is `wire` (Status::wire: "en:ja>en=ready").
     fn status_is(&self, wire: &str) {
         let wire = wire.to_string();
         self.wait(&format!("status {wire}"), |ev| {
             ev.iter().rev().find_map(|e| match e {
-                Event::Status(s) => Some(kd_translate::service::status_text(s)),
+                Event::Status(s) => Some(s.wire()),
                 _ => None,
             }) == Some(wire.clone())
         });
@@ -170,7 +195,7 @@ impl Rig {
         r[before].clone()
     }
 
-    fn statuses(&self) -> Vec<Vec<RuleStatus>> {
+    fn statuses(&self) -> Vec<Status> {
         self.events
             .0
             .lock()
@@ -184,14 +209,21 @@ impl Rig {
     }
 }
 
+const JA: &str = "こんにちは、元気ですか？";
+const KO: &str = "오늘 같이 게임할 사람?";
+const ZH: &str = "我们今天去哪里玩？";
+const ES: &str = "¿Alguien sabe dónde está la llave del sótano?";
+const RU: &str = "Привет, как дела? Это русский текст.";
+
 #[test]
-fn rules_and_lines() {
+fn lines_into_the_target() {
     let r = rig();
-    r.t.set_rules(&rules(&[("ja", "en"), ("ko", "en")]));
-    r.status_is("ja>en=ready,ko>en=ready");
-    assert_eq!(r.ask(1, "こんにちは、元気ですか？"), "en(こんにちは、元気ですか？)");
-    assert_eq!(r.ask(2, "오늘 같이 게임할 사람?"), "en(오늘 같이 게임할 사람?)");
-    assert_eq!(r.ask(3, "Does anyone know where the key is?"), "", "nothing in a rule's language: empty");
+    r.set("en", &["en"]);
+    r.status_is("en:");
+    assert_eq!(r.ask(1, JA), format!("en({JA})"), "a language seen the first time: its pair made, the line waits");
+    assert_eq!(r.ask(2, KO), format!("en({KO})"));
+    r.status_is("en:ja>en=ready,ko>en=ready");
+    assert_eq!(r.ask(3, "Does anyone know where the key is?"), "", "the player's own language: empty");
     assert_eq!(r.ask(4, "   "), "");
     assert_eq!(r.ask(5, ""), "");
     // (mixed: the Japanese translated, the English kept, the order kept)
@@ -205,63 +237,224 @@ fn rules_and_lines() {
     );
     // (a failing engine: that piece kept; nothing translated - empty)
     assert_eq!(r.ask(8, "FAILです"), "");
-    assert_eq!(r.t.status().len(), 2);
+    assert_eq!(r.t.status().pairs.len(), 2);
+    assert_eq!(r.src.prepared(), ["ja>en", "ko>en"], "each pair made once");
     r.t.stop();
 }
 
 #[test]
-fn pivots_and_targets() {
+fn own_languages_left_alone() {
     let r = rig();
-    r.t.set_rules(&rules(&[("ja", "ko"), ("en", "ja")]));
-    r.status_is("ja>ko=ready,en>ja=ready");
+    r.set("en", &["en", "ja"]);
+    assert_eq!(r.ask(1, JA), "", "Japanese is the player's");
+    assert_eq!(r.ask(2, KO), format!("en({KO})"));
+    assert_eq!(
+        r.ask(3, "上の階に宝物があるはずです。 오늘 같이 게임할 사람?"),
+        "上の階に宝物があるはずです。en(오늘 같이 게임할 사람?)",
+        "in a mixed line, only the stretch the player does not speak"
+    );
+    assert!(!r.src.prepared().contains(&"ja>en".to_string()), "no pair for a language the player speaks");
+    // (the target is left alone too, spoken or not)
+    r.set("ko", &["en"]);
+    r.status_is("ko:");
+    assert_eq!(r.ask(4, KO), "", "a line already in the target");
+    assert_eq!(r.ask(5, "Does anyone know where the key is?"), "");
+    assert_eq!(r.ask(6, JA), format!("ko(en({JA}))"));
+    // (Chinese and Cantonese are one for the player)
+    r.set("ja", &["zh"]);
+    assert_eq!(r.ask(7, "你哋今晚去邊度玩？"), "", "a Chinese speaker reads Cantonese");
+    assert_eq!(r.ask(8, "Where are we going tonight?"), "ja(Where are we going tonight?)", "English is not theirs");
+    r.t.stop();
+}
+
+#[test]
+fn a_language_now_spoken_lets_go_of_its_pair() {
+    let r = rig();
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(1, JA), format!("en({JA})"));
+    r.status_is("en:ja>en=ready");
+    assert!(r.src.alive("ja-en/1"));
+    r.set("en", &["en", "ja"]);
+    r.status_is("en:");
+    assert_eq!(r.ask(2, JA), "");
+    assert!(!r.src.alive("ja-en/1"), "its model let go");
+    // (another target: every pair goes)
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(3, KO), format!("en({KO})"));
+    r.status_is("en:ko>en=ready");
+    r.set("ja", &["en"]);
+    r.status_is("ja:");
+    assert!(!r.src.alive("ko-en/1"));
+    assert_eq!(r.ask(4, KO), format!("ja(en({KO}))"));
+    r.status_is("ja:ko>ja=ready");
+    // (the same setting again: nothing happens - no new preparation)
+    let n = r.src.prepared().len();
+    r.set("ja", &["en"]);
+    r.set("ja", &["en"]);
+    assert_eq!(r.ask(5, "감사합니다 여러분"), "ja(en(감사합니다 여러분))");
+    assert_eq!(r.src.prepared().len(), n);
+    r.t.stop();
+}
+
+#[test]
+fn pivots_through_english() {
+    let r = rig();
+    r.set("ko", &["en"]);
     assert_eq!(r.ask(1, "ありがとう"), "ko(en(ありがとう))", "two models through English");
-    // (into Japanese; two translated pieces: a space between them unless one side is Chinese or Japanese)
-    assert_eq!(r.ask(2, "Thank you very much for the help"), "ja(Thank you very much for the help)");
+    assert_eq!(r.ask(2, ES), format!("ko(en({ES}))"));
     assert_eq!(
         r.ask(3, "This is my favourite song. 「さくら」が好きです"),
-        "ja(This is my favourite song.) ko(en(「さくら」が好きです))"
+        "This is my favourite song. ko(en(「さくら」が好きです))"
     );
     let loads = r.src.loads.lock().unwrap().clone();
-    assert_eq!(loads.iter().filter(|l| l.as_str() == "en-ja/1").count(), 1);
+    assert_eq!(loads.iter().filter(|l| l.as_str() == "en-ko/1").count(), 1, "the shared direction loaded once");
+    // (into Japanese, the player speaking Korean: English pieces translated; two translated pieces with a space
+    //  between them unless one side is Chinese or Japanese)
+    r.set("ja", &["ko"]);
+    assert_eq!(r.ask(4, "Thank you very much for the help"), "ja(Thank you very much for the help)");
     r.t.stop();
 }
 
 #[test]
-fn shared_direction_loaded_once_and_unused_let_go() {
+fn a_new_language_is_fetched_and_its_line_held() {
+    let src = Source { steps: 50, ..Default::default() };
+    src.hold("ja>en");
+    let r = rig_with(src);
+    r.set("en", &["en"]);
+    r.status_is("en:");
+    assert!(r.src.prepared().is_empty(), "nothing fetched before a language shows up");
+    // (not ready: the line waits for the models - no "" that would lose it)
+    assert!(r.t.request(1, JA));
+    r.status_is("en:ja>en=downloading 100");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(r.replies(1).is_empty(), "held while the models come");
+    // (a line in the player's own language behind it waits its turn: the replies keep the lines' order)
+    assert!(r.t.request(2, "Does anyone know where the key is?"));
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(r.replies(2).is_empty());
+    r.src.release("ja>en");
+    r.status_is("en:ja>en=ready");
+    let t0 = Instant::now();
+    while r.replies(2).is_empty() && t0.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(r.replies(1), vec![format!("en({JA})")], "answered once they are ready");
+    assert_eq!(r.replies(2), vec![String::new()]);
+    assert_eq!(r.ask(3, JA), format!("en({JA})"));
+    let seen: Vec<String> = r.statuses().iter().map(Status::wire).collect();
+    // (loading until the first bytes come: models already here never show "downloading")
+    assert_eq!(seen.first().map(String::as_str), Some("en:"));
+    assert_eq!(seen.get(1).map(String::as_str), Some("en:ja>en=loading"));
+    assert!(seen.iter().any(|s| s.starts_with("en:ja>en=downloading")), "{seen:?}");
+    assert_eq!(seen.last().map(String::as_str), Some("en:ja>en=ready"));
+    // (fifty progress steps in a moment: told at most every 0.5 s, plus the last one)
+    let downloading = seen.iter().filter(|s| s.contains("downloading")).count();
+    assert!(downloading <= 3, "{seen:?}");
+    // (each status told is a change)
+    assert!(seen.windows(2).all(|w| w[0] != w[1]), "{seen:?}");
+    r.t.stop();
+}
+
+#[test]
+fn downloads_off() {
+    let src = Source::default();
+    src.on_pc.lock().unwrap().push("es>en".into());
+    let r = rig_with(src);
+    r.t.set_target(Some("en".into()), langs(&["en"]), false);
+    assert_eq!(r.ask(1, JA), "", "its models are not here: nothing downloaded, the reply empty");
+    r.status_is("en:ja>en=unavailable");
+    assert_eq!(r.t.status().pairs[0].state, State::NotDownloaded, "the window tells it apart");
+    assert!(r.src.downloaded.lock().unwrap().is_empty(), "no download");
+    assert_eq!(r.ask(2, ES), format!("en({ES})"), "models already on this PC are used");
+    assert_eq!(r.ask(3, JA), "", "not asked again while downloads are off");
+    assert_eq!(r.src.prepared().iter().filter(|p| *p == "ja>en").count(), 1);
+    // (downloads on: the pair is made again the next time its language shows up)
+    r.t.set_target(Some("en".into()), langs(&["en"]), true);
+    r.status_is("en:es>en=ready");
+    assert_eq!(r.ask(4, JA), format!("en({JA})"));
+    assert_eq!(*r.src.downloaded.lock().unwrap(), ["ja>en"]);
+    r.status_is("en:es>en=ready,ja>en=ready");
+    r.t.stop();
+}
+
+#[test]
+fn off_means_nothing() {
     let r = rig();
-    r.t.set_rules(&rules(&[("ja", "en"), ("ko", "ja")]));
-    r.status_is("ja>en=ready,ko>ja=ready");
-    assert!(r.src.alive("ja-en/1") && r.src.alive("ko-en/1") && r.src.alive("en-ja/1"));
-    // (ja > en no more: its model goes, the others stay)
-    r.t.set_rules(&rules(&[("ko", "ja")]));
-    r.status_is("ko>ja=ready");
-    assert_eq!(r.ask(1, "안녕하세요 여러분"), "ja(en(안녕하세요 여러분))");
-    assert!(!r.src.alive("ja-en/1"), "a model no rule uses is let go");
-    assert!(r.src.alive("ko-en/1") && r.src.alive("en-ja/1"));
-    // (the same rules again: nothing happens - no new preparation)
-    let n = r.src.prepared.lock().unwrap().len();
-    r.t.set_rules(&rules(&[("ko", "ja")]));
-    r.t.set_rules(&rules(&[("ko", "ja")]));
-    assert_eq!(r.ask(2, "감사합니다"), "ja(en(감사합니다))");
-    assert_eq!(r.src.prepared.lock().unwrap().len(), n);
-    // (no rules: off - everything let go, every line empty)
-    r.t.set_rules(&[]);
+    // (off until the player chooses a language)
+    assert_eq!(r.ask(1, JA), "");
+    assert_eq!(r.ask(2, ES), "");
+    assert!(r.src.prepared().is_empty(), "nothing fetched while off");
+    assert_eq!(r.t.status(), Status::default());
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(3, JA), format!("en({JA})"));
+    // (off again: every pair let go, every line empty)
+    r.t.set_target(None, langs(&["en"]), true);
     r.status_is("");
-    assert_eq!(r.ask(3, "감사합니다"), "");
-    assert!(!r.src.alive("ko-en/1") && !r.src.alive("en-ja/1"));
+    assert_eq!(r.ask(4, JA), "");
+    assert!(!r.src.alive("ja-en/1"));
+    r.set("en", &["en"]);
+    r.t.set_target(Some(String::new()), langs(&["en"]), true);
+    r.status_is("");
+    assert_eq!(r.ask(5, JA), "", "\"\" is off too");
+    assert_eq!(r.src.prepared(), ["ja>en"]);
+    r.t.stop();
+}
+
+#[test]
+fn the_least_recently_used_pair_goes() {
+    assert_eq!(MAX_PAIRS, 4);
+    let r = rig();
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(1, JA), format!("en({JA})"));
+    assert_eq!(r.ask(2, KO), format!("en({KO})"));
+    assert_eq!(r.ask(3, ZH), format!("en({ZH})"));
+    assert_eq!(r.ask(4, ES), format!("en({ES})"));
+    r.status_is("en:ja>en=ready,ko>en=ready,zh>en=ready,es>en=ready");
+    // (Japanese used again: Korean is now the least recently used)
+    assert_eq!(r.ask(5, JA), format!("en({JA})"));
+    assert_eq!(r.ask(6, RU), format!("en({RU})"));
+    r.status_is("en:ja>en=ready,zh>en=ready,es>en=ready,ru>en=ready");
+    assert!(!r.src.alive("ko-en/1"), "Korean's model let go");
+    assert!(r.src.alive("ja-en/1") && r.src.alive("ru-en/1"));
+    // (Korean again: made again, and Chinese - now the least recently used - goes)
+    assert_eq!(r.ask(7, KO), format!("en({KO})"));
+    r.status_is("en:ja>en=ready,es>en=ready,ru>en=ready,ko>en=ready");
+    assert!(!r.src.alive("zh-en/1"));
+    // (pairs without models do not count: an unavailable one is listed, nothing else goes)
+    r.src.special.lock().unwrap().insert("mt>en".into(), Prepared::Unavailable("no model".into()));
+    assert_eq!(r.ask(8, "Xi ħadd jaf fejn hu ċ-ċavetta tal-bieb?"), "");
+    r.status_is("en:ja>en=ready,es>en=ready,ru>en=ready,ko>en=ready,mt>en=unavailable");
+    r.t.stop();
+}
+
+#[test]
+fn short_lines_stay_the_players() {
+    // (a Spanish speaker reading Spanish: "ok", "lol", "gg" are too short to tell - their own language first)
+    let r = rig();
+    r.set("es", &["es"]);
+    for (i, line) in ["ok", "lol", "gg", "ok ok", "jajaja"].iter().enumerate() {
+        assert_eq!(r.ask(i as i64 + 1, line), "", "{line}");
+    }
+    // (an English speaker reading English)
+    r.set("en", &["en"]);
+    for (i, line) in ["ok", "lol", "gg wp", "brb", "np"].iter().enumerate() {
+        assert_eq!(r.ask(i as i64 + 10, line), "", "{line}");
+    }
+    assert!(r.src.prepared().is_empty(), "no pair made for a short line: {:?}", r.src.prepared());
+    // (longer lines are translated as before)
+    assert_eq!(r.ask(20, ES), format!("en({ES})"));
     r.t.stop();
 }
 
 #[test]
 fn one_reply_per_id() {
     let r = rig();
-    r.t.set_rules(&rules(&[("es", "en")]));
-    r.status_is("es>en=ready");
-    assert_eq!(r.ask(7, "¿Alguien sabe dónde está la llave?"), "en(¿Alguien sabe dónde está la llave?)");
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(7, ES), format!("en({ES})"));
     // (the game keeps the line in its feed until it reads the reply: asked again, ignored)
-    assert!(!r.t.request(7, "¿Alguien sabe dónde está la llave?"));
+    assert!(!r.t.request(7, ES));
     assert!(!r.t.request(7, "something else"));
-    assert_eq!(r.ask(8, "Hola a todos, ¿qué tal la partida?"), "en(Hola a todos, ¿qué tal la partida?)");
+    assert_eq!(r.ask(8, "Hola a todos, ¿qué tal la partida de hoy?"), "en(Hola a todos, ¿qué tal la partida de hoy?)");
     assert_eq!(r.replies(7).len(), 1);
     // (a new session: the ids start over)
     r.t.new_session();
@@ -272,13 +465,13 @@ fn one_reply_per_id() {
 #[test]
 fn a_new_session_drops_what_is_queued() {
     let r = rig();
-    r.t.set_rules(&rules(&[("es", "en")]));
-    r.status_is("es>en=ready");
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(100, ES), format!("en({ES})"));
     // (the translator busy with a slow line; more queued behind it; then a new session: the queued ones are never
     // answered - their ids may be new lines' now - and the new session's line is)
-    assert!(r.t.request(1, "Hola SLOW a todos, ¿qué tal la partida?"));
+    assert!(r.t.request(1, "Hola SLOW a todos, ¿qué tal la partida de hoy?"));
     for id in 2..=20 {
-        assert!(r.t.request(id, "Hola a todos, ¿qué tal la partida?"));
+        assert!(r.t.request(id, "Hola a todos, ¿qué tal la partida de hoy?"));
     }
     r.t.new_session();
     assert_eq!(r.ask(2, "Buenas noches a todos los jugadores"), "en(Buenas noches a todos los jugadores)");
@@ -290,76 +483,36 @@ fn a_new_session_drops_what_is_queued() {
 }
 
 #[test]
-fn states_downloading_loading_ready() {
-    let src = Source { steps: 50, ..Default::default() };
-    src.hold("ja>en");
-    let r = rig_with(src);
-    r.t.set_rules(&rules(&[("ja", "en")]));
-    r.status_is("ja>en=downloading 100");
-    // (not ready: the line waits for the models - no "" that would lose it)
-    assert!(r.t.request(1, "こんにちは"));
-    std::thread::sleep(Duration::from_millis(300));
-    assert!(r.replies(1).is_empty(), "held while the models come");
-    r.src.release("ja>en");
-    r.status_is("ja>en=ready");
-    let t0 = std::time::Instant::now();
-    while r.replies(1).is_empty() && t0.elapsed() < Duration::from_secs(5) {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert_eq!(r.replies(1), vec!["en(こんにちは)".to_string()], "answered once they are ready");
-    assert_eq!(r.ask(2, "こんにちは"), "en(こんにちは)");
-    let seen: Vec<String> = r.statuses().iter().map(|s| kd_translate::service::status_text(s)).collect();
-    // (loading until the first bytes come: models already here never show "downloading")
-    assert_eq!(seen.first().map(String::as_str), Some("ja>en=loading"));
-    assert!(seen.iter().any(|s| s.starts_with("ja>en=downloading")), "{seen:?}");
-    assert!(seen.contains(&"ja>en=loading".to_string()), "{seen:?}");
-    assert_eq!(seen.last().map(String::as_str), Some("ja>en=ready"));
-    // (fifty progress steps in a moment: told at most every 0.5 s, plus the last one)
-    let downloading = seen.iter().filter(|s| s.contains("downloading")).count();
-    assert!(downloading <= 3, "{seen:?}");
-    // (each status told is a change)
-    assert!(seen.windows(2).all(|w| w[0] != w[1]), "{seen:?}");
-    r.t.stop();
-}
-
-#[test]
 fn unavailable_and_errors() {
     let src = Source::default();
     src.special.lock().unwrap().insert("mt>en".into(), Prepared::Unavailable("no model".into()));
     src.special.lock().unwrap().insert("fi>en".into(), Prepared::Error("offline".into()));
     src.special.lock().unwrap().insert("sv>en".into(), Prepared::Ready(vec![("broken/1".into(), PathBuf::from("x"))]));
     let r = rig_with(src);
-    r.t.set_rules(&rules(&[("mt", "en"), ("fi", "en")]));
-    r.status_is("mt>en=unavailable,fi>en=error");
+    r.set("en", &["en"]);
     assert_eq!(r.ask(1, "Xi ħadd jaf fejn hu ċ-ċavetta tal-bieb?"), "");
     assert_eq!(r.ask(2, "Tietääkö kukaan, missä punaisen oven avain on?"), "");
-    // (rules Koetama can never have: unavailable without asking for models)
-    r.t.set_rules(&rules(&[("ja", "ja"), ("en", "yue")]));
-    r.status_is("ja>ja=unavailable,en>yue=unavailable");
-    assert!(!r.src.prepared.lock().unwrap().iter().any(|p| p == "ja>ja" || p == "en>yue"));
-    r.t.set_rules(&rules(&[("xx", "en"), ("sv", "en")]));
-    r.status_is("xx>en=unavailable,sv>en=error");
-    // (more than two rules: the first two)
-    r.t.set_rules(&rules(&[("ja", "en"), ("ko", "en"), ("zh", "en")]));
-    r.status_is("ja>en=ready,ko>en=ready");
+    assert_eq!(r.ask(3, "Vet någon var nyckeln till den röda dörren är?"), "");
+    r.status_is("en:mt>en=unavailable,fi>en=error,sv>en=error");
+    // (a target Koetama can never have models for - Cantonese: every pair unavailable without asking for models)
+    let n = r.src.prepared().len();
+    r.set("yue", &["en"]);
+    assert_eq!(r.ask(4, JA), "");
+    r.status_is("yue:ja>yue=unavailable");
+    assert_eq!(r.src.prepared().len(), n);
     r.t.stop();
 }
 
 #[test]
-fn chinese_and_cantonese_stand_in() {
+fn cantonese_is_its_own_pair() {
     let r = rig();
-    r.t.set_rules(&rules(&[("yue", "en")]));
-    r.status_is("yue>en=ready");
+    r.set("en", &["en"]);
     assert_eq!(r.ask(1, "你哋今晚去邊度玩？"), "en(你哋今晚去邊度玩？)");
-    assert_eq!(
-        r.ask(2, "我们今天去哪里玩？"),
-        "en(我们今天去哪里玩？)",
-        "Chinese through the Cantonese rule when there is no Chinese one"
-    );
-    r.t.set_rules(&rules(&[("zh", "en"), ("yue", "ja")]));
-    r.status_is("zh>en=ready,yue>ja=ready");
-    assert_eq!(r.ask(3, "我们今天去哪里玩？"), "en(我们今天去哪里玩？)");
-    assert_eq!(r.ask(4, "你哋今晚去邊度玩？"), "ja(en(你哋今晚去邊度玩？))", "each to its own rule");
+    assert_eq!(r.ask(2, ZH), format!("en({ZH})"));
+    r.status_is("en:yue>en=ready,zh>en=ready");
+    // (into Chinese: Cantonese is left alone - the same written language for the player)
+    r.set("zh", &["en"]);
+    assert_eq!(r.ask(3, "你哋今晚去邊度玩？"), "");
     r.t.stop();
 }
 
@@ -367,9 +520,9 @@ fn chinese_and_cantonese_stand_in() {
 fn unchanged_translation_is_empty() {
     let r = rig();
     // (the fake de -> en model gives the text back: nothing to show)
-    r.t.set_rules(&rules(&[("de", "en")]));
-    r.status_is("de>en=ready");
-    assert_eq!(r.ask(1, "Ich habe den Schlüssel gefunden."), "");
+    r.set("en", &["en"]);
+    assert_eq!(r.ask(1, "Ich habe den Schlüssel im Keller gefunden."), "");
+    r.status_is("en:de>en=ready");
     r.t.stop();
 }
 
@@ -378,4 +531,7 @@ fn state_words() {
     assert_eq!(State::Downloading(0.5).wire(), "downloading 50");
     assert_eq!(State::Downloading(0.5).word(), "downloading");
     assert_eq!(State::Ready.wire(), "ready");
+    assert_eq!(State::NotDownloaded.wire(), "unavailable");
+    let p = PairStatus { from: "ja".into(), to: "en".into(), state: State::NotDownloaded };
+    assert_eq!(p.common().state, "unavailable");
 }

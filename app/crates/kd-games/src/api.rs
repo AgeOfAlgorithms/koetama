@@ -172,8 +172,14 @@ pub fn from_player(object: &str, player: &PlayerId) -> Option<String> {
             }
         }
         "translations_status" => {
+            // ("into": a language code, or "" - translation off; an older Koetama leaves it out)
+            let into = match v.get("into") {
+                None => String::new(),
+                Some(Value::String(s)) if s.is_empty() => String::new(),
+                x => lang(x)?,
+            };
             let mut states = Vec::new();
-            for r in v.get("translations")?.as_array()?.iter().take(feed::MAX_TRANSLATIONS) {
+            for r in v.get("translations")?.as_array()?.iter().take(feed::MAX_PAIRS_TOLD) {
                 states.push(RuleState {
                     from: lang(r.get("from"))?,
                     to: lang(r.get("to"))?,
@@ -184,7 +190,7 @@ pub fn from_player(object: &str, player: &PlayerId) -> Option<String> {
                     progress: r.get("progress").and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(0.0),
                 });
             }
-            translations_status(&states)
+            translations_status(&into, &states)
         }
         "status" => status(
             one_of("speech", &["off", "loading", "ready", "error"])?,
@@ -211,9 +217,10 @@ pub fn from_player(object: &str, player: &PlayerId) -> Option<String> {
 static LANG: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$").expect("a valid regex"));
 
-/// {"type":"translations_status","translations":[{"from":..,"to":..,"state":..[,"progress":0..1]}]}: each
-/// translation's state; "progress" (to 1/100) only while downloading.
-pub fn translations_status(states: &[RuleState]) -> String {
+/// {"type":"translations_status","into":..,"translations":[{"from":..,"to":..,"state":..[,"progress":0..1]}]}: the
+/// language the player's chat is translated into ("" off) and each pair in use, its state; "progress" (to 1/100)
+/// only while downloading.
+pub fn translations_status(into: &str, states: &[RuleState]) -> String {
     let items: Vec<String> = states
         .iter()
         .map(|r| {
@@ -225,7 +232,7 @@ pub fn translations_status(states: &[RuleState]) -> String {
             format!("{{\"from\":{},\"to\":{},\"state\":{}{progress}}}", js(&r.from), js(&r.to), js(&r.state))
         })
         .collect();
-    format!("{{\"type\":\"translations_status\",\"translations\":[{}]}}", items.join(","))
+    format!("{{\"type\":\"translations_status\",\"into\":{},\"translations\":[{}]}}", js(into), items.join(","))
 }
 
 /// An object as the files connector's teardown-prefab format writes it: a prefab whose body's tag j holds the
@@ -720,21 +727,6 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         }
         Some(_) => return Err("\"transmit\" must be true, false or a list of at most 256 player ids".into()),
     };
-    let translations = match v.get("translations") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(x) if list(x).is_some_and(|a| a.len() <= 16) => {
-            let a = list(x).unwrap_or_default();
-            let mut pairs = Vec::new();
-            for t in a {
-                match (t.get("from"), t.get("to")) {
-                    (Some(Value::String(from)), Some(Value::String(to))) => pairs.push((from.clone(), to.clone())),
-                    _ => return Err("each of \"translations\" must be {\"from\": a language code, \"to\": a language code}".into()),
-                }
-            }
-            feed::translation_pairs(pairs)
-        }
-        Some(_) => return Err("\"translations\" must be a list of at most 16 {\"from\", \"to\"} pairs".into()),
-    };
     let to_translate = match v.get("to_translate") {
         None | Some(Value::Null) => Vec::new(),
         Some(x) if list(x).is_some_and(|a| a.len() <= 64) => {
@@ -768,7 +760,7 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         me,
         to,
         region,
-        translations,
+        translate: flag(v, "translate", true)?,
         to_translate,
         me_id,
         name: short_text(v.get("name")),

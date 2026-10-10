@@ -173,8 +173,8 @@ impl Game for JoinedGame {
         self.to_hub(vec![api::translation(id, &cut_translation(text), rule)])
     }
 
-    fn send_translations_state(&self, states: &[RuleState]) -> bool {
-        self.to_hub(vec![api::translations_status(states)])
+    fn send_translations_state(&self, into: &str, states: &[RuleState]) -> bool {
+        self.to_hub(vec![api::translations_status(into, states)])
     }
 
     fn set_standing(&self, kind: &'static str, object: String) {

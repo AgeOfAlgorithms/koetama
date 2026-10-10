@@ -316,15 +316,23 @@ fn detect_alphabetic_with(text: &str, g: Group, function_words: bool) -> (Option
         }
         c => c,
     };
-    // (a short or unsure text whose language is not one the player translates from or into: those first - a chat
-    //  line of four Spanish words reads as Hungarian or Slovene to the trigrams, but the player said Spanish is
-    //  likely; the letters still rule a language out)
+    // (a short or unsure text whose language is not one the line is likely in - the player's own, the one chat is
+    //  translated into: those first - "ok" or "lol" is the player's, not a language picked from three letters. The
+    //  letters still rule a language out: one with a letter it never writes ("¿Dónde estás?" is not English), or
+    //  whose little words are clearly fewer than the detected language's ("Buenas noches a todos los jugadores")
     let preferred = PREFERRED.with(|p| p.borrow().clone());
     if !preferred.is_empty()
         && code.is_none_or(|c| !preferred.contains(&c))
         && (words(text) < PREFER_WORDS || info.confidence() < PREFER_BELOW)
     {
-        let likely: Vec<&(&'static str, Lang, &str)> = allowed.iter().copied().filter(|t| preferred.contains(&t.0)).collect();
+        // (the detected language's little words in it - counted from MIN_WORDS words: "no" is English too)
+        let most = match code {
+            Some(c) if g == Group::Latin && words(text) >= MIN_WORDS => function_word_hits(&lower, c),
+            _ => 0,
+        };
+        let plausible = |l: &str| g != Group::Latin || (writes_all(l, &lower) && most <= function_word_hits(&lower, l));
+        let likely: Vec<&(&'static str, Lang, &str)> =
+            allowed.iter().copied().filter(|t| preferred.contains(&t.0) && plausible(t.0)).collect();
         match likely.len() {
             0 => {}
             1 => return (Some(likely[0].0), info.confidence()),
@@ -344,7 +352,7 @@ pub const PREFER_WORDS: usize = 6;
 pub const PREFER_BELOW: f64 = 0.5;
 
 thread_local! {
-    /// the languages a line is most likely in (the translations' languages and English; empty: none) - set by
+    /// the languages a line is most likely in (the player's own and the one chat is translated into; empty: none) - set by
     /// stretches_preferring for the time of one line
     static PREFERRED: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -355,7 +363,7 @@ const FUNCTION_WORDS_BELOW: f64 = 0.5;
 /// The commonest little words of each Latin language (a short chat line has too few trigrams; it has these).
 const FUNCTION_WORDS: [(&str, &str); 20] = [
     ("en", "the you your and are is was what this that with have get here there just don't can't i'm it's let's it we they he she my me to for not but out how why where when will would can do go i of"),
-    ("es", "el la los las que de y en un una es no por para con lo se del al como pero más está qué yo tú muy hay eso"),
+    ("es", "el la los las que de y en un una es no por para con lo se del al como pero más está qué yo tú muy hay eso a todos hola"),
     ("fr", "le la les de des et est un une je tu il elle nous vous ne pas que qui dans pour avec ce ça c'est sur mais au du on j'ai"),
     ("de", "der die das und ist nicht ich du er sie wir ihr ein eine zu mit auf für den dem auch es was wie aber noch hier mal bin"),
     ("it", "il lo la gli le di e è che non un una per con del della sono ho io tu ma come questo qui anche cosa perché"),
@@ -375,6 +383,38 @@ const FUNCTION_WORDS: [(&str, &str); 20] = [
     ("lt", "ir kad su į ne aš tu jis mes yra bet kas tai iš kaip labai"),
     ("sl", "in je v na da se za so ne sem kaj to ali jaz ti kako ki"),
 ];
+
+/// The letters beyond a-z each Latin language writes (a text with another one is not in it; the preference for the
+/// player's languages uses this: detect_alphabetic).
+const OWN_LETTERS: [(&str, &str); 21] = [
+    ("en", ""),
+    ("es", "áéíóúüñ"),
+    ("fr", "àâæçéèêëîïôœùûüÿ"),
+    ("de", "äöüß"),
+    ("it", "àèéìíîòóùú"),
+    ("pt", "áâãàçéêíóôõúü"),
+    ("nl", "éëïöüáèóú"),
+    ("pl", "ąćęłńóśźż"),
+    ("cs", "áčďéěíňóřšťúůýž"),
+    ("sk", "áäčďéíĺľňóôŕšťúýž"),
+    ("ro", "ăâîșțşţ"),
+    ("hr", "čćđšž"),
+    ("fi", "äöåšž"),
+    ("sv", "åäöé"),
+    ("hu", "áéíóöőúüű"),
+    ("da", "æøåé"),
+    ("et", "äöõüšž"),
+    ("lv", "āčēģīķļņšūž"),
+    ("lt", "ąčęėįšųūž"),
+    ("sl", "čšžćđ"),
+    ("mt", "ċġħżàèìòù"),
+];
+
+/// Every letter of a (lower-case) text is one `lang` writes (a-z, or its OWN_LETTERS).
+fn writes_all(lang: &str, lower: &str) -> bool {
+    let own = OWN_LETTERS.iter().find(|(l, _)| *l == lang).map_or("", |(_, o)| *o);
+    lower.chars().filter(|c| c.is_alphabetic() && !c.is_ascii_alphabetic()).all(|c| own.contains(c))
+}
 
 /// How many of a (lower-case) text's words are among a language's FUNCTION_WORDS.
 fn function_word_hits(lower: &str, lang: &str) -> usize {
@@ -538,7 +578,7 @@ fn split_run(text: &str, g: Group, main: Option<&'static str>) -> Vec<(usize, us
     out
 }
 
-/// stretches(), with the languages the line is most likely in (the player's translations' languages, English): a
+/// stretches(), with the languages the line is most likely in (the player's own, the one chat is translated into): a
 /// short or unsure stretch is told among those first (PREFER_WORDS, PREFER_BELOW).
 pub fn stretches_preferring(line: &str, likely: &[&str]) -> Vec<Stretch> {
     let codes: Vec<&'static str> = LANGS.iter().copied().filter(|l| likely.contains(l)).collect();
@@ -623,6 +663,11 @@ pub fn stretches(line: &str) -> Vec<Stretch> {
 /// again (Chinese and Japanese write no spaces; Korean does).
 pub fn no_space(c: char) -> bool {
     matches!(script(c), Script::Han | Script::Kana) || in_ranges(c as u32, &[(0x3000, 0x303F), (0xFF00, 0xFF65)])
+}
+
+/// One of Koetama's languages written in the Latin alphabet (the detector chooses among these for a Latin stretch).
+pub fn latin(lang: &str) -> bool {
+    lang == "mt" || LATIN.iter().any(|t| t.0 == lang)
 }
 
 #[cfg(test)]

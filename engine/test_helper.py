@@ -104,10 +104,13 @@ check(f and f['room'] == room and f['me'] == rid(7) and f['to'] == [rid(2), rid(
       'the voice room; ids as the room numbers them; to: each once, not me')
 f = H.parse_feed(hexfeed(room=room, key='zz', me=7, region='weur'))
 check(f and f['room'] == '' and f['me'] == 0 and f['region'] == '', 'a bad key: no room (and no region)')
-f6 = H.parse_feed(hexfeed(translations=[dict(to='en', **{'from': 'ja'}), dict(to='en', **{'from': 'ko'}), dict(to='en', **{'from': 'zh'})],
+f6 = H.parse_feed(hexfeed(translations=[dict(to='en', **{'from': 'ja'})],
                           to_translate=[dict(id=7, text='こんにちは'), dict(id=8, text='x' * 401), dict(id=0, text='a'), dict(id=7, text='b')]))
-check(f6 and f6['translations'] == [('ja', 'en'), ('ko', 'en')] and f6['to_translate'] == [(7, 'こんにちは'), (8, '')],
-      'the first two translations; each line by its id (too long: kept with "", a bad id skipped, each id once)')
+check(f6 and f6['translate'] and 'translations' not in f6 and f6['to_translate'] == [(7, 'こんにちは'), (8, '')],
+      'translation allowed by default (an old "translations" ignored); each line by its id (too long: kept with "", a bad '
+      'id skipped, each id once)')
+f7 = H.parse_feed(hexfeed(translate=False))
+check(f7 and f7['translate'] is False, '"translate": false stops translation for a while')
 A, B = hexfeed(seq=5, session=7, speakers=[dict(id=2000, test_voice=1, talking=True)]), hexfeed(seq=9, session=3)
 xml = ('<registry version="2.1.0">\n<savegame><mod>\n<local-proximity-chat>\n<pcmode value="s"/>\n<pcvx>\n\t<f value="%s"/>\n</pcvx>\n'
        '</local-proximity-chat>\n<steam-123>\n<pcvx>\n<f value="%s"/>\n</pcvx>\n</steam-123>\n</mod></savegame>\n</registry>\n' % (A, B)).encode()
@@ -200,10 +203,10 @@ with tempfile.TemporaryDirectory() as local, tempfile.TemporaryDirectory() as sh
     link.send_msg('l', 8, 'no times here')
     check('times' not in obj(local, 9) and 'ago' not in obj(local, 9), 'without times: no times / ago')
     check(link.send_msg('r', 0, room + ':' + key) and obj(local, 10) == dict(type='room', room=room, key=key), 'a voice room: its own object')
-    check(link.send_translation(123456789012345, ' Hello ') and link.send_translations_state([('ja', 'en', 'downloading', 0.4271)]),
+    check(link.send_translation(123456789012345, ' Hello ') and link.send_translations_state([('ja', 'en', 'downloading', 0.4271)], 'en'),
           'a translation and the translations\' states are sent')
     check(obj(local, 11) == dict(type='translation', id=123456789012345, text='Hello')
-          and obj(local, 12) == dict(type='translations_status', translations=[{'from': 'ja', 'to': 'en', 'state': 'downloading', 'progress': 0.43}]),
+          and obj(local, 12) == dict(type='translations_status', into='en', translations=[{'from': 'ja', 'to': 'en', 'state': 'downloading', 'progress': 0.43}]),
           '... the translation (stripped), the states (progress to 1/100)')
     link.set_voice('connected')
     check(obj(local, 13) == dict(type='voice', state='connected', players=[]) and link.set_voice('connected') is None and 'pcvx_t14.xml' not in names(local),

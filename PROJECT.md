@@ -105,13 +105,12 @@ again until users reinstall a build with a new key by hand. Releasing (from `app
 1. Set the version in `app/Cargo.toml`, commit, tag and push: `git tag v<version> && git push origin main v<version>`.
 2. CI builds both systems and drafts the release with the installer, the Linux build and `SHA256SUMS.txt` (first line
    `# koetama <version>`, written from the tag). Nothing is public yet.
-3. Download the draft's checksums (do not open them in an editor - the signature is over the exact bytes):
-   `gh release download v<version> -R AgeOfAlgorithms/koetama -p SHA256SUMS.txt -D <some folder>`
-4. Sign: `cargo run -p kd-update --example release_key -- sign $HOME/.koetama-signing/release.key
-   <some folder>/SHA256SUMS.txt` (writes `SHA256SUMS.txt.sig`; refuses without the version line, or with a key
-   that is not the built-in one). Check: `cargo run -p kd-update --example release_key -- verify <some folder>/SHA256SUMS.txt`.
-5. Upload only the signature: `gh release upload v<version> <some folder>/SHA256SUMS.txt.sig -R AgeOfAlgorithms/koetama`.
-6. Publish the draft (GitHub's release page -> Edit -> Publish, or `gh release edit v<version> --draft=false -R AgeOfAlgorithms/koetama`).
+3. Sign and publish: `python release.py <version>` (from the repo root, with cargo on PATH: `export
+   PATH="$HOME/.cargo/bin:$PATH"`). Through GitHub's API with git's own login (no gh needed), it downloads the draft's
+   `SHA256SUMS.txt` and installer, checks the installer against it, signs it with the release key (kd-update's
+   `release_key` example: it refuses without the version line or with a key that is not the built-in one), verifies
+   the signature, uploads `SHA256SUMS.txt.sig`, takes the release notes from README.md's `### <version>` section and
+   publishes. `--no-publish` stops after the upload (the draft stays a draft). First write README's What's new entry.
 
 A new key (only if the old one is lost or leaked): `cargo run -p kd-update --example release_key -- new-key <file>`
 (never overwrites a file) prints the `pub const RELEASE_KEY` line to paste into `app/crates/kd-update/src/lib.rs`.

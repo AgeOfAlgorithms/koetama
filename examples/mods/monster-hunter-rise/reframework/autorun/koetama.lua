@@ -14,7 +14,8 @@ REFramework's menu (Insert) under "Koetama". Push to talk: hold a keyboard key (
 with reframework:is_key_down, a Windows virtual-key code).
 
 Other scripts can ask for a translation: Koetama.translate("texto", "who said it"). Nothing in MH Rise's chat is
-hooked: the game's chat types are not documented, see the report.
+hooked: the game's chat types are not documented, see the report. What lines are translated into is the player's
+setting in Koetama's window ("Translate chat into"); this script only shows it (translations_status's "into").
 
 Install: REFramework for MH Rise, then copy this file to <MonsterHunterRise>/reframework/autorun/. Start the game
 once (this creates reframework/data/koetama), then start Koetama (its files connector only writes into folders that
@@ -38,7 +39,6 @@ local cfg = {
     talk_vk = 0x56,           -- V
     lang = "en",
     live = true,
-    translations = {},        -- {{from=, to=}}
     overlay = true,
     game_chat = false,        -- also post lines into the game's chat log (unverified game call)
 }
@@ -49,7 +49,8 @@ local kt = {
     next_feed = 0, dirty = false,
     talk_key = false,
     online = false, features = {}, version = nil,
-    states = {}, lines = {}, retry = {}, next_id = 1,
+    into = nil,              -- what Koetama translates into ("": off; nil: not said yet)
+    states = {}, progress = {}, lines = {}, retry = {}, next_id = 1,  -- states/progress: "from>to" -> ..., the pairs in use
     shown = {},              -- {text=, kind="said"|"live"|"line"|"translation"|"info", at=}
     live = nil,              -- the words so far of the line being said
     started = nil,
@@ -84,9 +85,10 @@ local function cut_utf8(s, n)
     return s:sub(1, i)
 end
 
+-- No translation is downloading or loading (Koetama answers "" for a line that meets one).
 local function all_ready()
-    for _, t in ipairs(cfg.translations) do
-        if kt.states[t.from .. ">" .. t.to] ~= "ready" then return false end
+    for _, state in pairs(kt.states) do
+        if state == "downloading" or state == "loading" then return false end
     end
     return true
 end
@@ -106,7 +108,7 @@ local function write_feed()
     local feed = {
         type = "feed", seq = kt.seq, session = kt.session, ack = kt.ack, ping = kt.ping,
         listen = cfg.listen, talk_key = kt.talk_key, lang = cfg.lang, live = cfg.live,
-        translations = cfg.translations, to_translate = lines,
+        to_translate = lines,
     }
     -- (an empty list is written as null by REFramework's json: Koetama reads null as "none", which is the same)
     json.dump_file(FEED, feed, -1)
@@ -123,7 +125,7 @@ local function queue_line(text, who)
 end
 
 function Koetama.translate(text, who)
-    if #cfg.translations == 0 or text == nil or text == "" then return nil end
+    if kt.into == "" or text == nil or text == "" then return nil end -- (off in Koetama's window)
     return queue_line(text, who)
 end
 
@@ -159,13 +161,20 @@ local function on_object(o)
             kt.retry[#kt.retry + 1] = line  -- ("" while a model is not ready: again once it is)
         end
     elseif t == "translations_status" then
+        if type(o.into) == "string" and o.into ~= kt.into then
+            kt.into = o.into
+            show("info", o.into == "" and "translation is off: choose a language in Koetama's window"
+                or "Koetama translates chat into " .. o.into)
+        end
+        local was = kt.states
+        kt.states, kt.progress = {}, {}
         for _, s in ipairs(o.translations or {}) do
-            local key = s.from .. ">" .. s.to
-            if kt.states[key] ~= s.state then
-                show("info", "translation " .. s.from .. " > " .. s.to .. ": " .. s.state)
+            local key = tostring(s.from) .. ">" .. tostring(s.to)
+            if was[key] ~= s.state then
+                show("info", "translation " .. key:gsub(">", " > ") .. ": " .. tostring(s.state))
             end
             kt.states[key] = s.state
-            kt.progress = s.progress
+            kt.progress[key] = s.progress
         end
         if all_ready() and #kt.retry > 0 then
             for _, line in ipairs(kt.retry) do
@@ -207,7 +216,6 @@ local function load_settings()
     local saved = s ~= "" and json.load_string(s) or nil
     if type(saved) == "table" then
         for k, v in pairs(saved) do if cfg[k] ~= nil then cfg[k] = v end end
-        if type(cfg.translations) ~= "table" then cfg.translations = {} end
     end
 end
 
@@ -270,15 +278,25 @@ local function draw_settings()
     if changed and tonumber(v, 16) then cfg.talk_vk = tonumber(v, 16); save_settings() end
     changed, v = imgui.input_text("Language I speak", cfg.lang)
     if changed then cfg.lang = v; kt.dirty = true; save_settings() end
-    local pair = cfg.translations[1] and (cfg.translations[1].from .. " " .. cfg.translations[1].to) or ""
-    changed, v = imgui.input_text("Translate (from to, e.g. ja en)", pair)
-    if changed then
-        local a, b = v:match("^%s*(%S+)%s+(%S+)%s*$")
-        cfg.translations = a and {{from = a, to = b}} or {}
-        kt.states = {}
-        kt.dirty = true
-        save_settings()
+    -- translation: Koetama's own setting, shown here
+    if kt.into == nil then
+        imgui.text("Translation: not said yet (Koetama tells once it is linked)")
+    elseif kt.into == "" then
+        imgui.text("Translation is off: choose a language in Koetama's window")
+    else
+        imgui.text("Koetama translates chat into " .. kt.into)
     end
+    local keys = {}
+    for key in pairs(kt.states) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local state = kt.states[key]
+        if state == "downloading" and kt.progress[key] then
+            state = string.format("downloading %d%%", math.floor(kt.progress[key] * 100))
+        end
+        imgui.text("  " .. key:gsub(">", " > ") .. ": " .. tostring(state))
+    end
+    imgui.text("Choose the language in Koetama's window (Translate chat into)")
     changed, v = imgui.input_text("Translate a line", translate_box)
     if changed then translate_box = v end
     if imgui.button("Translate") then Koetama.translate(translate_box, nil); translate_box = "" end

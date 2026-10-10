@@ -371,8 +371,8 @@ impl Game for SocketGame {
         self.send_line(&api::translation(id, &cut_translation(text), rule))
     }
 
-    fn send_translations_state(&self, rules: &[RuleState]) -> bool {
-        self.send_line(&api::translations_status(rules))
+    fn send_translations_state(&self, into: &str, pairs: &[RuleState]) -> bool {
+        self.send_line(&api::translations_status(into, pairs))
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

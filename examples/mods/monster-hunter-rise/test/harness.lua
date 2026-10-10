@@ -191,11 +191,12 @@ local scenario = coroutine.create(function()
     sleep(0.2)
     check((readfile(path("koetama/feed.json")) or ""):find('"talk_key":false', 1, true), "push to talk: released")
 
-    -- translation (es -> en; the first line meets the model loading)
-    cfg.translations = {{from = "es", to = "en"}}
+    -- translation into English: Koetama's own setting (its window: Translate chat into; set it before the run). The
+    -- first line may meet the model loading
     Koetama.translate("¿Dónde está la biblioteca?", "Hunter2")
     local tr = waitfor(function() return on_screen("Hunter2: Where is the library?") end, 30)
     check(tr ~= nil, "a translation shows in the overlay")
+    check(kt.into == "en", "translations_status says Koetama translates into en (" .. tostring(kt.into) .. ")")
     local tl = {}
     for _, line in ipairs({"¿Quién tiene la gran espada?", "El dragón está en la montaña", "¿Me ayudas con el monstruo?"}) do
         sleep(0.2 + math.random() * 0.5)

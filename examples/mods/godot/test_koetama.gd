@@ -2,7 +2,8 @@
 ##     koetama.exe --cli --game godot-example --type ...          (lines typed into it come back as speech)
 ##     koetama.exe --cli --game godot-example --mic-wav x.wav ... (a recording as the microphone: speech, and the voice)
 ##     godot --headless --script test_koetama.gd -- <seconds>
-## Prints each object as it arrives, asks for es -> en and one line translated, and says how long each took. The
+## Prints each object as it arrives, sends one Spanish line to translate (into what: Koetama's window, "Translate chat
+## into"; set English), and says how long each took. The
 ## feed also names a voice room (a room_seed made from the time), this player's string id, where they hear from, a
 ## range, and one other player by position: the voice chat connects, and with --mic-wav this player's own voice going
 ## out comes back as talking (id = me).
@@ -34,7 +35,7 @@ func _initialize() -> void:
 	k.talking.connect(func(id, on): _say("talking %s %s (now: %s)" % [id, on, k.talking_now.keys()]))
 	k.speech.connect(func(kind, utt, text, _o): _say("speech %s %d: %s" % [kind, utt, text]))
 	k.translation.connect(func(id, text, from, to): _say("translation %d (%s -> %s): %s" % [id, from, to, text]))
-	k.translations_status.connect(func(ts): _say("translations %s" % [ts]))
+	k.translations_status.connect(func(into, ts): _say("translates into \"%s\", pairs %s" % [into, ts]))
 	root.add_child(k)
 	t0 = Time.get_ticks_msec() / 1000.0
 
@@ -47,7 +48,6 @@ func _process(_delta: float) -> bool:
 	var now := Time.get_ticks_msec() / 1000.0 - t0
 	if k.connected() and not asked:
 		asked = true
-		k.feed.translations = [{"from": "es", "to": "en"}]
 	# (the line to translate, until its translation is back - Koetama answers "" while the models are not ready)
 	k.feed.to_translate = [{"id": 1 + int(now / 5.0), "text": "¿Dónde está la llave del sótano?"}] if asked else []
 	return now > until

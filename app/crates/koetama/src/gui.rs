@@ -53,37 +53,44 @@ fn english_name(code: &str) -> String {
     kd_speech::lang_info(code).map_or_else(|| code.to_string(), |l| l.english.to_string())
 }
 
-/// A translation rule as the window says it: "Japanese → English", its state in words and its colour.
-pub fn rule_text(r: &kd_translate::service::RuleStatus) -> (String, String, Color32) {
+/// A translation pair as the window says it: "Japanese → English", its state in words and its colour.
+pub fn pair_text(r: &kd_translate::service::PairStatus) -> (String, String, Color32) {
     use kd_translate::service::State;
-    let rule = format!("{} → {}", english_name(&r.from), english_name(&r.to));
+    let pair = format!("{} → {}", english_name(&r.from), english_name(&r.to));
     let (state, colour) = match r.state {
         State::Ready => ("ready".to_string(), theme::GOOD),
         State::Downloading(f) => (format!("downloading {} %", kd_translate::service::percent(f)), theme::WARN),
         State::Loading => ("loading".to_string(), theme::WARN),
         State::Unavailable => ("no model for it".to_string(), theme::MUTED),
+        State::NotDownloaded => ("not downloaded (downloads are off)".to_string(), theme::MUTED),
         State::Error => ("failed - trying again in a minute".to_string(), theme::BAD),
     };
-    (rule, state, colour)
+    (pair, state, colour)
 }
 
-/// The translation as the command line says it: "ja → en ready, ko → en 42 %" ("no rules" while the game sets none).
-pub fn translate_line(rules: &[kd_translate::service::RuleStatus]) -> String {
+/// The translation as the command line says it: "into en: ja → en ready, ko → en 42 %" ("off").
+pub fn translate_line(st: &kd_translate::service::Status) -> String {
     use kd_translate::service::State;
-    if rules.is_empty() {
-        return "no rules".into();
+    if st.into.is_empty() {
+        return "off".into();
     }
-    let parts: Vec<String> = rules
+    let parts: Vec<String> = st
+        .pairs
         .iter()
         .map(|r| {
             let state = match r.state {
                 State::Downloading(f) => format!("{} %", kd_translate::service::percent(f)),
+                State::NotDownloaded => "not downloaded".to_string(),
                 ref s => s.word().to_string(),
             };
             format!("{} → {} {state}", r.from, r.to)
         })
         .collect();
-    parts.join(", ")
+    if parts.is_empty() {
+        format!("into {}", st.into)
+    } else {
+        format!("into {}: {}", st.into, parts.join(", "))
+    }
 }
 
 pub fn download_text(d: &(String, u64, u64)) -> String {
@@ -127,6 +134,11 @@ struct App {
     /// the languages the player speaks (empty: the game's "Language I speak")
     langs: Vec<String>,
     choosing_langs: bool,
+    /// the language the game's chat is translated into ("": off), whether models download when needed, and the
+    /// languages offered (Mozilla's list as kept on this PC)
+    translate_into: String,
+    translate_downloads: bool,
+    targets: Vec<&'static str>,
     /// the window's look done once it exists (its dark title bar)
     dressed: bool,
     /// the game mods (built-in, then profile files) and the one in use
@@ -183,6 +195,9 @@ impl App {
             upd_busy: false,
             langs: Vec::new(),
             choosing_langs: false,
+            translate_into: String::new(),
+            translate_downloads: true,
+            targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
             dressed: false,
             kinds: Vec::new(),
             kind: kd_games::by_id(""),
@@ -194,6 +209,8 @@ impl App {
             joined: None,
         };
         app.kinds = kd_games::games();
+        app.translate_into = app.settings.str("translate_into").unwrap_or_default();
+        app.translate_downloads = app.settings.bool("translate_downloads", true);
         app.langs = app
             .settings
             .0
@@ -231,6 +248,8 @@ impl App {
             mic_device: Self::device(&self.mic),
             volume: self.volume / 100.0,
             langs: self.langs.clone(),
+            translate_into: Some(self.translate_into.clone()).filter(|l| !l.is_empty()),
+            translate_downloads: self.translate_downloads,
             ..Default::default()
         };
         let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
@@ -358,6 +377,69 @@ impl App {
         if let Some(rt) = self.rt.as_mut() {
             rt.set_languages(self.langs.clone());
         }
+    }
+
+    /// The player changed the translation setting: saved, and the translator follows.
+    fn set_translation(&mut self) {
+        self.settings.set("translate_into", self.translate_into.clone());
+        self.settings.set("translate_downloads", self.translate_downloads);
+        self.settings.save();
+        let into = Some(self.translate_into.clone()).filter(|l| !l.is_empty());
+        if let Some(rt) = self.rt.as_mut() {
+            rt.set_translation(into, self.translate_downloads);
+        }
+    }
+
+    /// "Translation": the language to translate chat into (Off, or one Mozilla's models translate into), whether
+    /// models download when needed, and each pair in use with its state.
+    fn translation_ui(&mut self, ui: &mut egui::Ui) {
+        let mut changed = false;
+        egui::Grid::new("translation-setting").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            ui.label(RichText::new("Translate chat into").color(theme::MUTED));
+            let shown = if self.translate_into.is_empty() { "Off".to_string() } else { lang_name(&self.translate_into) };
+            egui::ComboBox::from_id_salt("translate-into").width(330.0).selected_text(shown).show_ui(ui, |ui| {
+                changed |= ui.selectable_value(&mut self.translate_into, String::new(), "Off").changed();
+                for code in &self.targets {
+                    changed |= ui.selectable_value(&mut self.translate_into, code.to_string(), lang_name(code)).changed();
+                }
+            });
+            ui.end_row();
+            ui.label("");
+            changed |= ui.checkbox(&mut self.translate_downloads, "Download translation models when needed").changed();
+            ui.end_row();
+        });
+        if changed {
+            self.set_translation();
+        }
+        if self.translate_into.is_empty() {
+            ui.label(
+                RichText::new("Off: the game's chat is shown as it is, and nothing is downloaded.")
+                    .size(12.5)
+                    .color(theme::MUTED),
+            );
+            return;
+        }
+        let st = self.status.as_ref().and_then(|s| s.translate.clone()).unwrap_or_default();
+        if st.pairs.is_empty() {
+            ui.label(
+                RichText::new(
+                    "Chat lines in a language you don't speak are translated as they come; the languages you speak are \
+                     left alone. A language's model is fetched the first time it shows up (about 20-55 MB).",
+                )
+                .size(12.5)
+                .color(theme::MUTED),
+            );
+        } else {
+            egui::Grid::new("translation").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                for r in &st.pairs {
+                    let (pair, state, colour) = pair_text(r);
+                    ui.label(RichText::new(pair).color(theme::FG));
+                    theme::pill(ui, &state, colour);
+                    ui.end_row();
+                }
+            });
+        }
+        ui.label(RichText::new("on this PC, with Mozilla's translation models").size(12.0).color(theme::MUTED));
     }
 
     /// "Languages I speak": what is in use (chips), and (Choose) every language by how well it is written.
@@ -976,29 +1058,9 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                         }); }
                         ui.add_space(2.0);
 
-                        // ---- translation (a game that uses it: the rules are set in the game)
-                        if let Some(rules) = self.status.as_ref().and_then(|s| s.translate.as_ref()) {
-                            theme::card(ui, "Translation", |ui| {
-                                if rules.is_empty() {
-                                    ui.label(
-                                        RichText::new("off - the languages to translate are chosen in the game")
-                                            .color(theme::MUTED),
-                                    );
-                                }
-                                egui::Grid::new("translation").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                                    for r in rules {
-                                        let (rule, state, colour) = rule_text(r);
-                                        ui.label(RichText::new(rule).color(theme::FG));
-                                        theme::pill(ui, &state, colour);
-                                        ui.end_row();
-                                    }
-                                });
-                                ui.label(
-                                    RichText::new("on this PC, with Mozilla's translation models")
-                                        .size(12.0)
-                                        .color(theme::MUTED),
-                                );
-                            });
+                        // ---- translation (a game that uses it: the player's own setting, here)
+                        if self.kind.translate {
+                            theme::card(ui, "Translation", |ui| self.translation_ui(ui));
                             ui.add_space(2.0);
                         }
 

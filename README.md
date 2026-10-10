@@ -72,7 +72,7 @@ game can show your words in text to other players. By extension, your game or mo
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
 bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.4. See [What's new](#whats-new).
+> **Status:** early prototype, version 0.5. See [What's new](#whats-new).
 
 ## Highlights
 
@@ -80,14 +80,26 @@ bytes it cannot listen to, and only to the players close enough to hear you.
   muffling. Only the players in range get your voice.
 - **For deaf and hard-of-hearing players.** Everyone who talks with Koetama is captioned live, so players who can't
   hear can follow every conversation, and players without a microphone can still talk with them.
-- **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line. Chat in
-  another language is translated on your own PC as it arrives, so you can play with people you share no language
-  with.
+- **Many languages.** 14 fully supported, 8 in beta, 7 experimental. Speak several and mix them in one line. Pick the
+  language you read once in Koetama, and chat in other languages is translated on your own PC as it arrives, in every
+  game.
 - **Light on your PC.** Only the speech models for your languages load: about 0.9 GB of memory for one language, up
   to 1.5 GB for several. It runs on the CPU, below the game's priority, and stays idle while you are silent.
 - **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
 
 ## What's new
+
+### 0.5.0: translation, set once in Koetama
+
+- **Translate chat into: one setting in Koetama's window**, the same in every game. Lines in the languages you
+  speak are left alone; anything else is translated into the language you picked. Off until you choose one.
+- **No pairs to set up.** The model for a language downloads the first time someone writes in it (or turn
+  downloads off and use only what is on your PC). Up to four languages stay loaded at once.
+- **Better on short lines.** Accented letters and common little words now decide what language a short line is in,
+  so "¿Dónde estás?" is no longer taken for English, while "ok" and "gg" stay yours.
+- **For mod makers:** games no longer send translation settings. They send the chat lines they show (`to_translate`)
+  and may pause translation with `"translate": false`; `translations_status` says which language the player reads
+  (`into`). See [PROTOCOL.md](PROTOCOL.md). Joined players in hosted games use their own setting.
 
 ### 0.4.0: translation, more games, walkie-talkies
 

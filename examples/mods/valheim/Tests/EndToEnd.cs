@@ -148,8 +148,8 @@ namespace Koetama.Tests
             client.StatusChanged += st => status.Add((Now, st));
             ben.StatusChanged += st => benStatus.Add((Now, st));
             client.TranslationReceived += t => translations.Add((Now, t));
-            client.TranslationsStatusReceived += st => statuses.Add((Now, string.Join(", ",
-                st.Select(x => $"{x.From}>{x.To} {x.State}" + (x.State == "downloading" ? $" {x.Progress:0.00}" : "")))));
+            client.TranslationsStatusReceived += st => statuses.Add((Now, "into " + st.Into + ": " + string.Join(", ",
+                st.Translations.Select(x => $"{x.From}>{x.To} {x.State}" + (x.State == "downloading" ? $" {x.Progress:0.00}" : "")))));
 
             // Ana at the origin facing +z, Ben 5 m away (3 right, 4 ahead) facing her: positions and a range, no gains
             var up = new Vec3(0, 1, 0);
@@ -242,14 +242,14 @@ namespace Koetama.Tests
 
                 string from = Environment.GetEnvironmentVariable("E2E_FROM") == "it" ? "it" : "es";
                 string[] foreign = from == "it" ? Italian : Spanish;
+                // (into English: Koetama's own setting, "Translate chat into" in its window; set it before the run)
                 Console.WriteLine($"-- translation ({from} -> en)");
                 client.Feed.Listen = Listen.Off;
-                client.Feed.Translations.Add(new LanguagePair(from, "en"));
                 double asked0 = Now;
                 long early = client.Translate(foreign[0]);
                 Check(Frames(() => statuses.Any(s => s.text.Contains("ready") || s.text.Contains("unavailable") || s.text.Contains("error")), 300),
                     $"translations_status reached a final state after {statuses.LastOrDefault().t - asked0:0.0} s");
-                foreach (var s in statuses.Where((s, i) => i == 0 || s.text.Split(' ')[1] != statuses[i - 1].text.Split(' ')[1] || i == statuses.Count - 1))
+                foreach (var s in statuses.Where((s, i) => i == 0 || Regex.Replace(s.text, @" [0-9]\.[0-9]+", "") != Regex.Replace(statuses[i - 1].text, @" [0-9]\.[0-9]+", "") || i == statuses.Count - 1))
                     Console.WriteLine($"   {s.t - asked0,6:0.00} s  {s.text}");
                 Frames(() => translations.Any(t => t.tr.Id == early), 15);
                 var e = translations.FirstOrDefault(t => t.tr.Id == early);

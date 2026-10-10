@@ -183,7 +183,8 @@ def feed_cases():
         dict(to_translate=[dict(id=0, text='a'), dict(id=-1, text='a'), dict(id=1234567890123456, text='a'), dict(id=5, text='x' * 401),
                            dict(id=6, text='é' * 200), dict(id=6, text='again'), dict(id=123456789012345, text='big')]),
         dict(to_translate=[dict(id=i, text='line %d' % i) for i in range(1, 20)]),
-        dict(translations=[['ja', 'en']]), dict(translations=[{'from': 'ja'}]), dict(to_translate=[dict(id=1)]),
+        dict(translations=[['ja', 'en']]), dict(translate=False, to_translate=[dict(id=1, text='hola')]), dict(translate='no'),
+        dict(to_translate=[dict(id=1)]),
         dict(to_translate=[dict(id=1, text=5)]),
         # (as Lua JSON libraries write them: whole numbers as decimals, an empty list as {})
         dict(seq=3.0, session=1.728e12, ack=2.0, ping=1.0, listen='always', speakers={}, to={}, translations={},
@@ -254,8 +255,9 @@ def feed_cases():
                                         ('r', 0, room + ':' + key, None, None)]]
     objects += [dict(fn='translation', args=[i, t], out=td.translation(i, t))
                 for i, t in [(7, 'Hello, how are you?'), (8, ''), (123456789012345, 'こんにちは "x"')]]
-    objects += [dict(fn='translations_status', args=[st], out=td.translations_status(st))
-                for st in [[], [('ja', 'en', 'ready', 1.0), ('ko', 'en', 'downloading', 0.4271)], [('mt', 'en', 'downloading', 1.7)]]]
+    objects += [dict(fn='translations_status', args=[st, into], out=td.translations_status(st, into))
+                for st, into in [([], ''), ([], 'en'), ([('ja', 'en', 'ready', 1.0), ('ko', 'en', 'downloading', 0.4271)], 'en'),
+                                 ([('mt', 'en', 'downloading', 1.7)], 'en'), ([('ja', 'zh', 'unavailable', 0.0)], 'zh')]]
     objects += [dict(fn='voice', args=[s, ps], out=td.voice(s, ps))
                 for s, ps in (('connected', []), ('unreachable', [('7656119800002', False), ('3', True)]), ('id_taken', []))]
     objects += [dict(fn='talking', args=[p, on], out=td.talking(p, on)) for p, on in ((('ana', False), True), (('7', True), False))]

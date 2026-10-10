@@ -520,8 +520,8 @@ impl Game for HttpGame {
         self.push(api::translation(id, &cut_translation(text), rule))
     }
 
-    fn send_translations_state(&self, states: &[RuleState]) -> bool {
-        self.push(api::translations_status(states))
+    fn send_translations_state(&self, into: &str, states: &[RuleState]) -> bool {
+        self.push(api::translations_status(into, states))
     }
 
     fn test_voices(&self) -> HashMap<i64, PathBuf> {

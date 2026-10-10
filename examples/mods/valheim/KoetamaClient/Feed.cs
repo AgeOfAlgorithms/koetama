@@ -48,14 +48,6 @@ namespace Koetama
         public double Muffle;
     }
 
-    /// <summary>"Translate from A into B" (language codes: en, ja, es, ...).</summary>
-    public struct LanguagePair
-    {
-        public string From;
-        public string To;
-        public LanguagePair(string from, string to) { From = from; To = to; }
-    }
-
     public sealed class Feed
     {
         /// <summary>0..1: how loud the other players' voices are.</summary>
@@ -90,8 +82,10 @@ namespace Koetama
         /// <summary>Where the voice room should live ("" = near the first player); the same for every player.</summary>
         public string Region = "";
 
-        /// <summary>Up to two.</summary>
-        public readonly List<LanguagePair> Translations = new List<LanguagePair>();
+        /// <summary>Koetama may translate the chat lines given to KoetamaClient.Translate (false: stop for a while).
+        /// What they are translated into is the player's setting in Koetama's window ("Translate chat into"), not the
+        /// game's: KoetamaClient.TranslationsStatus says it.</summary>
+        public bool Translate = true;
 
         /// <summary>
         /// The feed line (without the newline). Positions go to 1/100 of a unit, angles to whole degrees and gains to
@@ -142,10 +136,7 @@ namespace Koetama
                 }
                 w.Prop("region", Region ?? "");
             }
-            w.BeginArray("translations");
-            for (int i = 0; i < Translations.Count && i < 2; i++)
-                w.BeginObject().Prop("from", Translations[i].From).Prop("to", Translations[i].To).EndObject();
-            w.EndArray();
+            if (!Translate) w.Prop("translate", false);
             w.BeginArray("to_translate");
             foreach (PendingLine p in toTranslate)
                 w.BeginObject().Prop("id", p.Id).Prop("text", p.Text).EndObject();

@@ -12,6 +12,10 @@
 ## their voice reaches ("range": [near, far]), and each other player's "position" in "speakers": Koetama works out
 ## loudness, direction and who gets the voice. The game adds only "muffle" (its raycast: walls).
 ##
+## Translation: put the chat lines the game shows in "to_translate" ([{"id", "text"}]) and show each `translation`
+## that comes back. What they are translated into is the player's own setting in Koetama's window ("Translate chat
+## into"), told back in `translations_status` (`translate_into`); "translate": false in the feed stops it for a while.
+##
 ## The node connects to 127.0.0.1 (and again whenever Koetama restarts), sends the feed when it changes and at
 ## least once a second, and turns each line Koetama sends into a signal. Godot 3 / Webfishing: the same with
 ## StreamPeerTCP's 3.x names (connect_to_host, get_status, get_partial_data) and JSON.parse(...).result.
@@ -37,8 +41,9 @@ signal talking(id: String, talking: bool)
 signal status(speech: String, microphone: String)
 ## the translation of line `id` ("": nothing to show), and the translation used (from -> to; "" when not said)
 signal translation(id: int, text: String, from: String, to: String)
-## each translation's state: [{from, to, state, progress?}]
-signal translations_status(translations: Array)
+## what chat is translated into (the player's setting in Koetama's window; "": off), and the state of each pair in
+## use: [{from, to, state, progress?}]
+signal translations_status(into: String, translations: Array)
 
 ## the feed (PROTOCOL.md): change any field; it is sent when it changes
 var feed: Dictionary = {"type": "feed", "listen": "off", "lang": "en", "live": true, "speakers": []}
@@ -48,6 +53,8 @@ var features: Array = []
 var talking_now: Dictionary = {}
 ## the last status: {"speech": .., "microphone": ..} (empty: none yet)
 var last_status: Dictionary = {}
+## what Koetama translates chat into, from the last translations_status ("": off, or not said yet)
+var translate_into: String = ""
 
 var _tcp := StreamPeerTCP.new()
 var _buf := PackedByteArray()
@@ -68,6 +75,7 @@ func _process(_delta: float) -> void:
 			features = []
 			talking_now.clear()
 			last_status = {}
+			translate_into = ""
 			if now >= _retry_at:                         # (Koetama may start after the game: try every 2 s)
 				_retry_at = now + 2.0
 				_tcp = StreamPeerTCP.new()
@@ -129,7 +137,8 @@ func _dispatch(o: Dictionary) -> void:
 		"translation":
 			translation.emit(int(o.get("id", 0)), o.get("text", ""), o.get("from", ""), o.get("to", ""))
 		"translations_status":
-			translations_status.emit(o.get("translations", []))
+			translate_into = str(o.get("into", ""))
+			translations_status.emit(translate_into, o.get("translations", []))
 		# (another type: a newer Koetama's - ignored)
 
 

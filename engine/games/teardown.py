@@ -85,20 +85,10 @@ def voice_id(s):
 REGIONS = ('wnam', 'enam', 'sam', 'weur', 'eeur', 'apac', 'apac-ne', 'apac-se', 'oc', 'afr', 'me')
 
 
-# translation (Rust: kd_common::feed): at most 2 translations, 16 lines of at most 400 bytes, ids of 1-15 digits
-MAX_RULES, MAX_REQUESTS, MAX_REQUEST_BYTES = 2, 16, 400
+# translation (Rust: kd_common::feed): 16 lines of at most 400 bytes, ids of 1-15 digits (what is translated into
+# what is the player's setting in Koetama, not the feed's)
+MAX_REQUESTS, MAX_REQUEST_BYTES = 16, 400
 LANG_CODE = re.compile(r'[A-Za-z0-9_-]{1,16}')
-
-
-def parse_translations(items):
-    """[{"from", "to"}] -> [('ja', 'en'), ...]: good codes only, each pair once, the first MAX_RULES"""
-    out = []
-    for t in items:
-        a, b = t.get('from'), t.get('to')
-        if (len(out) < MAX_RULES and isinstance(a, str) and isinstance(b, str) and LANG_CODE.fullmatch(a)
-                and LANG_CODE.fullmatch(b) and (a, b) not in out):
-            out.append((a, b))
-    return out
 
 
 def request_text(b):
@@ -499,9 +489,6 @@ def _parse_one(v, inherit=None):
             r = relay_id(room, pid)
             if r != me and r not in ids and len(ids) < 64:
                 ids.append(r)
-    pairs = _list(v, 'translations', 16)
-    if not all(isinstance(t, dict) and isinstance(t.get('from'), str) and isinstance(t.get('to'), str) for t in pairs):
-        raise ValueError('translations')
     lines = _list(v, 'to_translate', 64)
     if not all(isinstance(r, dict) and isinstance(r.get('text'), str) for r in lines):
         raise ValueError('to_translate')
@@ -509,7 +496,7 @@ def _parse_one(v, inherit=None):
                 ack=_int(v, 'ack'), ping=_int(v, 'ping'), mic=listen in ('always', 'push_to_talk'),
                 ptt=_flag(v, 'talk_key', False) if listen == 'push_to_talk' else None, lang=lang,
                 live=_flag(v, 'live', True), speakers=speakers, room=room, key=key, me=me, to=ids, region=region,
-                translations=parse_translations(pairs), to_translate=parse_requests(lines), me_id=me_id,
+                translate=_flag(v, 'translate', True), to_translate=parse_requests(lines), me_id=me_id,
                 name=_short(v.get('name')), range=my_range, clashes=clashes, transmit_all=transmit_all, players=[])
 
 
@@ -671,13 +658,14 @@ def player(pid, joined):
     return '{"type":"player","player":%s,"joined":%s}' % (_pid(pid), 'true' if joined else 'false')
 
 
-def translations_status(states):
-    """states: [(from, to, state, progress 0..1)]"""
+def translations_status(states, into=''):
+    """states: [(from, to, state, progress 0..1)], the pairs in use; into: the language the player's chat is translated
+    into ('' off)"""
     items = []
     for a, b, st, prog in states:
         extra = ',"progress":%s' % json_secs(min(1.0, max(0.0, prog))) if st == 'downloading' else ''
         items.append('{"from":%s,"to":%s,"state":%s%s}' % (_js(a), _js(b), _js(st), extra))
-    return '{"type":"translations_status","translations":[%s]}' % ','.join(items)
+    return '{"type":"translations_status","into":%s,"translations":[%s]}' % (_js(into), ','.join(items))
 
 
 def object_prefab(obj):
@@ -778,9 +766,10 @@ class Link:
         """the translation of line rid ("" = nothing to show); False if no game is listening"""
         return self._write(translation(rid, text.strip()[:TRANSLATION_MAX]))
 
-    def send_translations_state(self, states):
-        """the translations' states, [(from, to, state, progress)]; False if no game is listening"""
-        return self._write(translations_status(states))
+    def send_translations_state(self, states, into=''):
+        """the translation's state: the pairs in use, [(from, to, state, progress)], and the target ('' off); False if
+        no game is listening"""
+        return self._write(translations_status(states, into))
 
     def send_msg(self, kind, utt, text, times=None, t0=None):
         """hand what the player said to the game: kind "s" (they started talking), "l" (the live words so far), "f"

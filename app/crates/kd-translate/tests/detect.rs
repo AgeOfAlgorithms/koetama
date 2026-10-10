@@ -194,4 +194,14 @@ fn short_lines_prefer_the_translations_languages() {
     assert_eq!(lang("ok let's go then", &["es", "en"]), Some("en"));
     // (a long, sure line keeps its own language)
     assert_eq!(lang("Ich habe den Schlüssel im Keller gefunden, aber die Tür ist immer noch zu.", &["es", "en"]), Some("de"));
+    // (the player's own languages: what is too short to tell is theirs - unless its letters or its little words say
+    //  otherwise)
+    for line in ["ok", "lol", "gg wp", "ok ok", "brb", "no", "si"] {
+        assert_eq!(lang(line, &["en"]), Some("en"), "{line}");
+        assert_eq!(lang(line, &["es"]), Some("es"), "{line}");
+    }
+    for line in ["¿Dónde estás?", "Buenas noches a todos los jugadores", "¿Alguien tiene una linterna?"] {
+        assert_eq!(lang(line, &["en"]), Some("es"), "{line}: not made English");
+    }
+    assert_eq!(lang("Ich bin hier oben", &["en"]), Some("de"));
 }

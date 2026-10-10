@@ -36,12 +36,11 @@ fetch::{base_url(), hf_cache_dir(repo, rev), repo_files(repo, rev, &[&str], mode
         download(url, dest, progress(done, total), tries), get_text(url, accept, timeout)}
 feed::{Feed {seq, vol, sid, ack, ping, mic, ptt, lang, live, speakers: BTreeMap<i64, Speaker>,
             room, key, me, to, region,               // (the voice room; "" / 0 / [] without one)
-            translations: Vec<(from, to)>, to_translate: Vec<(id, text)>},   // ([] without)
+            translate: bool, to_translate: Vec<(id, text)>},   // (translate: the game's opt-out, default true)
        Speaker {src, talk, gain, az, el, muffle},   // src: a test voice (0: a real player, id = their player id)
        MAX_ID, MAX_TO, voice_room(room, key, me) -> (room, key, me), voice_to(ids) -> Vec<i64>, voice_region,
-       MAX_TRANSLATIONS, MAX_REQUESTS, MAX_REQUEST_BYTES, MAX_REQUEST_ID, lang_code, translation_pairs(pairs),
-       translate_requests(items), request_text,
-       RuleState { from, to, state: "ready" | "downloading" | "loading" | "unavailable" | "error", progress },
+       MAX_PAIRS_TOLD, MAX_REQUESTS, MAX_REQUEST_BYTES, MAX_REQUEST_ID, translate_requests(items), request_text,
+       RuleState { from, to, state: "ready" | "downloading" | "loading" | "unavailable" | "error", progress },  // a pair's
        translations_wire(&[RuleState]) -> "ja>en=ready,ko>en=downloading 42",   // (the status line)
        trait FeedSink: Send + Sync { fn set_feed(&self, Feed); fn fresh(&self) -> bool }}
 ```
@@ -177,7 +176,8 @@ pub trait Game: Send {
     fn send_text(&self, text: &str) -> bool;                             // a typed line (--type, --auto)
     fn send_translation(&self, id: i64, text: &str, rule: Option<(&str, &str)>) -> bool;
                                                                          // api::translation (one per line id; from / to)
-    fn send_translations_state(&self, states: &[RuleState]) -> bool;     // api::translations_status (on each change)
+    fn send_translations_state(&self, into: &str, pairs: &[RuleState]) -> bool;
+                                                                         // api::translations_status (on each change)
     fn set_standing(&self, kind: &'static str, object: String);          // a "standing" object (voice, status): sent now
                                                                          // and again after every hello (new session /
                                                                          // connection / hub link)
@@ -198,7 +198,7 @@ pub mod profile { Profile, Connector, FilesConfig, SocketConfig, MessageFormat, 
 pub mod api { PROTOCOL = 2, parse_feed(&Value) -> Feed, feed_from_text(object or its hex), features(profile),
               player_id(&Value) -> Option<PlayerId>, whole, MAX_PLAYERS = 32,
               hello, speech, room, voice(state, players), talking(id, on), status(speech, microphone),
-              translation(id, text, from/to), translations_status, join_code, player, from_player(object, id),
+              translation(id, text, from/to), translations_status(into, pairs), join_code, player, from_player(object, id),
               object_prefab, json_secs }
                                                                         // the game API (PROTOCOL.md "The objects"): one
                                                                         // parser and the objects, for both connectors
@@ -386,13 +386,14 @@ games()/by_id()/bad_profiles() are cached until the folder's *.json files change
 resolves the placeholders: registry + Steam's .vdf files, a few ms). make() is cheap; Game::start() starts the
 connector's thread; Game::test_voices() blocks (PowerShell makes missing wavs, seconds each). A profile's "uses"
 lists "voices", "speech" and/or "translate" (default: voices and speech): a speech-only game's feed has no speakers,
-a voices-only game's feed never asks for the microphone, a game without "translate" has no translations or lines to translate (the
+a voices-only game's feed never asks for the microphone, a game without "translate" has no lines to translate (the
 connectors enforce all three). A translate-only game needs no microphone, no sound output and no relay.
 
 ## kd-translate (PROTOCOL.md "Translation"; engine/mt.py is the engine's reference)
 
 Chat translation on the player's PC with Mozilla's Firefox Translations models (MPL-2.0, ~20-55 MB a direction,
-downloaded the first time a rule needs them). Four modules:
+downloaded the first time a language needs them, if the player allows downloads). What is translated into what is the
+player's setting in Koetama's window - the game only sends lines. Four modules:
 
 ```rust
 pub mod engine { Model::load(dir) -> Result<Model, String>; model.translate(text) -> Result<String, String>; bytes() }
@@ -406,28 +407,35 @@ pub mod catalog {                      // Mozilla's list and the downloads
     Direction { from, to, version, files } .key() "ja-en", .id() "ja-en/2.1", .dir(root), .bytes(), .present(root),
     Catalog::parse(json)?; .direction(from, to) -> newest numeric whole version (else newest pre-release); .route(from, to) -> Result<Vec<Direction>, why>
                                                    // one direction with English, two through it
+    .targets() -> the languages to translate INTO (en, and each with an en -> it model),
+    TARGETS (what Mozilla offered, 2026-10: all but yue and mt), offered_targets(root) -> the kept list's targets, else TARGETS
+                                                   // (the window's picker: never fetches the list)
     load_list(root, max_age, get, log) -> Catalog  // kept in <root>/models.json, fetched at most daily, offline: the kept one
     fetch_route(root, &[Direction], progress(done, total), download, log) -> folders
                                                    // <root>/<from>-<to>/<version>/<own name>, via <name>.dl, sha256 checked,
                                                    // reused when there, the direction's other versions deleted
     get_list, download_file (kd_common::fetch), sha256_file }
 pub mod detect {                       // which language each stretch of a line is in
-    LANGS (Koetama's 29), MIN_WORDS, SPLIT_WORDS, SPLIT_SURE,
+    LANGS (Koetama's 29), MIN_WORDS, SPLIT_WORDS, SPLIT_SURE, PREFER_WORDS, PREFER_BELOW,
     stretches(line) -> Vec<Stretch { start, end, lang: Option<&str> }>,  // in order, covering the line
+    stretches_preferring(line, likely),            // short / unsure stretches told among `likely` first
     detect(text) -> Option<&str>,                  // the main language (stretches weighed by their letters)
-    no_space(c) }                                  // Chinese / Japanese: no space when stretches are joined
+    no_space(c), latin(lang) }                     // Chinese / Japanese: no space when stretches are joined
 pub mod service {                      // the translator
     trait Engine: Send + Sync { translate(&self, text) },   // Model (behind a lock) or a test's fake
-    trait Provider: Send + Sync { prepare(from, to, progress) -> Prepared, load(id, dir) -> Arc<dyn Engine> },
+    trait Provider: Send + Sync { prepare(from, to, download, progress) -> Prepared, load(id, dir) -> Arc<dyn Engine> },
     Mozilla::new(root, log),                       // the real Provider: catalog + engine::Model
-    enum Prepared { Ready(Vec<(id, dir)>), Unavailable(why), Error(why) },
-    enum State { Ready, Downloading(0..1), Loading, Unavailable, Error }  .wire() "downloading 42", .word()
-    RuleStatus { from, to, state } .wire(), .common() -> kd_common::feed::RuleState;  status_text(&[RuleStatus]),
-    enum Event { Reply { id, text }, Status(Vec<RuleStatus>) },
+    enum Prepared { Ready(Vec<(id, dir)>), Unavailable(why), NotDownloaded(why), Error(why) },
+    enum State { Ready, Downloading(0..1), Loading, Unavailable, NotDownloaded, Error }
+                                                   // .wire() "downloading 42", .word() (NotDownloaded: "unavailable")
+    PairStatus { from, to, state } .wire(), .common() -> kd_common::feed::RuleState;  status_text(&[PairStatus]),
+    Status { into ("" off), pairs } .wire() "en:ja>en=ready",
+    enum Event { Reply { id, text, rule: Option<(from, to)> }, Status(Status) },
     #[derive(Clone)] Translator::start(provider, on_event, log) / Translator::mozilla(on_event, log);
-        .set_rules(&[(from, to)])  .request(id, text) -> bool (false: id already queued / answered)
-        .new_session()  .status()  .stop()
-    MAX_RULES = 2, STATUS_EVERY = 0.5 s, RETRY_AFTER = 60 s, join_pieces, percent }
+        .set_target(into: Option<String>, known: Vec<String>, allow_downloads)   // cheap when unchanged
+        .request(id, text) -> bool (false: id already queued / answered)
+        .new_session()  .status() -> Status  .stop()
+    MAX_PAIRS = 4, STATUS_EVERY = 0.5 s, RETRY_AFTER = 60 s, HOLD_MAX = 120 s, join_pieces, percent }
 ```
 
 Detection (detect.rs): the line is cut by script (Han, kana, Hangul, Latin, Cyrillic, Greek, other; punctuation,
@@ -443,31 +451,48 @@ mostly capitalised words - names, brands - takes the line's main language. Withi
 are SPLIT_SURE sure, the little words agree, and its language is not KIN to the run's (es/pt/it/fr/ro/mt, cs/sk/pl,
 hr/sl, ru/uk/bg, da/sv, fi/et, lv/lt, de/nl). Measured on the NTREX-128 sentences of bench/mt/data (100 per language,
 2900): 98.5 % come out as one stretch in the right language (the main language right: 98.6 %); Cantonese 93 % (lines
-without a Cantonese-only character read as Chinese - the translator lets Chinese and Cantonese stand in for each
-other), Croatian 94 %, Slovene 94 %, the rest 96-100 %.
+without a Cantonese-only character read as Chinese - for the player the two are one language: a Chinese speaker's
+Cantonese is left alone), Croatian 94 %, Slovene 94 %, the rest 96-100 %. stretches_preferring (the translator: the
+player's languages and the target): a Latin / Cyrillic stretch under PREFER_WORDS words or less than PREFER_BELOW sure,
+detected as another language, is detected again among those - unless a letter rules one out (OWN_LETTERS: "¿Dónde
+estás?" is not English) or, from MIN_WORDS words, the detected language has more of its little words in it.
 
-The translator (service.rs): one thread; a rule's models are got ready on a helper thread (Provider::prepare: the
-list, the downloads - one rule at a time), then loaded on the translator's thread (shared by rules through the same
-direction, let go when no rule uses them). A request: detect::stretches; a stretch in a ready rule's source language
-(the first rule from it; Chinese / Cantonese stand in for each other when only one has a rule) goes through the rule's
-model(s); the rest are kept; pieces are joined again (two kept pieces as they were; next to a translated one a space,
-unless either side is Chinese or Japanese). "" when nothing was translated or the result is the line itself. A line
-that comes while a rule's models are downloading or loading is held (in order) until none is, or HOLD_MAX (120 s) -
-an early "" would lose it: a game asks once per line. Exactly one reply per id; a new session forgets the ids and drops (never answers) what is still queued from the old one, even
-a line being translated when it changed. States are told on each change, a download's progress at most every 0.5 s;
-a failed rule is tried again after RETRY_AFTER; rules Koetama can never have (the same language twice, a code it does
-not know, into Cantonese) are "unavailable" without asking Mozilla's list.
+The translator (service.rs): one thread. The player's setting (set_target): the target ("into"; None: off - every
+line ""), the languages they speak (`known`), downloads allowed or not; another target lets go of every pair, a
+language now spoken lets go of its pair, downloads switched on forgets the pairs that lacked models. A request:
+detect::stretches_preferring(line, known + target, and English when none of those is written in Latin letters - "ok"
+in a Japanese speaker's chat is English, not a language guessed from two letters); each stretch in a language that is
+not the target nor spoken (Chinese and Cantonese count as one) needs the PAIR "language > target". A pair is made the
+first time its language shows up: its models are got ready on a helper thread (Provider::prepare: the list, the
+downloads - one pair at a time; downloads off: the kept list and only models already on this PC, else NotDownloaded),
+then loaded on the translator's thread (shared by pairs through the same direction, let go when no pair uses them).
+Before a pair's models load, the least recently used ready pairs go until fewer than MAX_PAIRS (4) are left (pairs
+without models - unavailable, not downloaded, failed - count for nothing). The line is held (in order) while its
+pairs are downloading or loading, or HOLD_MAX (120 s) - an early "" would lose it: a game asks once per line. Then
+each wanted stretch with a ready pair goes through its model(s); the rest are kept; pieces are joined again (two kept
+pieces as they were; next to a translated one a space, unless either side is Chinese or Japanese). "" when nothing
+was translated or the result is the line itself. Exactly one reply per id; a new session forgets the ids and drops
+(never answers) what is still queued from the old one, even a line being translated when it changed. The status (the
+target and the pairs in use, in the order they came) is told on each change, a download's progress at most every
+0.5 s; a failed pair is tried again after RETRY_AFTER; pairs Koetama can never have (a code it does not know, into
+Cantonese) are "unavailable" without asking Mozilla's list.
 
-The program (runtime.rs): a game kind with `translate` gets a Translator::mozilla. Its Sink hands each feed's rules
-and requests to it as the feed is read (a new session in the feed: new_session first); the files connector runs the
-Link before the Sink, so a new session's files are set up before a reply can be written. Replies go to the game at
-once (Game::send_translation), the states on each Status event (Game::send_translations_state) and again in tick() when the
-game is in a session they were not told in (none told while there are no rules). Runtime::stop stops the translator
-before taking the game's lock (its thread may be waiting on that lock to send a reply). The window shows a
-"Translation" card (each rule: "Japanese → English" and its state); the command line's status line "translate: ja →
-en ready, ko → en 42 %". Tests: tests/catalog.rs (a canned list, a fake CDN), tests/detect.rs (NTREX, chat lines,
-mixed lines), tests/service.rs (a fake engine and model source), kd-games tests/translation.rs and tests/feed.rs
-(against the Python fixtures).
+The program (runtime.rs): a game kind with `translate` gets a Translator::mozilla, translation off until the setting
+arrives. Options { translate_into, translate_downloads } (the window's settings.json "translate_into" / "translate_downloads",
+or --translate-into) go to it at start, on Runtime::set_translation and on every tick (set_target only acts on a
+change; `known` is the languages ticked in the window, else the game's "Language I speak" unless "auto"). Its Sink
+hands each feed's requests to it as the feed is read, unless the feed says "translate": false (a new session in the
+feed: new_session first); the files connector runs the Link before the Sink, so a new session's files are set up
+before a reply can be written. Replies go to the game at once (Game::send_translation), the status on each Status
+event (Game::send_translations_state(into, pairs)) and again in tick() when the game is in a session it was not told
+in. A joined player's Koetama uses its own setting (nothing of it comes from the host). Runtime::stop stops the
+translator before taking the game's lock (its thread may be waiting on that lock to send a reply). The window's
+"Translation" card: "Translate chat into" (Off, or catalog::offered_targets), "Download translation models when
+needed", and each pair in use ("Japanese → English" and its state); the command line's status line "translate: into
+en: ja → en ready, ko → en 42 %". Tests: tests/catalog.rs (a canned list, a fake CDN), tests/detect.rs (NTREX, chat
+lines, mixed lines, the preference), tests/service.rs (a fake engine and model source: own languages left alone, a
+new language fetched and its line held, downloads off, off, the least recently used pair let go, "ok" not
+translated), kd-games tests/translation.rs and tests/feed.rs (against the Python fixtures).
 
 ### The engine (`engine.rs`, `engine/gemm.rs`, `engine/marian.rs`, `engine/spm.rs`)
 

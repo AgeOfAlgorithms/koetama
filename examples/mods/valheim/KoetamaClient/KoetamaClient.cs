@@ -57,7 +57,7 @@ namespace Koetama
         public event Action<Talking> TalkingChanged;
         public event Action<Status> StatusChanged;
         public event Action<Translation> TranslationReceived;
-        public event Action<List<TranslationState>> TranslationsStatusReceived;
+        public event Action<TranslationsStatus> TranslationsStatusReceived;
 
         /// <summary>Diagnostics (called on the game's thread, from Update).</summary>
         public Action<string> Log;
@@ -68,6 +68,9 @@ namespace Koetama
         public Hello Hello { get; private set; }
         /// <summary>The last status (null before the first one on this connection).</summary>
         public Status Status { get; private set; }
+        /// <summary>The last translations_status: what chat is translated into (Into, "": off) and the pairs in use
+        /// (null before the first one on this connection).</summary>
+        public TranslationsStatus TranslationsStatus { get; private set; }
         /// <summary>The players whose voice is heard now (and this player's own while it is sent), by id.</summary>
         public readonly HashSet<string> TalkingNow = new HashSet<string>();
 
@@ -123,7 +126,8 @@ namespace Koetama
         }
 
         /// <summary>
-        /// Asks Koetama to translate a chat line (Feed.Translations says from and into what). The answer comes as
+        /// Asks Koetama to translate a chat line (into what: the player's setting in Koetama's window, told in
+        /// TranslationsStatus). The answer comes as
         /// TranslationReceived with the returned id. The line stays in every feed until then, or TranslateTimeout.
         /// </summary>
         public long Translate(string text)
@@ -211,6 +215,7 @@ namespace Koetama
                     {
                         Log?.Invoke("Koetama: disconnected" + (ev.Why != null ? " (" + ev.Why + ")" : ""));
                         Status = null;
+                        TranslationsStatus = null;
                         TalkingNow.Clear();
                         Disconnected?.Invoke();
                     }
@@ -239,7 +244,10 @@ namespace Koetama
                     t.Original = original;
                     TranslationReceived?.Invoke(t);
                     break;
-                case List<TranslationState> states: TranslationsStatusReceived?.Invoke(states); break;
+                case TranslationsStatus ts:
+                    TranslationsStatus = ts;
+                    TranslationsStatusReceived?.Invoke(ts);
+                    break;
                 case string bad: Log?.Invoke("Koetama: " + bad); break;
             }
         }

@@ -11,15 +11,18 @@
 //! (the room, whom to send to, whom to hear), takes the microphone's audio and plays what arrives through the mixer;
 //! once per game session the runtime sends the game a fresh room (kind 'r').
 //!
-//! Translation (a game that uses it; PROTOCOL.md "Translation"): the translator (kd_translate::Translator) gets each
-//! feed's rules and new lines as the feed is read; its replies go to the game at once (kind 'x'), and the rules' states
-//! on each change (kind 'd') - again when the game starts a new session or reconnects.
+//! Translation (a game that uses it; PROTOCOL.md "Translation"): the player's setting (the language to translate chat
+//! into, downloads on or off - from the window or --translate-into; the languages the player speaks are left alone)
+//! goes to the translator (kd_translate::Translator) at start and on each tick (a change only), and it gets each
+//! feed's new lines as the feed is read (unless the feed says "translate": false); its replies go to the game at once,
+//! and the target and the pairs' states on each change - again when the game starts a new session or reconnects. A
+//! joined player's Koetama uses its own setting: nothing of it comes from the host.
 use crate::mic::Microphone;
 use kd_audio::{Mixer, MixerSink, Output, SharedMixer, STALE};
 use kd_common::Log;
 use kd_games::{Game, GameKind};
 use kd_speech::{Callbacks, Listener, Mic, ModelState, Models, MIXED_LANGS, MODEL_INFO};
-use kd_translate::service::{Event, RuleStatus, Translator};
+use kd_translate::service::{Event, PairStatus, Translator};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,6 +42,10 @@ pub struct Options {
     pub no_mic: bool,
     /// where the mod looks for Koetama's files (None: the game module's own)
     pub io_dir: Option<PathBuf>,
+    /// the language the game's chat is translated into (None: off - the default, so nothing downloads until the
+    /// player chooses), and whether its models may be downloaded when needed
+    pub translate_into: Option<String>,
+    pub translate_downloads: bool,
 }
 
 impl Default for Options {
@@ -51,6 +58,8 @@ impl Default for Options {
             langs: Vec::new(),
             no_mic: false,
             io_dir: None,
+            translate_into: None,
+            translate_downloads: true,
         }
     }
 }
@@ -104,8 +113,8 @@ pub struct Status {
     pub error: String,
     /// the voice chat (None: the game plays no voices)
     pub voice: Option<kd_voice::VoiceStatus>,
-    /// the translation rules and their states (None: the game does not use translation)
-    pub translate: Option<Vec<RuleStatus>>,
+    /// the translation: the target ("" off) and the pairs in use, their states (None: the game does not use it)
+    pub translate: Option<kd_translate::service::Status>,
 }
 
 pub struct Runtime {
@@ -139,20 +148,25 @@ pub struct Runtime {
     status_told: String,
     /// the translator (a game that uses translation)
     translator: Option<Translator>,
-    /// the rules' states as last told to the game: (its session then, what was told)
+    /// the translation's state as last told to the game: (its session then, what was told)
     rules_told: Arc<Mutex<Option<(i64, String)>>>,
 }
 
 /// The game, once it is made (the translator's replies go to it; the translator starts before it).
 type GameSlot = Arc<Mutex<Option<Arc<Mutex<Box<dyn Game>>>>>>;
 
-/// Tells the game the rules' states; remembers what was told in which session (false: no game listening).
-fn tell_rules(game: &Mutex<Box<dyn Game>>, rules: &[RuleStatus], told: &Mutex<Option<(i64, String)>>) -> bool {
+/// Tells the game the translation's state (the target, the pairs); remembers what was told in which session (false:
+/// no game listening).
+fn tell_rules(
+    game: &Mutex<Box<dyn Game>>,
+    st: &kd_translate::service::Status,
+    told: &Mutex<Option<(i64, String)>>,
+) -> bool {
     let g = game.lock().unwrap();
     let Some(sid) = g.feed().map(|f| f.sid) else { return false };
-    let common: Vec<kd_common::feed::RuleState> = rules.iter().map(RuleStatus::common).collect();
-    let wire = kd_common::feed::translations_wire(&common);
-    if !g.send_translations_state(&common) {
+    let common: Vec<kd_common::feed::RuleState> = st.pairs.iter().map(PairStatus::common).collect();
+    let wire = format!("{}:{}", st.into, kd_common::feed::translations_wire(&common));
+    if !g.send_translations_state(&st.into, &common) {
         return false;
     }
     *told.lock().unwrap() = Some((sid, wire));
@@ -206,9 +220,11 @@ impl kd_common::feed::FeedSink for Sink {
                 }
                 *sid = Some(feed.sid);
             }
-            t.set_rules(&feed.translations);
-            for (id, text) in &feed.to_translate {
-                t.request(*id, text); // (ids already queued or answered: ignored)
+            // (what is translated into what: the player's setting in Koetama's window; the game may only stop it)
+            if feed.translate {
+                for (id, text) in &feed.to_translate {
+                    t.request(*id, text); // (ids already queued or answered: ignored)
+                }
             }
         }
         self.mixer.set_feed(feed);
@@ -249,8 +265,8 @@ impl Runtime {
                             let rule = rule.as_ref().map(|(f, t)| (f.as_str(), t.as_str()));
                             game.lock().unwrap().send_translation(id, &text, rule);
                         }
-                        Event::Status(rules) => {
-                            tell_rules(&game, &rules, &told);
+                        Event::Status(st) => {
+                            tell_rules(&game, &st, &told);
                         }
                     }
                 }),
@@ -305,6 +321,7 @@ impl Runtime {
             hub,
             rules_told,
         };
+        rt.apply_translation();
         if rt.kind.voices {
             rt.open_output();
         }
@@ -436,6 +453,35 @@ impl Runtime {
         self.mic = Some(m);
     }
 
+    /// The player's translation setting: the language chat is translated into (None: off), and whether models may be
+    /// downloaded when needed. The translator follows at once.
+    pub fn set_translation(&mut self, into: Option<String>, downloads: bool) {
+        self.opts.translate_into = into.filter(|l| !l.is_empty());
+        self.opts.translate_downloads = downloads;
+        self.apply_translation();
+    }
+
+    /// The languages left alone in the game's chat: the ones the player ticked, else the game's "Language I speak"
+    /// (unless "auto").
+    fn spoken(&self) -> Vec<String> {
+        if !self.opts.langs.is_empty() {
+            return self.opts.langs.clone();
+        }
+        let lang = self.game.lock().unwrap().language();
+        if lang == "auto" || lang.is_empty() {
+            Vec::new()
+        } else {
+            vec![lang]
+        }
+    }
+
+    /// The setting to the translator (it only acts on a change).
+    fn apply_translation(&self) {
+        if let Some(t) = &self.translator {
+            t.set_target(self.opts.translate_into.clone(), self.spoken(), self.opts.translate_downloads);
+        }
+    }
+
     // ---- a few times a second
     /// The languages in use: the player's choice, else the game's "Language I speak" ("auto": MIXED_LANGS); and
     /// whether they came from the game.
@@ -507,8 +553,7 @@ impl Runtime {
         }
     }
 
-    /// The rules' states again when the game is in a session they were not told in (a new level, a reconnect); none
-    /// told while there are no rules.
+    /// The translation's state again when the game is in a session it was not told in (a new level, a reconnect).
     fn tell_rules_again(&mut self) {
         let Some(t) = &self.translator else { return };
         let sid = {
@@ -521,12 +566,7 @@ impl Runtime {
         if self.rules_told.lock().unwrap().as_ref().is_some_and(|(s, _)| *s == sid) {
             return;
         }
-        let rules = t.status();
-        if rules.is_empty() {
-            *self.rules_told.lock().unwrap() = Some((sid, String::new()));
-        } else {
-            tell_rules(&self.game, &rules, &self.rules_told);
-        }
+        tell_rules(&self.game, &t.status(), &self.rules_told);
     }
 
     /// The voice chat for the game (PROTOCOL.md "Koetama -> game"): its state and the players in the room (a standing
@@ -571,6 +611,8 @@ impl Runtime {
     }
 
     pub fn tick(&mut self) {
+        // (the languages spoken may follow the game's setting: the translator gets them as they are now)
+        self.apply_translation();
         self.send_room();
         self.tell_rules_again();
         self.tell_voice();

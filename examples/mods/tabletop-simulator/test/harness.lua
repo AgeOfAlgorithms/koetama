@@ -14,6 +14,10 @@ mod must show Blue only. A SECOND Koetama is then started with --join <that code
 relay): a line typed into it must print as Blue, in Blue's colour; Blue's own translation (their Koetama's models)
 must come back to Blue only; and with "!voice on" both Koetamas must meet in the table's seeded voice room.
 KT_NO_HUB=1 skips that part, KT_NO_DOWNLOAD=1 the French model download.
+
+Translation: what chat is translated into is Koetama's own setting (its window: "Translate chat into"), so this PC's
+Koetama must be set to English before the run; the mod only learns it from translations_status's "into".
+The offline checks (no Koetama, the objects faked): luajit offline.lua.
 ]]
 local ffi = require("ffi")
 ffi.cdef [[
@@ -218,14 +222,18 @@ local scenario = coroutine.create(function()
     check(not chat_entry(function(c) return not c.private and c.text:find(tostring(code), 1, true) end),
         "... and nowhere in the public chat")
 
-    -- translation: enabled and used in the same frame, so the first line meets a model that is not "ready" yet
-    player_chat(host_player, "!translate es en")
-    check(not chat_line(function(s) return s:find("!translate", 1, true) end), "a command is hidden from chat")
+    -- translation: Koetama's own setting (into English); the first line may meet a model that is not "ready" yet
+    player_chat(host_player, "!koetama")
+    check(not chat_line(function(s) return s:find("!koetama", 1, true) end), "a command is hidden from chat")
     local t_line = t()
     player_chat(blue_player, "¿Dónde está la biblioteca?")
     local got = waitfor(function() return chat_line(function(s) return s:find("^    > ") end) end, 30)
     check(got ~= nil, "the first Spanish line, sent with the command, is translated (at once, or after a \"\" and a retry)")
     if got then log("first translation: %q, %.0f ms after the line", got.text, (got.at - t_line) * 1000) end
+    check(waitfor(function() return kt.host.into == "en" end, 5), "translations_status says Koetama translates into en (" ..
+        tostring(kt.host.into) .. ")")
+    check(chat_entry(function(e) return e.to == "White" and e.text == "[Koetama] Koetama translates chat into English" end),
+        "the host is told what their chat is translated into")
 
     -- push to talk on the scripting button: an urgent feed each way
     local u0 = stats.urgent
@@ -331,9 +339,9 @@ local scenario = coroutine.create(function()
         end, 10)
         check(st ~= nil, "Blue is told their Koetama's status (" .. (st and st.text or "nothing") .. ")")
 
-        -- Blue's own translation, made by Blue's Koetama, shown to Blue only
-        player_chat(blue_player, "!translate es en")
-        sleep(1.5)
+        -- Blue's own translation, made by Blue's Koetama (its own setting), shown to Blue only
+        check(waitfor(function() return kt.players["76561198000000002"].into == "en" end, 10),
+            "Blue's Koetama says it translates into en")
         local m2 = #chat + 1
         local t_es = t()
         player_chat(host_player, "¿Alguien tiene madera para cambiar?")
@@ -362,10 +370,9 @@ local scenario = coroutine.create(function()
         mark = #chat + 1
     end
 
-    -- a pair whose model is not on this PC yet (fr -> en, ~35 MB the first time): the line sent at once comes back
-    -- "" while it downloads; the mod sends it again under a new id once translations_status says ready
+    -- a language whose model is not on this PC yet (fr -> en, ~35 MB the first time, fetched on first sight of French):
+    -- the line waits for it, or comes back "" and is sent again under a new id once translations_status says ready
     if os.getenv("KT_NO_DOWNLOAD") == nil then
-        player_chat(host_player, "!translate fr en")
         local id = kt.next_id
         local t_fr = t()
         player_chat(blue_player, "Est-ce que quelqu'un veut échanger du bois contre du blé ?")
