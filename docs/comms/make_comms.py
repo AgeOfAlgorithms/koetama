@@ -158,7 +158,7 @@ def channel(kind, label):
 
 
 CARDS = [
-    ('1-voice', 'Voice to voice', 'Player 1 talks; Player 2 hears them.',
+    ('1-voice', 'Voice', 'Player 1 talks; Player 2 hears them.',
      who(avatar(ANA, 'mic'), 'Player 1, on mic', spoken('"How is your mother?"')),
      channel('audio', 'audio'),
      '<div class="stack">%s<div class="quiet">%s</div></div>' % (
@@ -170,7 +170,7 @@ CARDS = [
      channel('text', 'text'),
      who(avatar(CHLOE, 'deaf'), 'Deaf player, nearby', receives(bubble('How is your mother?'))),
      "Speech to text runs on Player 1's PC; the words appear as they are said, in a bubble over Player 1's head."),
-    ('3-typed', 'Text to text, in proximity', 'A player without a microphone types; the players near them read it.',
+    ('3-typed', 'Text', 'A player without a microphone types; the players near them read it.',
      who(avatar(DEV, 'keys'), 'No mic, types', bubble('How is your mother?')),
      channel('text', 'text'),
      '<div class="stack">%s%s<div class="far">%s</div></div>' % (

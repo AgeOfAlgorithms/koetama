@@ -45,7 +45,7 @@ game can show your words in text to other players. By extension, your game or mo
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/1-voice-dark.png">
-  <img src="docs/comms/1-voice-light.png" width="760" alt="Voice to voice: Player 1 says &quot;How is your mother?&quot; on mic, Player 2 (4 m away) hears it, and Player 3 (20 m away) hears it more quietly">
+  <img src="docs/comms/1-voice-light.png" width="760" alt="Voice: Player 1 says &quot;How is your mother?&quot; on mic, Player 2 (4 m away) hears it, and Player 3 (20 m away) hears it more quietly">
 </picture>
 
 <picture>
@@ -55,7 +55,7 @@ game can show your words in text to other players. By extension, your game or mo
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/3-typed-dark.png">
-  <img src="docs/comms/3-typed-light.png" width="760" alt="Text to text in proximity: a player without a microphone types &quot;How is your mother?&quot;; the players 6 m and 18 m away read it, the one 60 m away gets nothing">
+  <img src="docs/comms/3-typed-light.png" width="760" alt="Text: a player without a microphone types &quot;How is your mother?&quot;; the players 6 m and 18 m away read it, the one 60 m away gets nothing">
 </picture>
 
 <picture>
