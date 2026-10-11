@@ -125,6 +125,8 @@ struct App {
     volume: f64,
     /// Mic boost, dB 0..=20 (the voice sent; saved as "mic_boost")
     mic_boost: f64,
+    /// the microphone test's "Hear yourself" (not saved)
+    hear_self: bool,
     last_tick: Instant,
     status: Option<Status>,
     upd_tx: Sender<UpdateMsg>,
@@ -177,6 +179,7 @@ impl App {
             out: pick(&outs, settings.str("out")),
             volume: settings.f64("volume", 1.0) * 100.0,
             mic_boost: settings.f64("mic_boost", 0.0).clamp(0.0, 20.0),
+            hear_self: false,
             game_id: settings
                 .str("game")
                 .unwrap_or_else(|| kd_games::games()[0].id.to_string()),
@@ -988,6 +991,40 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                         st.is_some_and(|s| s.mic == "talking"),
                                     );
                                     ui.end_row();
+                                    // (the microphone test: no game needed - the level, the words, and with the voice
+                                    //  chat the player's own voice as the others hear it)
+                                    let testing = self.status.as_ref().and_then(|s| s.mic_test);
+                                    ui.label("");
+                                    ui.horizontal(|ui| {
+                                        let label = match testing {
+                                            Some(left) => format!("Stop the test ({:.0} s)", left.ceil()),
+                                            None => "Test microphone".to_string(),
+                                        };
+                                        if ui.button(label).clicked() {
+                                            if let Some(rt) = self.rt.as_mut() {
+                                                rt.set_mic_test(testing.is_none(), self.hear_self);
+                                            }
+                                        }
+                                        if self.kind.voices
+                                            && ui.checkbox(&mut self.hear_self, "Hear yourself").on_hover_text(
+                                                "Plays your voice back as the other players will hear it (use headphones)",
+                                            ).changed()
+                                        {
+                                            if let Some(rt) = self.rt.as_mut() {
+                                                rt.set_hearing(self.hear_self);
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+                                    if testing.is_some() {
+                                        ui.label("");
+                                        ui.label(
+                                            RichText::new("Talk normally: the bar should reach about two thirds. What you say shows under \"You said\".")
+                                                .size(12.0)
+                                                .color(theme::MUTED),
+                                        );
+                                        ui.end_row();
+                                    }
                                     if self.kind.voices {
                                         // (the voice sent: its automatic gain evens players out; this raises a quiet
                                         //  microphone further)

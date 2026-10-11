@@ -413,7 +413,7 @@ impl Mixer {
             let (tl, tr, tm) = match sp {
                 Some(s) if talking || v.fx_sounding => {
                     let b = behind(s.az);
-                    let g = s.gain * master * (1.0 - BEHIND_QUIET * b);
+                    let g = s.gain * s.loudness() * master * (1.0 - BEHIND_QUIET * b);
                     let (l, r) = pan_gains(s.az, s.el);
                     (g * l, g * r, (s.muffle + BEHIND_MUFFLE * b).min(1.0))
                 }
@@ -501,7 +501,8 @@ impl Mixer {
                     continue;
                 }
                 let x = if on { &v.x[..frames] } else { &zeros[..] };
-                level = level.max(d.render(x, on, dv, master, k, ramp, out));
+                let own = sp.map_or(1.0, |s| s.loudness());
+                level = level.max(d.render(x, on, dv, master * own, k, ramp, out));
             }
             while v.devs.len() > via.len() && v.devs.last().is_some_and(DevOut::quiet) {
                 v.devs.pop();

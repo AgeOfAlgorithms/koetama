@@ -93,12 +93,20 @@ pub struct Speaker {
     /// effects on their direct voice (a helmet, a robot; default none)
     #[serde(default)]
     pub effects: Effects,
+    /// this player's own volume for them (0..2), on top of everything else - direct voice and devices (None: 1)
+    #[serde(default)]
+    pub volume: Option<f64>,
 }
 
 impl Speaker {
-    /// Heard at all: directly, or through one of the devices.
+    /// Heard at all: directly, or through one of the devices (and not turned all the way down).
     pub fn audible(&self) -> bool {
-        self.gain > 0.0 || self.via.iter().any(Via::audible)
+        self.loudness() > 0.0 && (self.gain > 0.0 || self.via.iter().any(Via::audible))
+    }
+
+    /// The player's own volume for this speaker (`volume`, 0..2; 1 when not given).
+    pub fn loudness(&self) -> f64 {
+        self.volume.unwrap_or(1.0)
     }
 }
 

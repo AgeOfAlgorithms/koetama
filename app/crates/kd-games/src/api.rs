@@ -686,6 +686,10 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
                         range: own_range,
                         via,
                         effects: parse_effects(s.get("effects"), Effects::default())?,
+                        volume: match s.get("volume") {
+                            None | Some(Value::Null) => None,
+                            Some(_) => Some(num(s, "volume", 1.0)?.clamp(0.0, 2.0)),
+                        },
                     },
                 );
             }

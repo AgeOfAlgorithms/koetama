@@ -15,6 +15,8 @@ pub struct Microphone {
     input: Option<Input>,
     level: Arc<AtomicU64>, // (f64 bits: dBFS of the last block)
     voice: Option<Voice>,
+    /// "Hear yourself" (the window's microphone test): the voice's blocks go to it too
+    monitor: Option<Arc<crate::monitor::Monitor>>,
 }
 
 impl Microphone {
@@ -26,7 +28,14 @@ impl Microphone {
             input: None,
             level: Arc::new(AtomicU64::new((-120f64).to_bits())),
             voice: None,
+            monitor: None,
         }
+    }
+
+    /// "Hear yourself": the microphone's 48 kHz blocks (with the voice chat) go to this monitor too.
+    pub fn with_monitor(mut self, monitor: Option<Arc<crate::monitor::Monitor>>) -> Microphone {
+        self.monitor = monitor;
+        self
     }
 
     /// The voice chat gets the microphone's audio too (None: only the listener).
@@ -63,6 +72,7 @@ impl Mic for Microphone {
                 None
             }
         });
+        let monitor = self.monitor.clone();
         let (rate, on_block): (u32, kd_audio::BlockFn) = match tap {
             Some((v, mut down)) => {
                 let mut low = Vec::new();
@@ -71,6 +81,9 @@ impl Mic for Microphone {
                     Box::new(move |x: &[f32]| {
                         level.store(level_db(x).to_bits(), Ordering::Relaxed);
                         v.push_mic(x, l.talking());
+                        if let Some(m) = &monitor {
+                            m.push(x);
+                        }
                         low.clear();
                         down.push(x, &mut |y| low.extend_from_slice(y));
                         if !low.is_empty() {

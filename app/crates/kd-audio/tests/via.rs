@@ -122,3 +122,26 @@ fn direct_voice_effects() {
     let highs = |x: &[f32]| rms(x.chunks(2).collect::<Vec<_>>().windows(2).map(|w| w[1][0] - w[0][0]));
     assert!(highs(&narrow) < 0.5 * highs(&clean), "{} vs {}", highs(&narrow), highs(&clean));
 }
+
+/// A player's own volume for a speaker (`volume`): the voice and its devices, scaled; 0: not played at all.
+#[test]
+fn a_speakers_own_volume() {
+    let render = |vol: Option<f64>, via: bool| {
+        let clock = Clock::default();
+        let mut m = Mixer::with_clock(noise(), clock.boxed());
+        m.set_feed(feed_with(1.0, |s| {
+            s.volume = vol;
+            s.gain = 0.4;
+            if via {
+                s.via = vec![plain(vec![out(0.0, 0.4, 0.0)])];
+            }
+        }));
+        let o = run(&mut m, &clock, 0.5, 480);
+        rms(o[o.len() / 2..].iter().copied())
+    };
+    for via in [false, true] {
+        let (full, half) = (render(None, via), render(Some(0.5), via));
+        assert!((half / full - 0.5).abs() < 0.02, "half: {half} of {full}");
+        assert!(render(Some(0.0), via) < 1e-6, "0: silent");
+    }
+}

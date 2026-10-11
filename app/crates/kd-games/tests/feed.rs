@@ -111,6 +111,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
             (d, w) => panic!("{text}: distance {d:?} vs {w:?}"),
         }
         same_effects(&s.effects, &v["effects"], text);
+        assert_eq!(s.volume, v["volume"].as_f64(), "{text}: volume");
         let via = v["via"].as_array().unwrap();
         assert_eq!(s.via.len(), via.len(), "{text}: via");
         for (d, w) in s.via.iter().zip(via) {
@@ -137,7 +138,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 70);
+    assert_eq!(cases.len(), 72);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);

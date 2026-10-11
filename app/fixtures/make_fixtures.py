@@ -230,6 +230,8 @@ def feed_cases():
         dict(speakers=[dict(id=1, via=[dict(effects=dict(band=[3000, 300]))])]),
         dict(speakers=[dict(id=1, via=[dict(effects=dict(drive='x'))])]), dict(speakers=[dict(id=1, effects=[1])]),
         dict(transmit='all'), dict(speakers=[dict(id=1, via=[dict(positions=[[1, 2]])])]),
+        dict(speakers=[dict(id=1, volume=0.5), dict(id=2, volume=3), dict(id=3, volume=-1), dict(id=4, volume=None)]),
+        dict(speakers=[dict(id=1, volume='loud')]),
     ]
     feeds = [hx(o) for o in objs]
     feeds += [json.dumps(objs[0]), ' ' + hx(objs[2]).upper() + ' ', '', 'garbage', '7b', hx([1, 2]), 'zz' + hx(objs[1])]

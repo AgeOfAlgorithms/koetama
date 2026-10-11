@@ -121,6 +121,8 @@ pub struct Status {
     pub voice: Option<kd_voice::VoiceStatus>,
     /// the translation: the target ("" off) and the pairs in use, their states (None: the game does not use it)
     pub translate: Option<kd_translate::service::Status>,
+    /// the microphone test: seconds left (None: not testing)
+    pub mic_test: Option<f64>,
 }
 
 pub struct Runtime {
@@ -130,6 +132,10 @@ pub struct Runtime {
     pub mixer: SharedMixer,
     pub game: Arc<Mutex<Box<dyn Game>>>,
     output: Option<Output>,
+    /// the window's microphone test: until when, and "Hear yourself" (its own mixer and output while on)
+    test_until: Option<std::time::Instant>,
+    monitor: Arc<crate::monitor::Monitor>,
+    monitor_out: Option<(SharedMixer, Output)>,
     listener: Option<Listener>,
     mic: Option<Box<dyn Mic>>,
     /// the microphone is a recording or a playlist (not switched with the device setting)
@@ -311,6 +317,9 @@ impl Runtime {
             mixer,
             game,
             output: None,
+            test_until: None,
+            monitor: Arc::new(crate::monitor::Monitor::default()),
+            monitor_out: None,
             listener: None,
             mic: None,
             mic_is_source: mic_source.is_some(),
@@ -338,6 +347,7 @@ impl Runtime {
             rt.make_listener(mic_source);
             *ptt_to.lock().unwrap() = rt.listener.clone();
         }
+        rt.monitor.set_boost_db(rt.opts.mic_boost_db);
         rt
     }
 
@@ -395,7 +405,8 @@ impl Runtime {
                     Some(make) => make(l.clone(), self.log.clone(), self.voice.clone()),
                     None => Box::new(
                         Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone())
-                            .with_voice(self.voice.clone()),
+                            .with_voice(self.voice.clone())
+                            .with_monitor(Some(self.monitor.clone())),
                     ),
                 });
                 self.listener = Some(l);
@@ -452,7 +463,9 @@ impl Runtime {
             m.close();
         }
         let mut m: Box<dyn Mic> = Box::new(
-            Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone()).with_voice(self.voice.clone()),
+            Microphone::new(l.clone(), self.opts.mic_device.clone(), self.log.clone())
+                .with_voice(self.voice.clone())
+                .with_monitor(Some(self.monitor.clone())),
         );
         if was {
             m.open();
@@ -463,6 +476,7 @@ impl Runtime {
     /// The player's Mic boost (dB, 0..=20): the voice they send follows at once.
     pub fn set_mic_boost(&mut self, db: f32) {
         self.opts.mic_boost_db = db.clamp(0.0, 20.0);
+        self.monitor.set_boost_db(self.opts.mic_boost_db);
         if let Some(v) = &self.voice {
             v.set_mic_boost(self.opts.mic_boost_db);
         }
@@ -640,12 +654,19 @@ impl Runtime {
             let sid = g.feed().map(|f| f.sid);
             h.lock().unwrap().pump(&**g, sid);
         }
+        self.tick_monitor();
         let Some(l) = self.listener.clone() else {
             return;
         };
+        let testing = self.test_until.is_some();
         let (want, live, ptt) = {
             let g = self.game.lock().unwrap();
-            (g.wants_mic() && g.connected(), g.live_words(), g.push_to_talk())
+            // (the microphone test: open, the speech detector deciding, live words on - whatever the game says)
+            if testing {
+                (true, true, None)
+            } else {
+                (g.wants_mic() && g.connected(), g.live_words(), g.push_to_talk())
+            }
         };
         let (langs, _) = self.languages();
         let key = langs.join(",");
@@ -771,6 +792,51 @@ impl Runtime {
             error: said.error.clone(),
             voice: self.voice.as_ref().map(|v| v.status()),
             translate: self.translator.as_ref().map(|t| t.status()),
+            mic_test: self.test_until.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_secs_f64()),
+        }
+    }
+
+    // ---- the microphone test (the window): no game needed
+    /// how long a test runs before it stops by itself
+    pub const TEST_FOR: std::time::Duration = std::time::Duration::from_secs(30);
+
+    /// Starts (or stops) the microphone test: the microphone opens for TEST_FOR whatever the game wants - its level,
+    /// what the speech to text makes of it - and, with `hear`, the player hears themselves as the others would (the
+    /// voice's automatic gain and Mic boost). Nothing is sent anywhere.
+    pub fn set_mic_test(&mut self, on: bool, hear: bool) {
+        self.test_until = on.then(|| std::time::Instant::now() + Self::TEST_FOR);
+        self.set_hearing(on && hear);
+    }
+
+    /// "Hear yourself" on or off (only during a test; only with the voice chat's 48 kHz microphone).
+    pub fn set_hearing(&mut self, on: bool) {
+        let on = on && self.test_until.is_some() && self.voice.is_some();
+        self.monitor.set_on(on);
+        if !on {
+            self.monitor_out = None;
+            return;
+        }
+        if self.monitor_out.is_some() {
+            return;
+        }
+        let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
+        mixer.lock().unwrap().streams = Some(Box::new(crate::monitor::MonitorStreams(self.monitor.clone())));
+        match Output::open(mixer.clone(), self.opts.out_device.as_deref(), self.log.clone()) {
+            Ok(o) => self.monitor_out = Some((mixer, o)),
+            Err(e) => (self.log)(&format!("hear yourself: no sound output ({e})")),
+        }
+    }
+
+    /// (each tick) the test's own mixer is told to play the one voice - its feed goes stale otherwise
+    fn tick_monitor(&mut self) {
+        if self.test_until.is_some_and(|t| std::time::Instant::now() >= t) {
+            self.set_mic_test(false, false);
+            (self.log)("microphone test over");
+        }
+        if let Some((mixer, _)) = &self.monitor_out {
+            let speaker = kd_common::feed::Speaker { src: 0, talk: true, gain: 1.0, ..Default::default() };
+            let feed = kd_common::feed::Feed { vol: 1.0, speakers: [(1, speaker)].into_iter().collect(), ..Default::default() };
+            mixer.lock().unwrap().set_feed(feed);
         }
     }
 

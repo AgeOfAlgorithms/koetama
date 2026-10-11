@@ -72,7 +72,7 @@ game can show your words in text to other players. By extension, your game or mo
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
 bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.5.2. See [What's new](#whats-new).
+> **Status:** early prototype, version 0.5.3. See [What's new](#whats-new).
 
 ## Highlights
 
@@ -189,6 +189,14 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ## What's new
+
+### 0.5.3: test your microphone
+
+- **Test microphone**, under Microphone in the window: the microphone opens for 30 s with no game needed - watch the
+  level bar and see what the speech to text makes of you. **Hear yourself** plays your voice back as the other players
+  will hear it (with the automatic gain and Mic boost; use headphones). Nothing is sent anywhere.
+- **Per-player volume** for games: a speaker's `volume` (0..2) in the feed scales that player's voice and their
+  devices ([PROTOCOL.md](PROTOCOL.md)); Proximity Babble Chat uses it for its new per-player sliders.
 
 ### 0.5.2: live words keep up
 

@@ -14,6 +14,7 @@ mod gui;
 mod hub;
 mod instance;
 mod mic;
+mod monitor;
 mod runtime;
 mod selftest;
 mod settings;
