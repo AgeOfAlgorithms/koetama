@@ -18,6 +18,7 @@
 <p align="center">
   <a href="https://github.com/AgeOfAlgorithms/koetama/releases"><img src="https://img.shields.io/github/downloads/AgeOfAlgorithms/koetama/total?label=downloads&color=f26d2a" alt="Downloads"></a>
   <a href="https://github.com/AgeOfAlgorithms/koetama/stargazers"><img src="https://img.shields.io/github/stars/AgeOfAlgorithms/koetama?label=stars&color=f59e0b&style=flat" alt="Stars"></a>
+  <a href="https://ko-fi.com/ageofalgorithms"><img src="https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-f26d2a?logo=kofi&logoColor=white" alt="Buy me a coffee on Ko-fi"></a>
 </p>
 
 <p align="center">
@@ -192,6 +193,11 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
   request is approved by hand): [AgeOfAlgorithms](https://github.com/AgeOfAlgorithms).
 - **Privacy:** see [PRIVACY.md](PRIVACY.md). Koetama sends nothing to its author; it only connects to the services
   listed there, for the features you use.
+
+## Support
+
+Koetama is free and stays free. If it makes your games better, you can
+[buy me a coffee on Ko-fi](https://ko-fi.com/ageofalgorithms). Stars, bug reports and game mods help too.
 
 ## License
 
