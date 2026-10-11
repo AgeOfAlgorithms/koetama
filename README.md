@@ -83,8 +83,6 @@ game can show your words in text to other players. By extension, your game or mo
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
 bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.5.3. See [What's new](#whats-new).
-
 ## Highlights
 
 - **Real voice chat.** Hear the other players where they stand: the game sets each voice's volume, direction and
