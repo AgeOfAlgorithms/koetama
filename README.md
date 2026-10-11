@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="640" alt="Koetama's window: connected to Teardown's Proximity Comms mod, English and Japanese picked">
+  <img src="docs/screenshot.png" width="640" alt="Koetama 0.5.4's window: Teardown's Proximity Comms mod picked; sound with Test microphone and Mic boost; speech to text in English and Japanese; translation into English">
 </p>
 
 Koetama (声魂, "voice spirit" in Japanese) runs next to your game. It plays the other players' voices placed where they
