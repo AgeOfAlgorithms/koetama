@@ -1,5 +1,5 @@
 //! The models (asr.py Models, lid_dir, lid_probs): each loaded once, on first use (downloaded the first time).
-use crate::{detector_label, lock, LID_NAME, MAX_LINE, MIXED_LANGS, MODELS, RATE, ROLL_EVERY, VAD_URL};
+use crate::{detector_label, lock, LID_NAME, MAX_LINE, MIXED_LANGS, MODELS, RATE, ROLL_EVERY, ROLL_MAX, ROLL_SLOW, VAD_URL};
 use kd_common::text::{tidy, unit_times};
 use kd_common::{fetch, paths, Log};
 use sherpa_onnx::{
@@ -38,6 +38,7 @@ pub struct Models {
     loading_now: Mutex<Option<String>>,                   // (the model being loaded, for the window)
     downloading: Mutex<Option<(String, u64, u64)>>,       // (a download going on: (file, bytes done, bytes total), for the window)
     every: Mutex<f64>,                                    // (the live words' interval: ROLL_EVERY, longer on a slow PC)
+    load: Mutex<f64>,                                     // (how much of that interval passes take, on average)
     sense_lang: Mutex<String>,                            // (SenseVoice's language: "auto", or the player's one of its own)
 }
 
@@ -105,6 +106,7 @@ impl Models {
             loading_now: Mutex::new(None),
             downloading: Mutex::new(None),
             every: Mutex::new(ROLL_EVERY),
+            load: Mutex::new(0.0),
             sense_lang: Mutex::new("auto".into()),
         })
     }
@@ -140,6 +142,24 @@ impl Models {
 
     pub fn set_every(&self, s: f64) {
         *lock(&self.every) = s;
+    }
+
+    /// A live-words pass took `took` s: the interval follows the average load - twice as long while passes take more
+    /// than ROLL_SLOW of it (up to ROLL_MAX), half again once they take less than a third of that (down to ROLL_EVERY).
+    /// The new interval when it changed.
+    pub fn note_pass(&self, took: f64) -> Option<f64> {
+        let mut every = lock(&self.every);
+        let mut load = lock(&self.load);
+        *load = 0.7 * *load + 0.3 * (took / every.max(1e-3));
+        let before = *every;
+        if *load > ROLL_SLOW && *every < ROLL_MAX {
+            *every = ROLL_MAX.min(*every * 2.0);
+            *load *= 0.5; // (measured against the longer interval from now on)
+        } else if *load < ROLL_SLOW / 3.0 && *every > ROLL_EVERY {
+            *every = ROLL_EVERY.max(*every / 2.0);
+            *load *= 2.0;
+        }
+        (*every != before).then_some(*every)
     }
 
     /// The folder of a model in MODELS: its pinned revision, only the files used (downloaded the first time).
@@ -365,5 +385,32 @@ impl Models {
         let p: Vec<f32> = z.iter().map(|&v| (v - top).exp()).collect();
         let sum: f32 = p.iter().sum();
         Ok(p.iter().map(|&v| (v / sum) as f64).collect())
+    }
+}
+
+#[cfg(test)]
+mod pace_tests {
+    use super::*;
+
+    /// A busy moment slows the live words down; once passes are quick again they speed back up (they stayed slow for
+    /// the whole session before, 2026-10-10).
+    #[test]
+    fn the_live_words_pace_follows_the_load() {
+        let m = Models::new(1, kd_common::null_log());
+        assert_eq!(m.every(), ROLL_EVERY);
+        for _ in 0..3 {
+            m.note_pass(0.1);
+        }
+        assert_eq!(m.every(), ROLL_EVERY, "quick passes: as it is");
+        assert_eq!(m.note_pass(0.6), None, "one slow pass alone does not slow it down");
+        let mut slowed = false;
+        for _ in 0..6 {
+            slowed |= m.note_pass(0.9).is_some();
+        }
+        assert!(slowed && m.every() == ROLL_MAX, "a busy PC: {} s", m.every());
+        for _ in 0..20 {
+            m.note_pass(0.1);
+        }
+        assert_eq!(m.every(), ROLL_EVERY, "the load gone: back to every {ROLL_EVERY} s");
     }
 }

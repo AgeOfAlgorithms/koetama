@@ -72,7 +72,7 @@ game can show your words in text to other players. By extension, your game or mo
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
 bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.5.1. See [What's new](#whats-new).
+> **Status:** early prototype, version 0.5.2. See [What's new](#whats-new).
 
 ## Highlights
 
@@ -189,6 +189,12 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ## What's new
+
+### 0.5.2: live words keep up
+
+- **Live words while you talk again.** After one slow moment (a game loading, say) Koetama read the line less and
+  less often, up to every 4 s, for the rest of the session: words then showed up only after you finished. It now
+  follows the average, speeds back up once the PC has room, and never waits more than 2 s.
 
 ### 0.5.1: louder quiet microphones
 

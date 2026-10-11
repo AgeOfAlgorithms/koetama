@@ -1,7 +1,7 @@
 //! One line while the player talks (asr.py RollingLine).
 use crate::models::Models;
 use crate::stitch::transcribe_mixed_in;
-use crate::{roll_model, MIXED_LANGS, RATE, ROLL_MAX, ROLL_SLOW};
+use crate::{roll_model, MIXED_LANGS, RATE};
 use kd_common::text::{is_wide, tidy, unit_key, units};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -177,11 +177,10 @@ impl RollingLine {
                 return Err(e);
             }
         };
-        if took > ROLL_SLOW * every && every < ROLL_MAX {
-            // (this PC is slow for it: pass less often)
-            every = ROLL_MAX.min(every * 2.0);
-            self.models.set_every(every);
-            (self.models.log())(&format!("live words every {every:.0} s (a pass took {took:.2} s)"));
+        if let Some(e) = self.models.note_pass(took) {
+            // (the PC got busier - or less busy: passes follow)
+            every = e;
+            (self.models.log())(&format!("live words every {every:.1} s (a pass took {took:.2} s)"));
         }
         self.next = self.speech + every;
         self.compute += took;

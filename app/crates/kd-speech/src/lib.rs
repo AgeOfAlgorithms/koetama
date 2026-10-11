@@ -79,10 +79,11 @@ pub const MODELS: [ModelSpec; 3] = [
 
 /// s: a rolling line is transcribed again this often...
 pub const ROLL_EVERY: f64 = 1.0;
-/// ...unless a pass takes more than this share of it: then twice as long (up to ROLL_MAX),
+/// ...unless passes take more than this share of it on average (Models::note_pass): then twice as long (up to
+/// ROLL_MAX); back to half again once they take less than a third of that - a busy moment (a game loading) no longer
+/// slows the live words for the rest of the session (it did: 4 s apart, words only after a line ended, 2026-10-10)
 pub const ROLL_SLOW: f64 = 0.5;
-///    remembered for the session (Models::every): a slow PC gets fewer, later live words
-pub const ROLL_MAX: f64 = 4.0;
+pub const ROLL_MAX: f64 = 2.0;
 /// a language's own model (else Parakeet)
 pub const ROLL_MODEL: [(&str, &str); 5] =
     [("ru", "gigaam"), ("zh", "sensevoice"), ("yue", "sensevoice"), ("ja", "sensevoice"), ("ko", "sensevoice")];
