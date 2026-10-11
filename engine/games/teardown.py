@@ -461,7 +461,8 @@ def _parse_one(v, inherit=None):
         speakers[rid] = dict(src=_whole(tv) if tv is not None else 0, talk=_flag(sp, 'talking', False), gain=gain,
                              az=az, el=el, muffle=min(1.0, max(0.0, _num(sp, 'muffle', 0.0))), id=pid,
                              name=_short(sp.get('name')), distance=placed[2] if placed else None, gain_given=given,
-                             range=own, via=via, effects=_effects(sp.get('effects'), CLEAN))
+                             range=own, via=via, effects=_effects(sp.get('effects'), CLEAN),
+                             volume=None if sp.get('volume') is None else min(2.0, max(0.0, _num(sp, 'volume', 1.0))))
     ids = []
     if v.get('to') is None:
         if my_range and ears:
