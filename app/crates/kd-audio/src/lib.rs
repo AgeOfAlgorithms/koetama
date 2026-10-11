@@ -5,11 +5,13 @@
 //! Threads: a `Mixer` lives in a `SharedMixer` (Arc<Mutex>): the game's reader calls `MixerSink::set_feed`, the
 //! output's audio thread locks it for each block (lock, render, unlock). `Output` and `Input` own their cpal stream:
 //! keep them alive as long as the sound should play; dropping one stops it.
+mod channels;
 mod devices;
 pub mod effects;
 mod mixer;
 mod wav;
 
+pub use channels::ChannelPicker;
 pub use devices::{input_devices, output_devices, BlockFn, Input, Output, Rechunk, IN_BLOCK_S, OUT_BLOCK};
 pub use mixer::{
     behind, lock, lowpass, lowpass_ir, pan_gains, Clip, Mixer, MixerSink, SharedMixer, Streams, BEHIND_MUFFLE,

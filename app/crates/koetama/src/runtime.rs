@@ -46,6 +46,10 @@ pub struct Options {
     /// player chooses), and whether its models may be downloaded when needed
     pub translate_into: Option<String>,
     pub translate_downloads: bool,
+    /// the player's Mic boost (dB, 0..=20) for the voice they send, before its automatic gain
+    pub mic_boost_db: f32,
+    /// languages the player speaks but wants translated anyway (the rest of theirs are left as they are)
+    pub translate_also: Vec<String>,
 }
 
 impl Default for Options {
@@ -60,6 +64,8 @@ impl Default for Options {
             io_dir: None,
             translate_into: None,
             translate_downloads: true,
+            mic_boost_db: 0.0,
+            translate_also: Vec::new(),
         }
     }
 }
@@ -250,6 +256,7 @@ impl Runtime {
         let hub = kind.join_code.is_none().then(|| Arc::new(Mutex::new(crate::hub::Hub::new(kd_voice::relay_url(), log.clone()))));
         if let Some(v) = &voice {
             mixer.lock().unwrap().streams = Some(Box::new(v.playback()));
+            v.set_mic_boost(opts.mic_boost_db);
         }
         let ptt_to: Arc<Mutex<Option<Listener>>> = Arc::new(Mutex::new(None));
         // (translation: the translator's replies and states go straight to the game)
@@ -453,11 +460,20 @@ impl Runtime {
         self.mic = Some(m);
     }
 
+    /// The player's Mic boost (dB, 0..=20): the voice they send follows at once.
+    pub fn set_mic_boost(&mut self, db: f32) {
+        self.opts.mic_boost_db = db.clamp(0.0, 20.0);
+        if let Some(v) = &self.voice {
+            v.set_mic_boost(self.opts.mic_boost_db);
+        }
+    }
+
     /// The player's translation setting: the language chat is translated into (None: off), and whether models may be
     /// downloaded when needed. The translator follows at once.
-    pub fn set_translation(&mut self, into: Option<String>, downloads: bool) {
+    pub fn set_translation(&mut self, into: Option<String>, downloads: bool, also: Vec<String>) {
         self.opts.translate_into = into.filter(|l| !l.is_empty());
         self.opts.translate_downloads = downloads;
+        self.opts.translate_also = also;
         self.apply_translation();
     }
 
@@ -478,7 +494,9 @@ impl Runtime {
     /// The setting to the translator (it only acts on a change).
     fn apply_translation(&self) {
         if let Some(t) = &self.translator {
-            t.set_target(self.opts.translate_into.clone(), self.spoken(), self.opts.translate_downloads);
+            // (the player's languages are left as they are - except the ones they chose to have translated anyway)
+            let keep: Vec<String> = self.spoken().into_iter().filter(|l| !self.opts.translate_also.contains(l)).collect();
+            t.set_target(self.opts.translate_into.clone(), keep, self.opts.translate_downloads);
         }
     }
 

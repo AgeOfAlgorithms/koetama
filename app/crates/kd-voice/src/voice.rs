@@ -97,6 +97,8 @@ struct Cfg {
     /// who gets presence: `to` and the real players
     present_to: Vec<u16>,
     fed: Option<Instant>,
+    /// the player's Mic boost (dB, 0..=20; the window's setting)
+    boost_db: f32,
 }
 
 impl Cfg {
@@ -305,6 +307,11 @@ impl Voice {
 
     /// The microphone's audio (mono, RATE: 48 kHz), from its callback - never waits (far behind: dropped). talking:
     /// the speech detector hears speech now (kd_speech::Listener::talking).
+    /// The player's Mic boost in dB (0..=20), before the voice's automatic gain.
+    pub fn set_mic_boost(&self, db: f32) {
+        lock(&self.sh.cfg).boost_db = db.clamp(0.0, 20.0);
+    }
+
     pub fn push_mic(&self, x: &[f32], talking: bool) {
         match self.tx.try_send(Block { x: x.to_vec(), talking }) {
             Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
@@ -394,6 +401,8 @@ impl kd_audio::Streams for Playback {
 /// This player's voice into packets: the gate, Opus, the packet layout (seq counts up across stretches).
 pub struct Sender {
     gate: Gate,
+    /// the voice's automatic gain (and the player's Mic boost)
+    pub agc: crate::agc::Agc,
     enc: Encoder,
     pcm: Vec<f32>,
     frames: Vec<Vec<u8>>,
@@ -402,7 +411,7 @@ pub struct Sender {
 
 impl Sender {
     pub fn new() -> Result<Sender, String> {
-        Ok(Sender { gate: Gate::new(), enc: Encoder::new()?, pcm: Vec::new(), frames: Vec::new(), seq: 0 })
+        Ok(Sender { gate: Gate::new(), agc: Default::default(), enc: Encoder::new()?, pcm: Vec::new(), frames: Vec::new(), seq: 0 })
     }
 
     fn encode_pending(&mut self) {
@@ -423,7 +432,8 @@ impl Sender {
     /// A block of microphone audio and what the player was doing -> the packets ready to send (a stretch's last one
     /// padded with silence to whole frames, flagged last). Their id and range are the sender's to fill in.
     pub fn push(&mut self, x: &[f32], mode: Mode) -> Vec<Packet> {
-        let g = self.gate.push(x, mode);
+        let mut g = self.gate.push(x, mode);
+        self.agc.process(&mut g.audio);
         self.pcm.extend_from_slice(&g.audio);
         let mut out = Vec::new();
         loop {
@@ -594,8 +604,10 @@ fn run(sh: Arc<Shared>, rx: Receiver<Block>, relay: String, log: Log) {
             }
         };
         let mut block = first;
+        let boost = lock(&sh.cfg).boost_db;
         while let Some(b) = block {
             if let Some(s) = sender.as_mut() {
+                s.agc.set_boost_db(boost);
                 let m = match mode {
                     None => Mode::Off,
                     Some(Mode::Detector(_)) => Mode::Detector(b.talking),

@@ -38,6 +38,7 @@ pub struct Models {
     loading_now: Mutex<Option<String>>,                   // (the model being loaded, for the window)
     downloading: Mutex<Option<(String, u64, u64)>>,       // (a download going on: (file, bytes done, bytes total), for the window)
     every: Mutex<f64>,                                    // (the live words' interval: ROLL_EVERY, longer on a slow PC)
+    sense_lang: Mutex<String>,                            // (SenseVoice's language: "auto", or the player's one of its own)
 }
 
 static ORT: OnceLock<Result<(), String>> = OnceLock::new();
@@ -104,7 +105,22 @@ impl Models {
             loading_now: Mutex::new(None),
             downloading: Mutex::new(None),
             every: Mutex::new(ROLL_EVERY),
+            sense_lang: Mutex::new("auto".into()),
         })
+    }
+
+    /// The language SenseVoice writes: a player who speaks only one of its languages (zh, yue, ja, ko) gets that one
+    /// fixed - in "auto" it can drift into another (a player saw lines in other languages, 2026-10-10);
+    /// several of them, or none: "auto". A change reloads it the next time it is needed.
+    pub fn set_sense_language(&self, langs: &[String]) {
+        let own: Vec<&String> = langs.iter().filter(|l| matches!(l.as_str(), "zh" | "yue" | "ja" | "ko")).collect();
+        let want = if own.len() == 1 { own[0].clone() } else { "auto".to_string() };
+        let mut cur = self.sense_lang.lock().unwrap_or_else(|e| e.into_inner());
+        if *cur != want {
+            *cur = want;
+            drop(cur);
+            self.unload("sensevoice");
+        }
     }
 
     /// Where these models write what they do.
@@ -249,7 +265,8 @@ impl Models {
         let mut cfg = OfflineRecognizerConfig::default();
         cfg.model_config.sense_voice = OfflineSenseVoiceModelConfig {
             model: path_str(&d.join("model.int8.onnx")),
-            language: Some("auto".into()), // (it tells zh / yue / ja / ko apart itself; a fixed language changed nothing measurable)
+            // (auto tells zh / yue / ja / ko apart itself; a player who speaks just one of them: that one, set_sense_language)
+            language: Some(self.sense_lang.lock().unwrap_or_else(|e| e.into_inner()).clone()),
             use_itn: true,
         };
         self.recognizer("sensevoice", cfg, &d)

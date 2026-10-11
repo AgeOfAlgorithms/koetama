@@ -419,6 +419,8 @@ pub fn main(argv: Vec<String>) -> i32 {
         io_dir: args.io_dir.clone().map(Into::into),
         translate_into: args.translate_into.clone().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && l != "off"),
         translate_downloads: true,
+        mic_boost_db: 0.0,
+        translate_also: Vec::new(),
     };
     println!("preparing...");
     let kind = match &args.join {

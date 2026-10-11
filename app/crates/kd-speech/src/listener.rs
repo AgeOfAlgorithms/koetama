@@ -102,6 +102,7 @@ impl Listener {
         let lang = if lang.is_empty() { "en".to_string() } else { lang.to_string() };
         *lock(&self.0.cands) =
             if lang == "auto" { MIXED_LANGS.iter().map(|l| l.to_string()).collect() } else { vec![lang.clone()] };
+        self.0.models.set_sense_language(&lock(&self.0.cands).clone());
         *lock(&self.0.lang) = lang;
     }
 
@@ -109,6 +110,7 @@ impl Listener {
     /// fewer wrong stretches); none - English. The next line uses it.
     pub fn set_languages(&self, langs: &[String]) {
         let (lang, cands) = plan(langs);
+        self.0.models.set_sense_language(&cands);
         *lock(&self.0.cands) = cands;
         *lock(&self.0.lang) = lang;
     }

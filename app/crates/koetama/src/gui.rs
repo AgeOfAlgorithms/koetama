@@ -123,6 +123,8 @@ struct App {
     mic: String,
     out: String,
     volume: f64,
+    /// Mic boost, dB 0..=20 (the voice sent; saved as "mic_boost")
+    mic_boost: f64,
     last_tick: Instant,
     status: Option<Status>,
     upd_tx: Sender<UpdateMsg>,
@@ -138,6 +140,8 @@ struct App {
     /// languages offered (Mozilla's list as kept on this PC)
     translate_into: String,
     translate_downloads: bool,
+    /// languages the player speaks but has translated anyway ("translate_also")
+    translate_also: Vec<String>,
     targets: Vec<&'static str>,
     /// the window's look done once it exists (its dark title bar)
     dressed: bool,
@@ -172,6 +176,7 @@ impl App {
             mic: pick(&ins, settings.str("mic")),
             out: pick(&outs, settings.str("out")),
             volume: settings.f64("volume", 1.0) * 100.0,
+            mic_boost: settings.f64("mic_boost", 0.0).clamp(0.0, 20.0),
             game_id: settings
                 .str("game")
                 .unwrap_or_else(|| kd_games::games()[0].id.to_string()),
@@ -197,6 +202,7 @@ impl App {
             choosing_langs: false,
             translate_into: String::new(),
             translate_downloads: true,
+            translate_also: Vec::new(),
             targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
             dressed: false,
             kinds: Vec::new(),
@@ -211,6 +217,13 @@ impl App {
         app.kinds = kd_games::games();
         app.translate_into = app.settings.str("translate_into").unwrap_or_default();
         app.translate_downloads = app.settings.bool("translate_downloads", true);
+        app.translate_also = app
+            .settings
+            .0
+            .get("translate_also")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect())
+            .unwrap_or_default();
         app.langs = app
             .settings
             .0
@@ -247,8 +260,10 @@ impl App {
             out_device: Self::device(&self.out),
             mic_device: Self::device(&self.mic),
             volume: self.volume / 100.0,
+            mic_boost_db: self.mic_boost as f32,
             langs: self.langs.clone(),
             translate_into: Some(self.translate_into.clone()).filter(|l| !l.is_empty()),
+            translate_also: self.translate_also.clone(),
             translate_downloads: self.translate_downloads,
             ..Default::default()
         };
@@ -383,10 +398,11 @@ impl App {
     fn set_translation(&mut self) {
         self.settings.set("translate_into", self.translate_into.clone());
         self.settings.set("translate_downloads", self.translate_downloads);
+        self.settings.set("translate_also", serde_json::Value::from(self.translate_also.clone()));
         self.settings.save();
         let into = Some(self.translate_into.clone()).filter(|l| !l.is_empty());
         if let Some(rt) = self.rt.as_mut() {
-            rt.set_translation(into, self.translate_downloads);
+            rt.set_translation(into, self.translate_downloads, self.translate_also.clone());
         }
     }
 
@@ -407,6 +423,24 @@ impl App {
             ui.label("");
             changed |= ui.checkbox(&mut self.translate_downloads, "Download translation models when needed").changed();
             ui.end_row();
+            // (the languages the player speaks: left as they are unless unticked here - then translated like any other)
+            let mine: Vec<String> = self.langs.iter().filter(|l| **l != self.translate_into).cloned().collect();
+            if !mine.is_empty() && !self.translate_into.is_empty() {
+                ui.label(RichText::new("Don't translate").color(theme::MUTED));
+                ui.horizontal_wrapped(|ui| {
+                    for l in &mine {
+                        let mut keep = !self.translate_also.contains(l);
+                        if ui.checkbox(&mut keep, lang_name(l)).changed() {
+                            self.translate_also.retain(|x| x != l);
+                            if !keep {
+                                self.translate_also.push(l.clone());
+                            }
+                            changed = true;
+                        }
+                    }
+                });
+                ui.end_row();
+            }
         });
         if changed {
             self.set_translation();
@@ -954,6 +988,19 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                         st.is_some_and(|s| s.mic == "talking"),
                                     );
                                     ui.end_row();
+                                    if self.kind.voices {
+                                        // (the voice sent: its automatic gain evens players out; this raises a quiet
+                                        //  microphone further)
+                                        ui.label(RichText::new("Mic boost").color(theme::MUTED));
+                                        if ui.add(egui::Slider::new(&mut self.mic_boost, 0.0..=20.0).show_value(false)).changed() {
+                                            self.settings.set("mic_boost", self.mic_boost.round());
+                                            if let Some(rt) = self.rt.as_mut() {
+                                                rt.set_mic_boost(self.mic_boost as f32);
+                                            }
+                                        }
+                                        ui.label(RichText::new(format!("+{:.0} dB", self.mic_boost)).color(theme::MUTED));
+                                        ui.end_row();
+                                    }
                                     }
 if self.kind.voices {
 ui.label(RichText::new("Speakers").color(theme::MUTED));

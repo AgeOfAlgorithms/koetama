@@ -72,7 +72,7 @@ game can show your words in text to other players. By extension, your game or mo
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
 bytes it cannot listen to, and only to the players close enough to hear you.
 
-> **Status:** early prototype, version 0.5. See [What's new](#whats-new).
+> **Status:** early prototype, version 0.5.1. See [What's new](#whats-new).
 
 ## Highlights
 
@@ -189,6 +189,19 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ## What's new
+
+### 0.5.1: louder quiet microphones
+
+- **Quiet microphones fixed.** Many headset and USB mics are offered to Windows as two channels with the voice in only
+  one; Koetama averaged them, which halved those voices. It now uses the channel that carries the voice.
+- **Automatic gain** on the voice you send, as other games' voice chat has: quiet voices are raised toward a normal
+  level, shouts held back, and a soft limiter keeps peaks clean. The new **Mic boost** slider (under Microphone) adds
+  up to +20 dB on top.
+- **Translate your own languages too:** the Translation card's new "Don't translate" row lists the languages you speak;
+  untick one to have it translated like any other.
+- **Korean, Japanese or Chinese speakers** who speak only one of them: SenseVoice is told that language instead of
+  guessing, so lines no longer drift into another one.
+- "Join a hosted game" only shows for games whose mod needs it.
 
 ### 0.5.0: translation, set once in Koetama
 

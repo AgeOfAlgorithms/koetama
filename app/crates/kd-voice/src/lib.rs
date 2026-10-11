@@ -15,6 +15,7 @@ pub mod codec;
 pub mod crypto;
 pub mod frames;
 pub mod hub;
+pub mod agc;
 pub mod gate;
 pub mod jitter;
 pub mod packet;
