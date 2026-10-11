@@ -43,30 +43,40 @@ game can show your words in text to other players. By extension, your game or mo
 
 **What kind of communications are possible with Koetama?**
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/1-voice-dark.png">
   <img src="docs/comms/1-voice-light.png" width="760" alt="Voice: Player 1 says &quot;How is your mother?&quot; on mic, Player 2 (4 m away) hears it, and Player 3 (20 m away) hears it more quietly">
 </picture>
+</p>
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/2-captions-dark.png">
   <img src="docs/comms/2-captions-light.png" width="760" alt="Voice to text: Player 1 says &quot;How is your mother?&quot; on mic, and a deaf player nearby reads it in a bubble">
 </picture>
+</p>
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/3-typed-dark.png">
   <img src="docs/comms/3-typed-light.png" width="760" alt="Text: a player without a microphone types &quot;How is your mother?&quot;; the players 6 m and 18 m away read it, the one 60 m away gets nothing">
 </picture>
+</p>
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/4-translation-dark.png">
   <img src="docs/comms/4-translation-light.png" width="760" alt="Voice with translation: Player 1 says &quot;Как твоя мама?&quot; in Russian; Player 2 hears it and sees the text in English, &quot;How is your mother?&quot;">
 </picture>
+</p>
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/5-command-dark.png">
   <img src="docs/comms/5-command-light.png" width="760" alt="Voice command: Player 1 says &quot;Open sesame&quot;, and the game opens a door">
 </picture>
+</p>
 
 **Speech to text runs on your own PC**, and no account is needed. Your voice reaches the other players through a
 small relay server, end-to-end encrypted with a key only the players in your game session have: the relay passes on
