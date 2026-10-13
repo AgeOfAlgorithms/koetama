@@ -163,6 +163,7 @@ namespace KoetamaValheim
             f.Me = null;
             f.Listener = null;
             f.Range = null;
+            f.MaxRange = null;
             Camera cam = Utils.GetMainCamera();
             if (me == null || voiceRoom.Room == null || cam == null) return;
 
@@ -176,6 +177,7 @@ namespace KoetamaValheim
             f.Listener = new Listener { Position = V(myHead), Forward = V(c.forward), Right = V(c.right), Up = V(c.up) };
             float far = Range(voiceMode);
             f.Range = new VoiceRange(far * NearPart, far);
+            f.MaxRange = Range(VoiceMode.Shout);
 
             float reach = Range(VoiceMode.Shout) * 1.1f; // (no one hears anyone beyond a shout: no raycast needed)
             foreach (Player p in Player.GetAllPlayers())

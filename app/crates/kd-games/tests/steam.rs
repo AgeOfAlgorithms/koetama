@@ -105,10 +105,11 @@ fn voices_as_python() {
 #[test]
 fn the_game_list() {
     let all = games();
-    // (built in: Teardown alone; profiles this PC has installed come after it)
-    assert_eq!(all.iter().filter(|g| g.builtin).count(), 1);
-    assert!(all[0].builtin);
+    // (built in: Teardown, then Don't Starve Together; profiles this PC has installed come after them)
+    assert_eq!(all.iter().filter(|g| g.builtin).count(), 2);
+    assert!(all[0].builtin && all[1].builtin);
     assert_eq!(by_id("teardown-proximity-babble-chat").name, "Teardown");
+    assert_eq!(by_id("dont-starve-together-proximity-comms").name, "Don't Starve Together");
     assert_eq!(by_id("no such game").id, all[0].id);
     for g in &all {
         assert!(!g.id.is_empty() && !g.name.is_empty() && !g.needs.is_empty());

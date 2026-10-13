@@ -26,7 +26,7 @@ fn a_prefix_in_use_is_refused_and_old_ids_are_the_builtins() {
     std::fs::write(&clash, files_profile("teardown-another-chat", "pcvx_")).unwrap();
     let e = install_profile(&clash).unwrap_err();
     assert!(e.contains("prefix is already used by Teardown (Proximity Comms mod)"), "{e}");
-    assert_eq!(games().len(), 1);
+    assert_eq!(games().len(), 2);
 
     // its own prefix: fine, next to the built-in
     let own = src.join("own.json");
@@ -34,12 +34,12 @@ fn a_prefix_in_use_is_refused_and_old_ids_are_the_builtins() {
     let g = install_profile(&own).unwrap();
     assert_eq!(g.id, "teardown-another-chat");
     let ids: Vec<String> = games().iter().map(|g| g.id.clone()).collect();
-    assert_eq!(ids, ["teardown-proximity-babble-chat", "teardown-another-chat"]);
+    assert_eq!(ids, ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms", "teardown-another-chat"]);
 
     // a file dropped into the folder by hand with a taken prefix: skipped, and said why (of two files, the first by
     // name keeps it)
     std::fs::write(dir.join("games").join("zz-dropped.json"), files_profile("teardown-third-chat", "achat_")).unwrap();
-    assert_eq!(games().len(), 2);
+    assert_eq!(games().len(), 3);
     assert!(bad_profiles().iter().any(|(p, why)| p.ends_with("zz-dropped.json") && why.contains("prefix is already used")));
 
     // the old id: the built-in, for settings that still hold it; no profile can take it

@@ -6,7 +6,7 @@
 //!                      kd_audio::STALE s = not connected)
 //!   Koetama -> mod    api.rs's objects: hello (on connect), speech, room (once per connection), voice, translation,
 //!                      translations_status
-//! No acks or pings: the connection is the liveness.
+//! No acks or pings: the connection is the liveness. A connection that speaks HTTP (a web page) is closed (looks_like_http).
 use crate::files::{as_used, cut_line, cut_translation};
 use crate::api;
 use crate::profile::{Connector, Profile};
@@ -33,6 +33,28 @@ pub const RETRY: Duration = Duration::from_secs(2);
 const TICK: Duration = Duration::from_millis(20);
 /// A message the mod does not read within this drops the connection (it hangs).
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long a new connection's first bytes are waited for before it replaces the old one: a web browser sends its
+/// request at once (and is turned away, the game's connection kept); a mod may also wait for Koetama's hello.
+const FIRST_BYTES: Duration = Duration::from_millis(150);
+
+/// The start of an HTTP request - its first line ("POST / HTTP/1.1") or a header ("Host: ...") - never a mod's JSON.
+/// Any web page can have the browser send a plain POST to 127.0.0.1:<port>, and its body could read as a feed (a
+/// voice room of the page's choosing, the microphone on): such a connection is closed before its body is read.
+pub fn looks_like_http(bytes: &[u8]) -> bool {
+    const METHODS: [&str; 9] = ["GET ", "POST ", "PUT ", "HEAD ", "OPTIONS ", "DELETE ", "PATCH ", "CONNECT ", "TRACE "];
+    let s = String::from_utf8_lossy(&bytes[..bytes.len().min(16)]);
+    let s = s.trim_start();
+    METHODS.iter().any(|m| s.starts_with(m)) || s.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("host:"))
+}
+
+/// A new connection's first bytes are an HTTP request (looked at without taking them, waiting at most FIRST_BYTES).
+fn sent_http(stream: &TcpStream) -> bool {
+    let mut b = [0u8; 16];
+    let _ = stream.set_read_timeout(Some(FIRST_BYTES));
+    let n = stream.peek(&mut b).unwrap_or(0);
+    let _ = stream.set_read_timeout(Some(TICK));
+    looks_like_http(&b[..n])
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -147,6 +169,11 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 let Ok(writer) = setup else {
                     continue;
                 };
+                if sent_http(&stream) {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    log(&format!("{}: refused a connection that spoke HTTP (a web page?)", profile.game));
+                    continue;
+                }
                 let _ = stream.set_nodelay(true);
                 if conn.is_some() {
                     drop_conn(&mut conn, &format!("{}: a new connection replaces the old one", profile.game));
@@ -181,11 +208,16 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 continue;
             }
         }
-        let mut too_long = false;
+        let (mut too_long, mut web) = (false, false);
         while let Some(pos) = c.buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = c.buf.drain(..=pos).collect();
             if line.len() > MAX_LINE + 1 {
                 too_long = true;
+                break;
+            }
+            // (a request that came after FIRST_BYTES: closed here, before its body)
+            if looks_like_http(&line) {
+                web = true;
                 break;
             }
             if let Err(e) = on_line(&line, &profile, &sink, &sh, &mut seq, session, &log) {
@@ -195,7 +227,9 @@ fn serve(port: u16, profile: Arc<Profile>, sink: Arc<dyn FeedSink>, sh: Arc<Shar
                 }
             }
         }
-        if too_long || c.buf.len() > MAX_LINE {
+        if web {
+            drop_conn(&mut conn, &format!("{}: an HTTP request on the game's port (a web page?): connection closed", profile.game));
+        } else if too_long || c.buf.len() > MAX_LINE {
             drop_conn(&mut conn, &format!("{}: a line over {} KB from the game: connection dropped", profile.game, MAX_LINE / 1024));
         }
     }

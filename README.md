@@ -123,6 +123,7 @@ with their size). The answer is Yes unless you choose No to keep them for a late
 | Game | Mod | Uses |
 |---|---|---|
 | Teardown | [Proximity Comms](https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496) | voices and speech to text |
+| Don't Starve Together | [Proximity Comms](https://steamcommunity.com/workshop/browse/?appid=322330&searchtext=Proximity+Comms) | voices, speech to text and translation |
 
 **Adding a game:** a mod made for Koetama comes with a small profile file (`.json`). In the window, open the game
 mod list and choose **Add game mod...**. Koetama shows what the profile reads, writes and listens on before adding
@@ -203,6 +204,25 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ## What's new
+
+### 0.5.5: Don't Starve Together
+
+- **Don't Starve Together** is built in: its Proximity Comms mod (proximity text and voice chat, live captions,
+  translation) shows in the game list next to Teardown.
+- The game list shows who made each game mod.
+- Safer voice chat: a changed Koetama can no longer make its voice heard across the whole map (a range beyond the
+  game's farthest is ignored), and a web page can no longer talk to a game's connection on this PC.
+- Games that send big requests over HTTP (Don't Starve Together) no longer get their data a second late.
+- **For mod makers** (see [PROTOCOL.md](PROTOCOL.md)):
+  - The feed's new **`max_range`**: the farthest any player's voice can reach in your game (your loudest mode's
+    `far`). A range another player's Koetama announces beyond it is ignored. Without it the limit is the farthest
+    `range` your feed gives, else 30, so a game whose players whisper and shout should send it. A hub passes the
+    host's on to its players.
+  - The **HTTP connector** answers `Expect: 100-continue` with `100 Continue` (libcurl sends it with any body over
+    1 KB). A client that sends that header must accept the interim reply; nothing changes for one that doesn't.
+  - The **socket connector** closes a connection that speaks HTTP (a request line or a `Host:` header): any web page
+    can make the browser connect to 127.0.0.1. A mod sends JSON lines, so it is not affected.
+  - A profile's **`author`** now shows in Koetama's window.
 
 ### 0.5.4: Proximity Comms
 

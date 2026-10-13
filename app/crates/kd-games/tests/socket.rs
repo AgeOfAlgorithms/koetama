@@ -321,3 +321,49 @@ fn a_connection_is_a_session_and_gets_its_room() {
     assert_eq!(g.feed().unwrap().sid, first + 1);
     g.stop();
 }
+
+#[test]
+fn http_is_never_a_mod() {
+    use kd_games::socket::looks_like_http;
+    for s in ["POST / HTTP/1.1\r\n", "GET /x HTTP/1.0\r\n", "OPTIONS * HTTP/1.1", "  PUT /", "Host: 127.0.0.1:47120\r\n", "host:x"] {
+        assert!(looks_like_http(s.as_bytes()), "{s:?}");
+    }
+    for s in [r#"{"type":"feed"}"#, " {\"type\":\"hello\"}", "", "GETTING", "post / http/1.1", "Hostile"] {
+        assert!(!looks_like_http(s.as_bytes()), "{s:?}");
+    }
+}
+
+#[test]
+fn a_web_page_cannot_speak_for_the_game() {
+    let port = free_port();
+    let sink = Arc::new(Sink::default());
+    let (log, lines) = logger();
+    let mut g = SocketGame::new(Arc::new(profile(port, json!(["voices", "speech"]))), false, sink.clone(), log);
+    g.start();
+    let mut game = Client::connect(port);
+    assert_eq!(game.line()["type"], "hello");
+    game.send(r#"{"type":"feed","listen":"off"}"#);
+    wait_until("the game's feed", || g.updates() == 1);
+    // any web site can have the browser send this (fetch with mode "no-cors" and a text body): its body would be a feed
+    // putting the microphone into the page's voice room
+    let feed = r#"{"type":"feed","listen":"always","room_seed":"the page's room","me":1}"#;
+    let post = format!(
+        "POST / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: text/plain;charset=UTF-8\r\nContent-Length: {}\r\n\r\n{feed}\n",
+        feed.len() + 1
+    );
+    let mut web = Client::connect(port);
+    web.w.write_all(post.as_bytes()).unwrap();
+    assert!(web.closed(), "turned away");
+    assert!(g.send_text("still the game"), "the game's connection is kept");
+    assert_eq!(game.line()["text"], "still the game");
+    assert!(g.updates() == 1 && !g.feed().unwrap().mic && sink.0.lock().unwrap().len() == 1, "the page's feed was not taken");
+    // a request that comes after the first moments (the connection taken by then): closed before its body is read
+    let mut late = Client::connect(port);
+    assert_eq!(late.line()["type"], "hello");
+    late.w.write_all(post.as_bytes()).unwrap();
+    assert!(late.closed());
+    wait_until("the page's connection is gone", || !g.has_client());
+    assert_eq!(sink.0.lock().unwrap().len(), 1, "no feed from the page");
+    let log = lines.lock().unwrap();
+    assert!(log.iter().any(|l| l.contains("refused a connection that spoke HTTP")) && log.iter().any(|l| l.contains("an HTTP request")), "{log:?}");
+}

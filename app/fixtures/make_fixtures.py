@@ -204,6 +204,10 @@ def feed_cases():
         dict(me='me', room_seed='s', listener=dict(position=[0, 0], forward=[0, 0, 1], right=[1, 0, 0], up=[0, 1, 0])),
         dict(me='me', room_seed='s', range=[5, 5], speakers=[dict(id=1, range=[3, 1])]),
         dict(me=1, room_seed='s', speakers=[dict(id=2), dict(id=3)], to=[]),
+        # max_range: a positive number, anything else ignored
+        dict(me=1, room_seed='s', range=[2, 8], max_range=60), dict(max_range=7.5), dict(max_range=0), dict(max_range=-3),
+        dict(max_range='far'), dict(max_range=True), dict(max_range=[1, 2]), dict(max_range=None),
+        dict(me=1, room_seed='s', max_range=40, players=[dict(id=2), dict(id=3, max_range=10)]),
         dict(me=1, room_seed='s', players=[dict(id=2, listen='always', lang='de'), dict(id='bob', room_seed='other'),
                                           dict(id=2, listen='off'), dict(listen='always'),
                                           dict(id=3, room=room, key=key, region='weur')]),

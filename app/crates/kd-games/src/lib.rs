@@ -1,7 +1,7 @@
 //! The game mods Koetama works with (engine/games/). A game mod is a PROFILE (profile.rs: a small JSON file), never
 //! code: Koetama's built-in CONNECTORS do the talking (files.rs: Teardown's link, through a file the game saves and
 //! files next to the mod; socket.rs: a TCP connection on 127.0.0.1) and a profile only names one and gives its
-//! settings. Built-in profiles (Teardown) are compiled in; others are *.json files in [`profiles_dir`]. [`games`]
+//! settings. Built-in profiles (Teardown, Don't Starve Together) are compiled in; others are *.json files in [`profiles_dir`]. [`games`]
 //! lists them in the window's game picker.
 //!
 //! The engine (speech to text, the voice mixer) knows no game; a connector is only the game's LINK. The game's state,
@@ -232,9 +232,19 @@ impl GameKind {
     }
 }
 
+/// Don't Starve Together's Proximity Comms (github.com/AgeOfAlgorithms/dst-proximity-comms): the HTTP connector, so
+/// the profile is all of it (the mod keeps the same file in its repo, koetama/).
+pub const DST_ID: &str = "dont-starve-together-proximity-comms";
+pub const DST_PROFILE_JSON: &str = include_str!("profiles/dont-starve-together-proximity-comms.json");
+static DST: LazyLock<Arc<Profile>> =
+    LazyLock::new(|| Arc::new(Profile::parse(DST_PROFILE_JSON).expect("the built-in Don't Starve Together profile is valid (tested)")));
+
 /// The built-in game mods (compiled in).
 fn builtins() -> Vec<GameKind> {
-    vec![GameKind::from_profile((*teardown::profile()).clone(), true, None)]
+    vec![
+        GameKind::from_profile((*teardown::profile()).clone(), true, None),
+        GameKind::from_profile((**DST).clone(), true, None),
+    ]
 }
 
 /// Where profile files are: Koetama's data folder/games (KOETAMA_PROFILES_DIR: tests).

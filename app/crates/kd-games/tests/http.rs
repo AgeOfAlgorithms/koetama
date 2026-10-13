@@ -314,3 +314,47 @@ fn other_hosts_and_slow_senders() {
     }
     g.stop();
 }
+
+/// libcurl (Don't Starve Together's QueryServer) sends "Expect: 100-continue" with a body over 1 KB and holds the
+/// body back until it hears "100 Continue" (or 1 s passes): Koetama says it at once, and only when asked.
+#[test]
+fn expect_100_continue() {
+    let port = free_port();
+    let mut g = HttpGame::new(profile(port, json!({})), false, Arc::new(Sink::default()), kd_common::null_log());
+    g.start();
+    assert_eq!(request(port, "GET", &[], "").0, 200, "the server is up");
+    let feed = json!({"type": "feed", "session": 3, "name": "x".repeat(2000)}).to_string();
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(
+        format!(
+            "POST / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+             Expect: 100-continue\r\n\r\n",
+            feed.len()
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    let mut first = [0u8; 25];
+    s.read_exact(&mut first).expect("100 Continue before the body");
+    assert_eq!(&first, b"HTTP/1.1 100 Continue\r\n\r\n");
+    s.write_all(feed.as_bytes()).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let mut rest = String::new();
+    s.read_to_string(&mut rest).unwrap();
+    assert!(rest.starts_with("HTTP/1.1 200 "), "{rest}");
+    assert!(rest.contains("\"hello\""), "{rest}");
+    // without Expect: no interim answer, the final one only
+    let (status, _, body) = request(port, "POST", &[], &json!({"session": 3, "ack": 1}).to_string());
+    assert_eq!(status, 200, "{body}");
+    // too big: the final 413 at once, never a 100
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(
+        format!("POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nExpect: 100-continue\r\n\r\n", 1 << 20).as_bytes(),
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    assert!(out.starts_with("HTTP/1.1 413 "), "{out}");
+    g.stop();
+}

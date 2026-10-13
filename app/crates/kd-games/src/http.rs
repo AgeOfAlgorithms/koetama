@@ -268,6 +268,11 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
         return Err(413);
     }
     let mut body = buf[head_end + 4..].to_vec();
+    // (libcurl - Don't Starve Together's QueryServer - sends "Expect: 100-continue" with a body over 1 KB and holds
+    //  the body back for up to 1 s until it hears "100 Continue": without it every bigger feed came a second late)
+    if body.len() < len && headers.get("expect").is_some_and(|e| e.eq_ignore_ascii_case("100-continue")) {
+        stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").map_err(|_| 400u16)?;
+    }
     while body.len() < len {
         let n = read(stream, &mut chunk)?;
         if n == 0 {

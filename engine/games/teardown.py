@@ -275,6 +275,12 @@ def _range(v):
     return (float(n), float(f)) if ok and 0 <= n < f else None
 
 
+def _positive(v):
+    """a positive, finite number (max_range), else None (ignored)"""
+    ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v > 0
+    return float(v) if ok else None
+
+
 def _short(v):
     return ''.join(c for c in v if unicodedata.category(c) != 'Cc')[:64] if isinstance(v, str) else ''
 
@@ -498,7 +504,8 @@ def _parse_one(v, inherit=None):
                 ptt=_flag(v, 'talk_key', False) if listen == 'push_to_talk' else None, lang=lang,
                 live=_flag(v, 'live', True), speakers=speakers, room=room, key=key, me=me, to=ids, region=region,
                 translate=_flag(v, 'translate', True), to_translate=parse_requests(lines), me_id=me_id,
-                name=_short(v.get('name')), range=my_range, clashes=clashes, transmit_all=transmit_all, players=[])
+                name=_short(v.get('name')), range=my_range, max_range=_positive(v.get('max_range')), clashes=clashes,
+                transmit_all=transmit_all, players=[])
 
 
 def parse_feed(text):

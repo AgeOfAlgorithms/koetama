@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "id": "dont-starve-together-proximity-comms",
+  "game": "Don't Starve Together",
+  "mod": "Proximity Comms",
+  "url": "https://steamcommunity.com/workshop/browse/?appid=322330&searchtext=Proximity+Comms",
+  "author": "AgeOfAlgorithms(+Opus5.5)",
+  "locate": {
+    "steam_app": 322330
+  },
+  "uses": [
+    "voices",
+    "speech",
+    "translate"
+  ],
+  "test_voices": [
+    {
+      "id": 1,
+      "voice": "Microsoft Zira Desktop",
+      "rate": -1,
+      "text": "I am the whisperer. Stay close, or you will not hear me at all."
+    },
+    {
+      "id": 2,
+      "voice": "Microsoft David Desktop",
+      "rate": 0,
+      "text": "I am the speaker. This is my normal voice, and it carries a fair distance."
+    },
+    {
+      "id": 3,
+      "voice": "Microsoft David Desktop",
+      "rate": 2,
+      "text": "I am the yeller! You can hear me from far away!"
+    }
+  ],
+  "speaker_names": {
+    "1": "the whisperer",
+    "2": "the speaker",
+    "3": "the yeller"
+  },
+  "connector": {
+    "type": "http",
+    "port": 47170
+  }
+}

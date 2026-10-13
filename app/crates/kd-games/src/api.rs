@@ -333,6 +333,9 @@ fn player_feed(p: &Value, host: &Feed, id: Option<&PlayerId>) -> String {
     if m.get("region").is_none() && !host.region.is_empty() {
         m.insert("region".into(), Value::from(host.region.clone()));
     }
+    if let (None, Some(x)) = (m.get("max_range"), host.max_range) {
+        m.insert("max_range".into(), Value::from(x));
+    }
     m.insert("session".into(), Value::from(host.sid));
     m.remove("players");
     Value::Object(m).to_string()
@@ -769,6 +772,7 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         me_id,
         name: short_text(v.get("name")),
         range: my_range,
+        max_range: v.get("max_range").and_then(Value::as_f64).filter(|x| x.is_finite() && *x > 0.0),
         clashes,
         transmit_all,
         players: Vec::new(),

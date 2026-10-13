@@ -309,6 +309,14 @@ pub fn falloff(distance: f64, (near, far): (f64, f64)) -> f64 {
 /// the range a voice reaches when nothing says otherwise
 pub const DEFAULT_RANGE: (f64, f64) = (10.0, 30.0);
 
+/// The range a speaker is heard with (PROTOCOL.md "Positions and ranges"): the one their own Koetama announces in its
+/// voice packets, unless it reaches beyond `ceiling` (a changed Koetama claiming to be heard across the map: ignored),
+/// else the one the feed gives for them, else this player's own, else DEFAULT_RANGE.
+pub fn heard_range(announced: Option<(f64, f64)>, theirs: Option<(f64, f64)>, mine: Option<(f64, f64)>, ceiling: f64) -> (f64, f64) {
+    // (compared as f32: an announced range travels as f32, so a far equal to the ceiling may come back a hair above it)
+    announced.filter(|r| r.1 as f32 <= ceiling as f32).or(theirs).or(mine).unwrap_or(DEFAULT_RANGE)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Feed {
     pub seq: i64,
@@ -364,6 +372,10 @@ pub struct Feed {
     /// how far this player's voice reaches now, [near, far] in the game's units (PROTOCOL.md "Positions and ranges")
     #[serde(default)]
     pub range: Option<(f64, f64)>,
+    /// the farthest any player's voice may reach in this game, in its units (`max_range`; None: range_ceiling works
+    /// one out)
+    #[serde(default)]
+    pub max_range: Option<f64>,
     /// the speakers' ids that clash with this player's (or each other's) number in this room
     #[serde(default)]
     pub clashes: Vec<PlayerId>,
@@ -533,6 +545,13 @@ impl Feed {
     pub fn has_room(&self) -> bool {
         !self.room.is_empty()
     }
+
+    /// The farthest any voice may reach for this player, in the game's units (heard_range's ceiling): the feed's
+    /// `max_range`, else the farthest range the feed itself gives (this player's, a speaker's), else DEFAULT_RANGE's.
+    pub fn range_ceiling(&self) -> f64 {
+        let given = self.range.iter().chain(self.speakers.values().filter_map(|s| s.range.as_ref())).map(|r| r.1);
+        self.max_range.or_else(|| given.reduce(f64::max)).unwrap_or(DEFAULT_RANGE.1)
+    }
 }
 
 /// Where a game module hands each new feed: the voice mixer (kd_audio::MixerSink), or a test's recorder.
@@ -540,4 +559,35 @@ pub trait FeedSink: Send + Sync {
     fn set_feed(&self, feed: Feed);
     /// a feed came at most kd_audio::STALE s ago (the game is running the mod)
     fn fresh(&self) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_announced_range_counts_only_up_to_the_ceiling() {
+        let (theirs, mine) = (Some((5.0, 20.0)), Some((2.0, 8.0)));
+        assert_eq!(heard_range(Some((10.0, 40.0)), theirs, mine, 60.0), (10.0, 40.0), "a shout within the game's reach");
+        assert_eq!(heard_range(Some((10.0, 60.0)), theirs, mine, 60.0), (10.0, 60.0), "exactly the ceiling");
+        assert_eq!(heard_range(Some((1e6, 1e7)), theirs, mine, 60.0), (5.0, 20.0), "across the map: the feed's own for them");
+        assert_eq!(heard_range(Some((1e6, 1e7)), None, mine, 60.0), (2.0, 8.0), "else this player's");
+        assert_eq!(heard_range(Some((1e6, 1e7)), None, None, 60.0), DEFAULT_RANGE);
+        assert_eq!(heard_range(None, theirs, mine, 60.0), (5.0, 20.0), "nothing announced");
+        // (an announced range comes as f32: 25.1 as f32 is a hair above 25.1)
+        let far = 25.1f32 as f64;
+        assert!(far > 25.1 && heard_range(Some((1.0, far)), None, None, 25.1) == (1.0, far));
+    }
+
+    #[test]
+    fn the_ceiling() {
+        let sp = |range| Speaker { range, ..Default::default() };
+        let mut f = Feed { range: Some((2.0, 8.0)), ..Default::default() };
+        f.speakers.insert(1, sp(Some((10.0, 50.0))));
+        f.speakers.insert(2, sp(None));
+        assert_eq!(f.range_ceiling(), 50.0, "the farthest range the feed gives");
+        assert_eq!(Feed { max_range: Some(100.0), ..f.clone() }.range_ceiling(), 100.0, "max_range wins");
+        assert_eq!(Feed { max_range: Some(4.0), ..f }.range_ceiling(), 4.0, "also below the feed's ranges");
+        assert_eq!(Feed::default().range_ceiling(), DEFAULT_RANGE.1, "none given");
+    }
 }

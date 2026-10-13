@@ -70,6 +70,9 @@ namespace Koetama
         public Listener Listener;
         /// <summary>How far this player's voice reaches now (whisper, talk, shout); null: not sent.</summary>
         public VoiceRange? Range;
+        /// <summary>The farthest any player's voice may reach in this game (a shout's far); null: not sent. A range
+        /// another player's Koetama announces beyond it is not believed.</summary>
+        public double? MaxRange;
 
         /// <summary>The session's voice room as a string every player has (Koetama makes room and key from it).</summary>
         public string RoomSeed;
@@ -123,6 +126,7 @@ namespace Koetama
                 w.EndObject();
             }
             if (Range.HasValue) w.BeginArray("range").Value(Range.Value.Near, 2).Value(Range.Value.Far, 2).EndArray();
+            if (MaxRange.HasValue) w.Prop("max_range", MaxRange.Value, 2);
             if (!string.IsNullOrEmpty(Me))
             {
                 w.Prop("me", Me);

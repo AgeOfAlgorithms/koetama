@@ -78,6 +78,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
     assert_eq!(f.me_id, pid(&want["me_id"]), "{text}");
     assert_eq!(f.name, want["name"].as_str().unwrap(), "{text}");
     assert_eq!(f.range, range_of(&want["range"]), "{text}");
+    assert_eq!(f.max_range, want["max_range"].as_f64(), "{text}");
     let clashes: Vec<PlayerId> = want["clashes"].as_array().unwrap().iter().map(|c| pid(c).unwrap()).collect();
     assert_eq!(f.clashes, clashes, "{text}");
     assert_eq!(f.region, want["region"].as_str().unwrap(), "{text}");
@@ -138,7 +139,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 72);
+    assert_eq!(cases.len(), 81);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -253,4 +254,17 @@ fn helper_feed_checks() {
     let got = find_feeds(odd);
     assert_eq!(got, vec![("steam-\u{FFFD}1".to_string(), "{}\u{FFFD}".to_string())]);
     assert!(parse_feed(&got[0].1).is_none());
+}
+
+#[test]
+fn a_hubs_players_get_its_max_range() {
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"me":1,"room_seed":"s","max_range":40,"players":[{"id":2},{"id":3,"max_range":10}]}"#,
+    )
+    .unwrap();
+    let f = api::parse_feed(&v).unwrap();
+    let raw = |i: usize| serde_json::from_str::<serde_json::Value>(&f.players[i].raw).unwrap();
+    assert_eq!((raw(0)["max_range"].as_f64(), raw(1)["max_range"].as_f64()), (Some(40.0), Some(10.0)), "the host's, unless their own");
+    let joined = api::parse_feed(&raw(0)).unwrap();
+    assert_eq!(joined.max_range, Some(40.0), "as the joined player's Koetama reads it");
 }

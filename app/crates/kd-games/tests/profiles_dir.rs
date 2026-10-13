@@ -36,11 +36,18 @@ fn the_profiles_folder() {
     std::env::set_var("KOETAMA_PROFILES_DIR", &dir);
     assert_eq!(profiles_dir(), dir);
     // no folder yet: the built-ins
-    assert_eq!(ids(), ["teardown-proximity-babble-chat"]);
+    assert_eq!(ids(), ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms"]);
     assert!(bad_profiles().is_empty());
     let td = by_id("teardown-proximity-babble-chat");
-    assert!(td.builtin && td.source.is_none() && td.voices && td.speech && td.name == "Teardown" && td.author == "AgeOfAlgorithms");
+    assert!(td.builtin && td.source.is_none() && td.voices && td.speech && td.name == "Teardown" && td.author == "AgeOfAlgorithms(+Opus5.5)");
     assert!(td.summary.iter().any(|l| l.contains("pcvx_*")), "{:?}", td.summary);
+    // Don't Starve Together's Proximity Comms: built in too (HTTP on 47170, its three test voices)
+    let dst = by_id("dont-starve-together-proximity-comms");
+    assert!(dst.builtin && dst.source.is_none() && dst.voices && dst.speech && dst.translate, "{dst:?}");
+    assert!(dst.name == "Don't Starve Together" && dst.mod_name == "Proximity Comms" && dst.author == "AgeOfAlgorithms(+Opus5.5)");
+    assert!(dst.summary.iter().any(|l| l == "answers HTTP on 127.0.0.1:47170 (this computer only)"), "{:?}", dst.summary);
+    assert_eq!(dst.profile.test_voices.len(), 3);
+    assert!(remove_profile("dont-starve-together-proximity-comms").is_err(), "a built-in cannot be removed");
 
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("a.json"), socket("example-game", "Example Game", 47120)).unwrap();
@@ -49,7 +56,7 @@ fn the_profiles_folder() {
     std::fs::write(dir.join("d.JSON"), socket("example-game", "Example Again", 47122)).unwrap();
     std::fs::write(dir.join("e.json"), socket("zz-game", "ZZ", 47123)).unwrap();
     std::fs::write(dir.join("notes.txt"), "not a profile").unwrap();
-    assert_eq!(ids(), ["teardown-proximity-babble-chat", "example-game", "zz-game"]);
+    assert_eq!(ids(), ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms", "example-game", "zz-game"]);
     let ex = by_id("example-game");
     assert!(!ex.builtin && ex.source.as_deref() == Some(dir.join("a.json").as_path()) && ex.name == "Example Game");
     assert_eq!(ex.summary[0], "listens on 127.0.0.1:47120 (this computer only)");
@@ -73,7 +80,7 @@ fn the_profiles_folder() {
     let g = install_profile(&new).unwrap();
     assert_eq!(g.source.as_deref(), Some(dir.join("other-game.json").as_path()));
     assert!(new.exists(), "the user's own copy stays");
-    assert_eq!(ids(), ["teardown-proximity-babble-chat", "example-game", "zz-game", "other-game"], "sorted by file name: a, e, other-game");
+    assert_eq!(ids(), ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms", "example-game", "zz-game", "other-game"], "sorted by file name: a, e, other-game");
     // a built-in's id: refused
     let fake = outside.join("teardown.json");
     std::fs::write(&fake, socket("teardown", "Fake", 47125)).unwrap();
@@ -91,7 +98,7 @@ fn the_profiles_folder() {
     // installing a file already in the folder under another name: moved to <id>.json
     install_profile(&dir.join("e.json")).unwrap();
     assert!(!dir.join("e.json").exists() && dir.join("zz-game.json").exists());
-    assert_eq!(ids(), ["teardown-proximity-babble-chat", "example-game", "other-game", "zz-game"]);
+    assert_eq!(ids(), ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms", "example-game", "other-game", "zz-game"]);
     // reinstalling a profile from its own place: still there
     install_profile(&dir.join("zz-game.json")).unwrap();
     assert!(dir.join("zz-game.json").exists());
@@ -101,7 +108,7 @@ fn the_profiles_folder() {
     remove_profile("other-game").unwrap();
     assert!(!dir.join("other-game.json").exists());
     assert_eq!(remove_profile("other-game").unwrap_err(), "no game mod profile with the id \"other-game\"");
-    assert_eq!(ids(), ["teardown-proximity-babble-chat", "example-game", "zz-game"]);
+    assert_eq!(ids(), ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms", "example-game", "zz-game"]);
     assert!(dir.join("notes.txt").exists() && dir.join("b.json").exists() && dir.join("c.json").exists(), "other files untouched");
     // a profile's module
     let sink = std::sync::Arc::new(NoSink);

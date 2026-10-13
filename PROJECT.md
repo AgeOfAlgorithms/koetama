@@ -117,6 +117,15 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
 
 ## Open
 
+- **Don't Starve Together (2026-10-13; the mod: github.com/AgeOfAlgorithms/dst-proximity-comms, private for now; its
+  PROJECT.md):** for
+  the next release: the HTTP connector answers `Expect: 100-continue` (DST's libcurl sends it with any body over 1 KB
+  and held the feed 1 s without it; `kd-games/src/http.rs`, test `expect_100_continue`; the mod tells players with an
+  older Koetama to update), and the window shows each game mod's author (the Teardown profile's author is now
+  "AgeOfAlgorithms(+Opus5.5)"). The DST profile (`dont-starve-together-proximity-comms`, HTTP 47170, test voices) is
+  built in (the user, 2026-10-13: `kd-games/src/profiles/`, `lib.rs` `builtins()`; the mod's repo keeps the same file);
+  its `url` is the Workshop's search for the mod until the item exists, then the item's page. Tried in game with a debug build: the room, the
+  test voices' directions and loudness, a typed "spoken" line, an es -> en translation.
 - **Real voices (2026-10-07; built and tested offline and through the live relay, NOT tried in-game):** feed version
   5 (room, key, me, to; Python reference and fixtures too), the `r` message (a fresh room once per game session; the
   socket connector: once per connection), the crate kd-voice (the relay client, end-to-end encryption, Opus 24 kbit/s
@@ -500,3 +509,17 @@ HTTP connector for sandboxed scripts) found five gaps, all closed in protocol 2 
 Tested: Rust and Python suites (fixtures shared), and over the live relay (no relay change was needed): a joined
 player's typed line reached the host's game 251 ms after it was typed; two seeded Koetamas saw each other in
 `players` and the listener heard `talking` ~140 ms after the speaker's own Koetama. NOT tried in a real game yet.
+
+**2026-10-12: two holes closed (the user asked whether packet editing works against Koetama).** Voice packets were
+already safe from tampering (ChaCha20-Poly1305 with the sender's relay id as aad; the game id inside checked against
+it). Two gaps were not:
+1. **A player's Koetama decided how far its own voice carried.** The range in its voice packets won over the listener's
+   game, unchecked, so a changed Koetama could claim `[1e6, 1e7]` and be heard at full volume across the map (games
+   that give positions without a `gain`: the Valheim demo; not Teardown, whose mod gives gains). Now the feed's
+   `max_range` (else the farthest range the feed gives, else 30) caps it: a range announced beyond it is ignored
+   (`kd_common::feed::heard_range`, `Feed::range_ceiling`; Python parses `max_range` too; fixtures). A hub passes the
+   host's `max_range` to its players; the Valheim demo sends its shout range (not compiled: no .NET SDK here now).
+2. **A web page could speak to the socket connector.** Any site can have the browser POST to 127.0.0.1:<port>; the
+   connector skipped the header lines and could take the body as a feed (the microphone into the page's room). Now a
+   new connection's first bytes are peeked (0.15 s) before it replaces the old one, and an HTTP request line or
+   `Host:` header closes the connection (`socket::looks_like_http`). Tested with a browser-style POST.

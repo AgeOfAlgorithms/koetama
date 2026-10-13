@@ -4,7 +4,7 @@
   "game": "Teardown",
   "mod": "Proximity Comms",
   "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496",
-  "author": "AgeOfAlgorithms",
+  "author": "AgeOfAlgorithms(+Opus5.5)",
   "locate": {"steam_app": 1167630},
   "uses": ["voices", "speech", "translate"],
   "test_voices": [

@@ -638,9 +638,15 @@ impl App {
                             open_url(&g.mod_url);
                         }
                     });
-                    if !g.builtin && ui.link(RichText::new("Remove").size(12.5).color(theme::MUTED)).clicked() {
-                        remove = Some(g.clone());
-                    }
+                    // (who made it: every profile names its author)
+                    ui.horizontal(|ui| {
+                        if !g.author.is_empty() {
+                            ui.label(RichText::new(format!("by {}", g.author)).size(12.0).color(theme::MUTED));
+                        }
+                        if !g.builtin && ui.link(RichText::new("Remove").size(12.5).color(theme::MUTED)).clicked() {
+                            remove = Some(g.clone());
+                        }
+                    });
                     ui.add_space(2.0);
                 }
                 for (path, why) in kd_games::bad_profiles() {
@@ -711,6 +717,9 @@ impl App {
                 && ui.link(RichText::new(format!("Get the {} mod ↗", kind.mod_name)).size(12.5).color(theme::ACCENT_TEXT)).clicked()
             {
                 open_url(&kind.mod_url);
+            }
+            if !kind.author.is_empty() {
+                ui.label(RichText::new(format!("{} by {}", kind.mod_name, kind.author)).size(12.5).color(theme::MUTED));
             }
             if !self.profile_msg.is_empty() {
                 ui.label(RichText::new(&self.profile_msg).size(12.5).color(theme::MUTED));

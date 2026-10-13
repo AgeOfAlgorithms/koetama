@@ -200,12 +200,12 @@ struct Sink {
 impl kd_common::feed::FeedSink for Sink {
     fn set_feed(&self, mut feed: kd_common::feed::Feed) {
         if let Some(v) = &self.voice {
-            // (positions: a player's loudness by the distance and the range their own Koetama announces - PROTOCOL.md
-            //  "Positions and ranges"; a gain the game gave wins)
-            let mine = feed.range;
+            // (positions: a player's loudness by the distance and the range their own Koetama announces, up to the
+            //  game's farthest - PROTOCOL.md "Positions and ranges"; a gain the game gave wins)
+            let (mine, ceiling) = (feed.range, feed.range_ceiling());
             for (rid, sp) in feed.speakers.iter_mut() {
                 if let (Some(d), false) = (sp.distance, sp.gain_given) {
-                    let range = v.range_of(*rid).or(sp.range).or(mine).unwrap_or(kd_common::feed::DEFAULT_RANGE);
+                    let range = kd_common::feed::heard_range(v.range_of(*rid), sp.range, mine, ceiling);
                     sp.gain = kd_common::feed::falloff(d, range);
                 }
             }

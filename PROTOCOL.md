@@ -42,6 +42,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `room`, `key` | none | instead of `room_seed`: the room and key themselves, 32 and 64 lower-case hex digits (the ones Koetama offers in a `room` object, shared by the game: "Real voices"). Neither: no voices sent or heard |
 | `listener` | none | where this player hears from: `{"position": [x,y,z], "forward": [x,y,z], "right": [x,y,z], "up": [x,y,z]}` - position the character's head (not the camera), the directions the camera's in the game's own units and axes (the three directions settle which way is right; they need not be unit length) |
 | `range` | none | how far this player's voice reaches now: `[near, far]` in the game's units - full loudness within `near`, nothing beyond `far` (a whisper `[1,4]`, talk `[8,25]`, a shout `[20,70]`). Other players' Koetamas use it for this player's loudness |
+| `max_range` | (the farthest `range` this feed gives) | the farthest any player's voice can reach in this game, in its units (the loudest mode's `far`: `70` above). A range another player's Koetama announces beyond it is not believed ("Positions and ranges"). Give it whenever ranges differ by mode; a hub passes the host's on to its players |
 | `to` | (with `range` and positions: everyone within `far`) | the player ids who should get this player's voice right now; empty: nobody. Left out: with `range`, `listener` and speakers' positions, Koetama sends to the speakers within `far` (and 10 % more); else nobody |
 | `transmit` | false | this player's voice is going into a device now ("Devices"): `true` - also to everyone in the voice room; a list of player ids - also to them |
 | `region` | `""` | where the voice room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; `""` (or anything else): wherever the first player is. Every player of a session sends the same one |
@@ -146,7 +147,10 @@ A game can give Koetama positions instead of doing the sound's maths itself:
   loudness from the distance: 1 within that player's `near`, falling to 0 at their `far` (the square of the way
   left: `((far - d) / (far - near))²`). Their range is the one their own Koetama announces (their feed's `range`,
   carried in their voice packets), else the speaker's `range` in this feed, else this player's own `range`, else
-  `[10, 30]`.
+  `[10, 30]`. An announced range whose `far` is beyond **`max_range`** is ignored: anyone can change their own Koetama
+  (it is open source) to claim a voice heard across the map. Without `max_range` the limit is the farthest `range`
+  the feed gives (this player's, a speaker's), else 30 - so a game whose players whisper and shout should give it, or
+  a whispering listener would hear a shout only as far as their own whisper.
 - a speaker's **`gain`**, when given, wins over the distance (a radio, a phone call, the dead hearing the living).
 - **`range`**: how far this player's voice reaches right now (whispering, talking, shouting), in the game's units.
   With it, positions and no `to`, Koetama sends this player's voice to the speakers within `far` (+10 %).
@@ -306,12 +310,19 @@ both ways. On connect Koetama sends its `hello`; the mod may send `{"type":"hell
 then feeds. Each connection is a session (a new `room` for it). No acks or pings: the connection shows the game is
 there. Koetama skips a line that is not JSON or a feed it cannot read (logging the first per connection), ignores an
 unknown `type`, and drops a connection whose line is longer than 64 KB. A busy port is tried again every 2 s.
+**Web pages are refused:** any site can make a browser send a plain HTTP POST to `127.0.0.1:<port>`, whose body
+would otherwise read as a feed (the microphone into the page's voice room). A new connection's first bytes are
+looked at (up to 0.15 s) before it replaces the old one: an HTTP request is closed at once and the game's connection
+kept; a request line or `Host:` header later on closes that connection before its body is read. A mod never sends
+either (its lines are JSON); it may send first or wait for Koetama's hello.
 `examples/socket_client.py` is a working client (Python 3, no packages) and a manual test.
 
 ## Transport: HTTP
 
 `{"type": "http", "port": 47140}` in the profile. Koetama answers HTTP/1.1 on `127.0.0.1:<port>` only. The mod POSTs
-its feed object (`Content-Length`, no chunked bodies; at most 64 KB) to `/`, and the answer is what Koetama has for it:
+its feed object (`Content-Length`, no chunked bodies; at most 64 KB) to `/`, and the answer is what Koetama has for it
+(a request with `Expect: 100-continue` - libcurl's, so Don't Starve Together's, with any body over 1 KB - gets
+`100 Continue` at once; before Koetama 0.5.5 it got none, and libcurl held such a feed back for 1 s):
 
     {"objects": [{"type":"hello",...}, {"type":"speech",...}], "first": 1, "last": 2}
 
@@ -384,7 +395,8 @@ Koetama's engine knows no game. Speech detection, speech to text and the languag
 `kd-speech`, and the voice mixer is `kd-audio` (in `app/crates/`). A game mod is linked to Koetama by a **profile**:
 a small JSON file that names one of Koetama's built-in **connectors** and gives its settings. A profile is never
 code, so anyone can write one for their game's mod without changing Koetama. A connector only does what this
-section describes. Teardown's link is a profile too, built into Koetama (`app/crates/kd-games/src/profiles/teardown.json`).
+section describes. Teardown's link is a profile too, built into Koetama (`app/crates/kd-games/src/profiles/`), and so is
+Don't Starve Together's (the HTTP connector).
 
 Three connectors, the transports above: **socket** (the mod opens a TCP connection), **http** (the mod makes HTTP
 requests) and **files** (the mod writes its feed into a file, and reads Koetama's objects from files next to
