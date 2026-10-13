@@ -123,7 +123,6 @@ with their size). The answer is Yes unless you choose No to keep them for a late
 | Game | Mod | Uses |
 |---|---|---|
 | Teardown | [Proximity Comms](https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496) | voices and speech to text |
-| Don't Starve Together | [Proximity Comms](https://steamcommunity.com/workshop/browse/?appid=322330&searchtext=Proximity+Comms) | voices, speech to text and translation |
 
 **Adding a game:** a mod made for Koetama comes with a small profile file (`.json`). In the window, open the game
 mod list and choose **Add game mod...**. Koetama shows what the profile reads, writes and listens on before adding
@@ -205,14 +204,12 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 ## What's new
 
-### 0.5.5: Don't Starve Together
+### 0.5.5: safer voice chat
 
-- **Don't Starve Together** is built in: its Proximity Comms mod (proximity text and voice chat, live captions,
-  translation) shows in the game list next to Teardown.
 - The game list shows who made each game mod.
 - Safer voice chat: a changed Koetama can no longer make its voice heard across the whole map (a range beyond the
   game's farthest is ignored), and a web page can no longer talk to a game's connection on this PC.
-- Games that send big requests over HTTP (Don't Starve Together) no longer get their data a second late.
+- Games that send big requests over HTTP no longer get their data a second late.
 - **For mod makers** (see [PROTOCOL.md](PROTOCOL.md)):
   - The feed's new **`max_range`**: the farthest any player's voice can reach in your game (your loudest mode's
     `far`). A range another player's Koetama announces beyond it is ignored. Without it the limit is the farthest
