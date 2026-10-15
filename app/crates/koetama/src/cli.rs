@@ -32,6 +32,17 @@ struct Args {
     /// play this recording as the microphone (real time; tests without one)
     #[arg(long = "mic-wav", value_name = "WAV")]
     mic_wav: Option<String>,
+    /// a simulated microphone (--list-sim-mics: which) instead of the device: the recording of --mic-wav (else a
+    /// voice-like test signal) played through it, over and over, into the same capture, voice chat and speech to text
+    /// a real one goes through (tests: tools/voice_e2e.py)
+    #[arg(long = "sim-mic", value_name = "NAME")]
+    sim_mic: Option<String>,
+    /// list the simulated microphones
+    #[arg(long = "list-sim-mics")]
+    list_sim_mics: bool,
+    /// play into this wav file (48 kHz stereo) instead of a sound device: what this player hears, kept (tests)
+    #[arg(long = "out-wav", value_name = "WAV")]
+    out_wav: Option<String>,
     /// no microphone: recorded lines (English, one-word callouts, Russian, Chinese, Spanish, German, mixed) played
     /// through the REAL speech-to-text as if spoken, each in its own language (needs export/asrbench from the benchmark)
     #[arg(long = "auto-speech")]
@@ -367,6 +378,12 @@ pub fn main(argv: Vec<String>) -> i32 {
     if args.demo {
         return demo(&args);
     }
+    if args.list_sim_mics {
+        for m in kd_audio::simmic::sim_mics() {
+            println!("  {:<24} {}", m.name, m.about);
+        }
+        return 0;
+    }
 
     let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new())); // (what to print above the status line)
     let l2 = lines.clone();
@@ -383,6 +400,26 @@ pub fn main(argv: Vec<String>) -> i32 {
         };
         mic_source = Some(Box::new(move |l: Listener, log: Log, _voice: Option<kd_voice::Voice>| {
             Box::new(PlaylistMicrophone::new(l, items, 2.5, log)) as Box<dyn Mic>
+        }));
+    } else if let Some(name) = &args.sim_mic {
+        // (a simulated microphone: the recording, or a voice-like signal, through the real capture)
+        let Some(m) = kd_audio::simmic::sim_mic(name) else {
+            eprintln!("no simulated microphone {name:?} (--list-sim-mics)");
+            return 1;
+        };
+        let voice = match &args.mic_wav {
+            Some(p) => match kd_audio::read_wav(std::path::Path::new(p)) {
+                Ok((x, sr)) => kd_audio::resample(&x, sr, kd_voice::RATE),
+                Err(e) => {
+                    eprintln!("{p}: {e}");
+                    return 1;
+                }
+            },
+            None => kd_audio::simmic::test_voice(6.0),
+        };
+        let sim = Some((m, Arc::new(voice)));
+        mic_source = Some(Box::new(move |l: Listener, log: Log, voice: Option<kd_voice::Voice>| {
+            Box::new(crate::mic::Microphone::new(l, None, log).with_voice(voice).with_sim(sim)) as Box<dyn Mic>
         }));
     } else if let Some(p) = &args.mic_wav {
         // (a recording instead of the microphone)
@@ -421,6 +458,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         translate_downloads: true,
         mic_boost_db: 0.0,
         translate_also: Vec::new(),
+        out_wav: args.out_wav.clone().map(Into::into),
     };
     println!("preparing...");
     let kind = match &args.join {

@@ -121,8 +121,8 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
   PROJECT.md):** for
   the next release: the HTTP connector answers `Expect: 100-continue` (DST's libcurl sends it with any body over 1 KB
   and held the feed 1 s without it; `kd-games/src/http.rs`, test `expect_100_continue`; the mod tells players with an
-  older Koetama to update), and the window shows each game mod's author (the Teardown profile's author is now
-  "AgeOfAlgorithms(+Opus5.5)"). The DST profile (`dont-starve-together-proximity-comms`, HTTP 47170, test voices) is
+  older Koetama to update), and the window shows each game mod's author (the profiles' author is "AgeOfAlgorithms"; "+Opus5.5"
+  was dropped the same day). The DST profile (`dont-starve-together-proximity-comms`, HTTP 47170, test voices) is
   built in (the user, 2026-10-13: `kd-games/src/profiles/`, `lib.rs` `builtins()`; the mod's repo keeps the same file);
   its `url` is the Workshop's search for the mod until the item exists, then the item's page. Tried in game with a debug build: the room, the
   test voices' directions and loudness, a typed "spoken" line, an es -> en translation.
@@ -523,3 +523,28 @@ it). Two gaps were not:
    connector skipped the header lines and could take the body as a feed (the microphone into the page's room). Now a
    new connection's first bytes are peeked (0.15 s) before it replaces the old one, and an HTTP request line or
    `Host:` header closes the connection (`socket::looks_like_http`). Tested with a browser-style POST.
+
+**2026-10-15: a friend's voice barely heard, even yelling (0.5.6).** He sounded fine in other games; his level bar
+reached only half. Cause: `ChannelPicker` averaged a 2-channel microphone's channels when they were alike in level,
+and some headsets send the second channel inverted - averaged, the voice cancels (measured: -219 dB for an exact
+inversion, -16.5 dB at 0.7). Now channels are averaged only when also in phase (correlation with the loudest >= 0.5,
+back to averaging at 0.7); otherwise the loudest is used alone (`Choice::OutOfPhase`), and the log says what is done
+("its channels are not in phase (correlation -1.00) - channel 1 of 2 used alone"; "microphone on" shows the format).
+Not yet confirmed on his PC (his mic model unknown); the symptoms fit and nothing else in the chain could cost that.
+- **Tests without hardware** (the user: "testing different devices would have caught this"): `kd_audio::simmic`
+  (19 simulated microphones: channels silent / copied / inverted / capsules apart / arrays, quiet, clipping, DC,
+  noise, 16k-96k, f32/i16/i24/i32/u8 through cpal's own conversions) run through `kd_audio::Capture` (the device
+  callback's body, now shared); `kd-audio/tests/mic_zoo.rs` (each at its right level and shape) and
+  `kd-voice/tests/voice_zoo.rs` (through A's sender, a stand-in relay - now `kd-voice/tests/common/standin.rs`, also
+  the example `standin_relay` - and B's decoder: within 3 dB of the reference microphone). Checked: with the old
+  averaging, mic_zoo fails on the three inverted microphones. `.github/workflows/voice-tests.yml` runs both on every
+  pull request (Windows and Linux; no sound device, no models). `tools/voice_e2e.py`: two real `koetama --cli` as a
+  fake game's players through the stand-in relay, A on `--sim-mic` (+ `--mic-wav`), B on `--out-wav`; level against
+  the reference and speech to text of what B heard (local only: it loads the speech model). First run: mono and
+  stereo-inverted both -23.6 dBFS at B, 100 % of "Hello, can anyone hear me?" understood.
+- **The automatic gain** (voice_zoo found it: quiet microphones -10.5 dB, clipping ones +9.3 dB against a normal one):
+  `kd-voice/src/agc.rs` rewritten - it follows the speech's power (pieces within 15 dB of it, above -54 dBFS; fast
+  for the first 0.4 s, then over seconds), sets the first level from the first 100 ms of speech (meanwhile the gain
+  only falls), gain range +30 / -20 dB (was +18 / -6). The target stays -20 dBFS (normal microphones as before).
+  Measured: every voice_zoo microphone within 1.5 dB of the reference; the shape of real speech kept (0.995 offline,
+  the old one 0.987 - a version that followed every 10 ms flattened syllables to 0.73).

@@ -504,8 +504,8 @@ impl Input {
     }
 }
 
-/// The device's frames -> mono (the channel with the voice, or the channels' average: ChannelPicker) -> `rate` ->
-/// blocks of rate * IN_BLOCK_S to on_block.
+/// The device's frames -> Capture (one channel, the asked rate, blocks of rate * IN_BLOCK_S) -> on_block; a change in
+/// what is done with the channels goes to the log.
 fn input_stream<T>(
     d: &cpal::Device,
     config: StreamConfig,
@@ -518,34 +518,22 @@ where
     T: SizedSample + Send + 'static,
     f32: FromSample<T>,
 {
-    let ch = config.channels.max(1) as usize;
-    let n = ((rate as f64 * IN_BLOCK_S) as usize).max(1);
-    let mut conv = Rechunk::new(config.sample_rate, rate, (config.sample_rate / 100).max(1) as usize, 1)?;
-    let mut mono: Vec<f32> = Vec::with_capacity(config.sample_rate as usize);
-    let mut picker = crate::ChannelPicker::new(ch);
-    let mut interleaved: Vec<f32> = Vec::with_capacity(config.sample_rate as usize * ch);
-    let device_rate = config.sample_rate;
-    let mut block: Vec<f32> = Vec::with_capacity(n * 4);
+    let mut capture = crate::capture::Capture::new(config.channels, config.sample_rate, rate)?;
+    let mut interleaved: Vec<f32> = Vec::with_capacity(config.sample_rate as usize * config.channels.max(1) as usize);
     let st = stats.clone();
+    let told_log = log.clone();
     d.build_input_stream::<T, _, _>(
         config,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
             first_call(&st);
-            mono.clear();
             interleaved.clear();
             interleaved.extend(data.iter().map(|&s| s.to_sample::<f32>()));
-            picker.mix(&interleaved, device_rate, &mut mono);
             let mut on_block = cb.lock().unwrap_or_else(|e| e.into_inner());
-            conv.push(&mono, &mut |y| {
-                block.extend_from_slice(y);
-                let mut used = 0;
-                while block.len() - used >= n {
-                    on_block(&block[used..used + n]);
-                    used += n;
-                }
-                block.drain(..used);
-                st.frames.fetch_add(used as u64, Ordering::Relaxed);
-            });
+            let (handed, told) = capture.push(&interleaved, &mut |b| on_block(b));
+            st.frames.fetch_add(handed as u64, Ordering::Relaxed);
+            if let Some(line) = told {
+                told_log(&line);
+            }
         },
         move |e| on_error(&stats, &log, "microphone", e),
         None,

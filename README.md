@@ -172,6 +172,11 @@ python build.py                           # dist/Koetama/ and, with Inno Setup 6
   [`bench/`](bench/) holds the benchmarks behind every model choice.
 - `Koetama --selftest` checks a build's native parts. CI runs it on every build, and on Windows also installs,
   tests and uninstalls the installer.
+- **Microphones and the voice chat** are tested without hardware: `cargo test -p kd-audio -p kd-voice` runs every
+  kind of microphone (simulated: channels, polarity, level, rate, sample type) through Koetama's capture and through
+  the voice chat between players on one machine; CI runs them on every pull request. `python tools/voice_e2e.py`
+  goes further: two real Koetamas as players of a fake game, a stand-in relay, a simulated microphone saying a
+  recording, and how loud and how understandable the other player hears it.
 
 ## Privacy
 
@@ -203,6 +208,23 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ## What's new
+
+### 0.5.6: every microphone heard
+
+- **Headsets heard far too quietly: fixed.** Some headsets send their voice in two channels with one of them
+  inverted. Koetama averaged the two and the voice cancelled itself out: a player could yell into the microphone and
+  still be barely heard, though other games heard them fine. Koetama now averages a microphone's channels only when
+  they carry the same signal, and otherwise uses the one with the voice. The log at the bottom of the window says what
+  it does with your microphone, and shows its format when it opens.
+- **Quiet and loud microphones evened out.** The automatic gain on the voice you send now raises a quiet microphone by
+  up to 30 dB (was 18) and holds a clipping one back by up to 20 dB (was 6), so both come through within about 1.5 dB
+  of a normal one (they were about 10 dB under and 9 dB over). It follows your voice over a second or two instead of
+  each syllable, and is set from your first words. A normal microphone sounds as before; Mic boost is still there for
+  one quieter than even that.
+- 0.5.5 was not released on its own: its changes (below) come with this version.
+- **For developers:** simulated microphones (`--sim-mic`, `--list-sim-mics`) and `--out-wav` on the command line;
+  every kind of microphone is tested through the voice chat on every pull request; `tools/voice_e2e.py` runs two
+  Koetamas voice to voice on one PC.
 
 ### 0.5.5: safer voice chat
 

@@ -1,6 +1,7 @@
 //! The microphone (engine/asr.py Microphone): the chosen (or default) input, its blocks to the listener at 16 kHz;
 //! open only while the game wants it. With the voice chat (kd_voice) it runs at 48 kHz: each block goes to the voice
 //! chat as it is (with whether the speech detector hears speech) and, resampled to 16 kHz, to the listener.
+use kd_audio::simmic::{SimInput, SimMic};
 use kd_audio::{Input, Rechunk};
 use kd_common::Log;
 use kd_speech::{Listener, Mic, RATE};
@@ -8,11 +9,20 @@ use kd_voice::Voice;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// An open microphone: a sound device, or a simulated one (tests).
+#[allow(dead_code)] // (held, never read: dropping it stops it)
+enum Opened {
+    Device(Input),
+    Sim(SimInput),
+}
+
 pub struct Microphone {
     listener: Listener,
     device: Option<String>,
     log: Log,
-    input: Option<Input>,
+    input: Option<Opened>,
+    /// a simulated microphone playing this recording (48 kHz mono) instead of the device (--sim-mic: tests)
+    sim: Option<(SimMic, Arc<Vec<f32>>)>,
     level: Arc<AtomicU64>, // (f64 bits: dBFS of the last block)
     voice: Option<Voice>,
     /// "Hear yourself" (the window's microphone test): the voice's blocks go to it too
@@ -26,6 +36,7 @@ impl Microphone {
             device,
             log,
             input: None,
+            sim: None,
             level: Arc::new(AtomicU64::new((-120f64).to_bits())),
             voice: None,
             monitor: None,
@@ -35,6 +46,13 @@ impl Microphone {
     /// "Hear yourself": the microphone's 48 kHz blocks (with the voice chat) go to this monitor too.
     pub fn with_monitor(mut self, monitor: Option<Arc<crate::monitor::Monitor>>) -> Microphone {
         self.monitor = monitor;
+        self
+    }
+
+    /// A simulated microphone (kd_audio::simmic) playing `voice` (48 kHz mono, over and over) instead of the device:
+    /// the same capture, voice chat and speech to text as a real one (koetama --cli --sim-mic).
+    pub fn with_sim(mut self, sim: Option<(SimMic, Arc<Vec<f32>>)>) -> Microphone {
+        self.sim = sim;
         self
     }
 
@@ -100,9 +118,15 @@ impl Mic for Microphone {
                 }),
             ),
         };
-        match Input::open(self.device.as_deref(), rate, on_block, self.log.clone()) {
-            Ok(i) => {
-                (self.log)(&format!("microphone on: {}", i.device_name()));
+        let opened = match &self.sim {
+            Some((m, voice)) => SimInput::start(m.clone(), voice, rate, on_block, self.log.clone(), true)
+                .map(|i| (i.device_name(), i.format(), Opened::Sim(i))),
+            None => Input::open(self.device.as_deref(), rate, on_block, self.log.clone())
+                .map(|i| (i.device_name(), i.format(), Opened::Device(i))),
+        };
+        match opened {
+            Ok((name, format, i)) => {
+                (self.log)(&format!("microphone on: {name} ({format})"));
                 self.input = Some(i);
                 true
             }

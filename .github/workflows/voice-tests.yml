@@ -1,0 +1,46 @@
+# The voice chat's tests on every pull request (and every push to main that changes the app): every kind of
+# microphone (kd-audio's mic_zoo: simulated devices through Koetama's own capture) and the voice chat end to end
+# between players on one machine (kd-voice: a stand-in relay, voice_zoo's microphones, relay's four players) - the
+# tests that would have caught a headset whose inverted second channel cancelled its voice (2026-10-15). No sound
+# device, no speech models, no internet beyond the build: they run anywhere in a minute or two. The whole suite (with
+# the speech models' libraries and the language detector) runs in build.yml on pushes to main.
+name: voice tests
+
+on:
+  pull_request:
+    paths: ['app/**', '.github/workflows/voice-tests.yml']
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/voice-tests.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+          prefix-key: v2-voice
+      - name: ALSA (cpal builds against it on Linux; no sound device is used)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Every kind of microphone, and the voice chat between players
+        working-directory: app
+        run: cargo test -p kd-audio -p kd-voice --locked -- --nocapture

@@ -50,6 +50,23 @@ pub struct Options {
     pub mic_boost_db: f32,
     /// languages the player speaks but wants translated anyway (the rest of theirs are left as they are)
     pub translate_also: Vec<String>,
+    /// play into this wav file instead of a sound device (--out-wav: tests record what a player hears)
+    pub out_wav: Option<PathBuf>,
+}
+
+/// Where the mixer plays: a sound device, or a wav file (Options::out_wav).
+enum Out {
+    Device(Output),
+    File(kd_audio::WavOutput),
+}
+
+impl Out {
+    fn info(&self) -> (String, f64) {
+        match self {
+            Out::Device(o) => (o.device_name(), o.latency_ms()),
+            Out::File(f) => (f.device_name(), f.latency_ms()),
+        }
+    }
 }
 
 impl Default for Options {
@@ -66,6 +83,7 @@ impl Default for Options {
             translate_downloads: true,
             mic_boost_db: 0.0,
             translate_also: Vec::new(),
+            out_wav: None,
         }
     }
 }
@@ -131,7 +149,7 @@ pub struct Runtime {
     opts: Options,
     pub mixer: SharedMixer,
     pub game: Arc<Mutex<Box<dyn Game>>>,
-    output: Option<Output>,
+    output: Option<Out>,
     /// the window's microphone test: until when, and "Hear yourself" (its own mixer and output while on)
     test_until: Option<std::time::Instant>,
     monitor: Arc<crate::monitor::Monitor>,
@@ -353,11 +371,11 @@ impl Runtime {
 
     fn open_output(&mut self) {
         self.output = None;
-        match Output::open(
-            self.mixer.clone(),
-            self.opts.out_device.as_deref(),
-            self.log.clone(),
-        ) {
+        let opened = match &self.opts.out_wav {
+            Some(p) => kd_audio::WavOutput::start(self.mixer.clone(), p.clone(), self.log.clone()).map(Out::File),
+            None => Output::open(self.mixer.clone(), self.opts.out_device.as_deref(), self.log.clone()).map(Out::Device),
+        };
+        match opened {
             Ok(o) => self.output = Some(o),
             Err(e) => {
                 let msg = format!("no sound output: {e}");
@@ -841,9 +859,7 @@ impl Runtime {
     }
 
     pub fn output_info(&self) -> Option<(String, f64)> {
-        self.output
-            .as_ref()
-            .map(|o| (o.device_name(), o.latency_ms()))
+        self.output.as_ref().map(Out::info)
     }
 }
 
