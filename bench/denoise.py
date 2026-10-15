@@ -147,7 +147,7 @@ def noise_track(kind, n, rng):
             total += len(y)
             if total >= n:
                 break
-        x = np.concatenate(parts)[:n]
+        x = np.resize(np.concatenate(parts), n)  # (the recordings over again when the speech is longer)
     return x / np.sqrt(np.mean(x ** 2))
 
 

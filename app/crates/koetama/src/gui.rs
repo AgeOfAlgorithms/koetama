@@ -125,6 +125,8 @@ struct App {
     volume: f64,
     /// Mic boost, dB 0..=20 (the voice sent; saved as "mic_boost")
     mic_boost: f64,
+    /// noise suppression for the voice sent (saved as "noise": off / standard / strong)
+    noise: kd_voice::denoise::Level,
     /// the microphone test's "Hear yourself" (not saved)
     hear_self: bool,
     last_tick: Instant,
@@ -179,6 +181,7 @@ impl App {
             out: pick(&outs, settings.str("out")),
             volume: settings.f64("volume", 1.0) * 100.0,
             mic_boost: settings.f64("mic_boost", 0.0).clamp(0.0, 20.0),
+            noise: settings.str("noise").as_deref().and_then(kd_voice::denoise::Level::from_name).unwrap_or(kd_voice::denoise::Level::Standard),
             hear_self: false,
             game_id: settings
                 .str("game")
@@ -264,6 +267,7 @@ impl App {
             mic_device: Self::device(&self.mic),
             volume: self.volume / 100.0,
             mic_boost_db: self.mic_boost as f32,
+            noise: self.noise,
             langs: self.langs.clone(),
             translate_into: Some(self.translate_into.clone()).filter(|l| !l.is_empty()),
             translate_also: self.translate_also.clone(),
@@ -1048,6 +1052,29 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                         }
                                         ui.label(RichText::new(format!("+{:.0} dB", self.mic_boost)).color(theme::MUTED));
                                         ui.end_row();
+                                        // (noise suppression for the voice sent: docs/noise-suppression.md)
+                                        ui.label(RichText::new("Noise suppression").color(theme::MUTED));
+                                        let before = self.noise;
+                                        ui.horizontal(|ui| {
+                                            use kd_voice::denoise::Level;
+                                            ui.selectable_value(&mut self.noise, Level::Off, "Off")
+                                                .on_hover_text("Your voice is sent as your microphone hears it.");
+                                            ui.selectable_value(&mut self.noise, Level::Standard, "Standard").on_hover_text(
+                                                "Takes out steady noise (fans, hum, a vacuum cleaner) and some keyboard clicks. Costs almost nothing (RNNoise).",
+                                            );
+                                            ui.selectable_value(&mut self.noise, Level::Strong, "Strong").on_hover_text(
+                                                "Takes out keyboard and mouse clicks too, keeping your voice natural. Uses more of your CPU (about 8 % of one core) and adds 30 ms; downloads its model (8 MB) the first time (DeepFilterNet 3).",
+                                            );
+                                        });
+                                        ui.label("");
+                                        ui.end_row();
+                                        if self.noise != before {
+                                            self.settings.set("noise", self.noise.name());
+                                            self.settings.save();
+                                            if let Some(rt) = self.rt.as_mut() {
+                                                rt.set_noise_suppression(self.noise);
+                                            }
+                                        }
                                     }
                                     }
 if self.kind.voices {

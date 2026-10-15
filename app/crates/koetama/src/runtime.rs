@@ -52,6 +52,8 @@ pub struct Options {
     pub translate_also: Vec<String>,
     /// play into this wav file instead of a sound device (--out-wav: tests record what a player hears)
     pub out_wav: Option<PathBuf>,
+    /// noise suppression for the voice sent (and "Hear yourself"): Off, Standard (RNNoise), Strong (DeepFilterNet 3)
+    pub noise: kd_voice::denoise::Level,
 }
 
 /// Where the mixer plays: a sound device, or a wav file (Options::out_wav).
@@ -84,6 +86,7 @@ impl Default for Options {
             mic_boost_db: 0.0,
             translate_also: Vec::new(),
             out_wav: None,
+            noise: kd_voice::denoise::Level::Standard,
         }
     }
 }
@@ -281,6 +284,7 @@ impl Runtime {
         if let Some(v) = &voice {
             mixer.lock().unwrap().streams = Some(Box::new(v.playback()));
             v.set_mic_boost(opts.mic_boost_db);
+            v.set_noise_suppression(opts.noise);
         }
         let ptt_to: Arc<Mutex<Option<Listener>>> = Arc::new(Mutex::new(None));
         // (translation: the translator's replies and states go straight to the game)
@@ -366,6 +370,7 @@ impl Runtime {
             *ptt_to.lock().unwrap() = rt.listener.clone();
         }
         rt.monitor.set_boost_db(rt.opts.mic_boost_db);
+        rt.monitor.set_noise(rt.opts.noise, &rt.log);
         rt
     }
 
@@ -489,6 +494,15 @@ impl Runtime {
             m.open();
         }
         self.mic = Some(m);
+    }
+
+    /// Noise suppression for the voice sent and the microphone test (Strong is made ready first: see denoise.rs).
+    pub fn set_noise_suppression(&mut self, level: kd_voice::denoise::Level) {
+        self.opts.noise = level;
+        self.monitor.set_noise(level, &self.log);
+        if let Some(v) = &self.voice {
+            v.set_noise_suppression(level);
+        }
     }
 
     /// The player's Mic boost (dB, 0..=20): the voice they send follows at once.

@@ -270,11 +270,15 @@ pub mod codec  { Encoder::new()?.encode(&[f32; FRAME]) -> Vec<u8>; Decoder; trai
 pub mod gate   { PTT_TAIL, PREROLL; enum Mode { Off, PushToTalk(held), Detector(talking) }; Gate::push(x, mode) -> Gated { audio, end } }
 pub mod jitter { START, MAX, END_AFTER; Jitter<D: FrameDecoder>::insert(Packet, now); pull(out, now) -> bool }
 pub mod relay  { Conn::open(relay, room, me)?; send(frame); ping(); poll(&mut Vec<frame>); close() }
-pub struct Sender;  Sender::new()?.push(x_48k, Mode) -> Vec<Packet>;   // gate + Opus + packets
+pub mod agc    { TARGET (-20 dBFS), MAX_GAIN, MIN_GAIN; Agc::process(&mut x) }   // the voice sent's automatic gain
+pub mod denoise { enum Level { Off, Standard /* RNNoise */, Strong /* DeepFilterNet 3 */ }; Denoiser; dfn3_model(log);
+                  Switch::want(level, log); Switch::process(x, wait) -> Vec<f32> }   // a worker thread per level
+pub struct Sender;  Sender::new()?.push(x_48k, Mode) -> Vec<Packet>;   // noise suppression + gate + gain + Opus + packets
 #[derive(Clone)] pub struct Voice;  impl Voice {                         // a handle; the "voice" thread inside
     pub fn start(relay: String, log: Log) -> Voice;
     pub fn set_feed(&self, &Feed);                  // the room, to, whom it hears (src 0, gain > 0), mic / ptt
     pub fn push_mic(&self, x_48k: &[f32], talking: bool);   // the microphone's callback: queued, never waits
+    pub fn set_mic_boost(&self, db: f32);  pub fn set_noise_suppression(&self, Level);
     pub fn playback(&self) -> Playback;             // impl kd_audio::Streams: the mixer pulls each sender
     pub fn status(&self) -> VoiceStatus { state: "off" | "connecting" | "connected" | "id_taken", heard, players };
     pub fn players(&self) -> Vec<PlayerId>;         // heard from (voice or presence) within PRESENT = 15 s

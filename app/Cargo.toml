@@ -33,6 +33,16 @@ regex = "1"
 sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-27"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_Console", "Win32_Security"] }
+# noise suppression for the voice sent (kd-voice/src/denoise.rs; docs/noise-suppression.md): RNNoise in pure Rust
+# (BSD-3), and DeepFilterNet 3 through its own library at its last commit (MIT/Apache-2.0) - with tract pinned to the
+# 0.21.4 it was built with (later 0.21.x moved to ndarray 0.16 and no longer build with it)
+nnnoiseless = { version = "0.5", default-features = false }
+deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", rev = "d375b2d8309e0935d165700c91da9de862a99c31", default-features = false, features = ["tract"] }
+ndarray = "0.15"
+tract-core = "=0.21.4"
+tract-onnx = "=0.21.4"
+tract-pulse = "=0.21.4"
+tract-hir = "=0.21.4"
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wgpu", "x11", "wayland", "accesskit"] }
 
 [profile.release]
@@ -47,3 +57,36 @@ opt-level = 2          # (dependencies optimised in debug builds too: the mixer 
 
 [profile.dev.package.kd-audio]
 opt-level = 2          # (the mixer runs in the audio callback: real time even in a debug build)
+
+# (DeepFilterNet 3's runtime, tract, even in debug builds: optimised - real time needs it - and without debug assertions,
+#  one of which makes its model fail to load in a debug build: "running pass codegen")
+[profile.dev.package.tract-core]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-data]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-linalg]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-hir]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-onnx]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-onnx-opl]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-nnef]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-pulse]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.tract-pulse-opl]
+opt-level = 2
+debug-assertions = false
+[profile.dev.package.deep_filter]
+opt-level = 2
+debug-assertions = false

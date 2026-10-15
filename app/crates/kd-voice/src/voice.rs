@@ -99,6 +99,8 @@ struct Cfg {
     fed: Option<Instant>,
     /// the player's Mic boost (dB, 0..=20; the window's setting)
     boost_db: f32,
+    /// noise suppression for the voice sent (the window's setting)
+    noise: crate::denoise::Level,
 }
 
 impl Cfg {
@@ -312,6 +314,12 @@ impl Voice {
         lock(&self.sh.cfg).boost_db = db.clamp(0.0, 20.0);
     }
 
+    /// Noise suppression for the voice sent (denoise.rs): a new level is made ready on a thread of its own and taken
+    /// over when it is (Strong may download its model first).
+    pub fn set_noise_suppression(&self, level: crate::denoise::Level) {
+        lock(&self.sh.cfg).noise = level;
+    }
+
     pub fn push_mic(&self, x: &[f32], talking: bool) {
         match self.tx.try_send(Block { x: x.to_vec(), talking }) {
             Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
@@ -398,8 +406,12 @@ impl kd_audio::Streams for Playback {
     }
 }
 
-/// This player's voice into packets: the gate, Opus, the packet layout (seq counts up across stretches).
+/// This player's voice into packets: noise suppression, the gate, the automatic gain, Opus, the packet layout (seq
+/// counts up across stretches).
 pub struct Sender {
+    /// noise suppression (denoise.rs): before the gate, on every block while the microphone is open (the gate's
+    /// pre-roll is made of earlier blocks)
+    pub denoise: crate::denoise::Switch,
     gate: Gate,
     /// the voice's automatic gain (and the player's Mic boost)
     pub agc: crate::agc::Agc,
@@ -411,7 +423,7 @@ pub struct Sender {
 
 impl Sender {
     pub fn new() -> Result<Sender, String> {
-        Ok(Sender { gate: Gate::new(), agc: Default::default(), enc: Encoder::new()?, pcm: Vec::new(), frames: Vec::new(), seq: 0 })
+        Ok(Sender { denoise: Default::default(), gate: Gate::new(), agc: Default::default(), enc: Encoder::new()?, pcm: Vec::new(), frames: Vec::new(), seq: 0 })
     }
 
     fn encode_pending(&mut self) {
@@ -432,7 +444,9 @@ impl Sender {
     /// A block of microphone audio and what the player was doing -> the packets ready to send (a stretch's last one
     /// padded with silence to whole frames, flagged last). Their id and range are the sender's to fill in.
     pub fn push(&mut self, x: &[f32], mode: Mode) -> Vec<Packet> {
-        let mut g = self.gate.push(x, mode);
+        // (a little wait for it to come back: what is late comes with the next block)
+        let x = self.denoise.process(x, Duration::from_millis(4));
+        let mut g = self.gate.push(&x, mode);
         self.agc.process(&mut g.audio);
         self.pcm.extend_from_slice(&g.audio);
         let mut out = Vec::new();
@@ -604,10 +618,11 @@ fn run(sh: Arc<Shared>, rx: Receiver<Block>, relay: String, log: Log) {
             }
         };
         let mut block = first;
-        let boost = lock(&sh.cfg).boost_db;
+        let (boost, noise) = { let c = lock(&sh.cfg); (c.boost_db, c.noise) };
         while let Some(b) = block {
             if let Some(s) = sender.as_mut() {
                 s.agc.set_boost_db(boost);
+                s.denoise.want(noise, &log);
                 let m = match mode {
                     None => Mode::Off,
                     Some(Mode::Detector(_)) => Mode::Detector(b.talking),

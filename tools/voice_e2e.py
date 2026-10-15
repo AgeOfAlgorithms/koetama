@@ -7,6 +7,7 @@ hears A against the reference microphone ("mono"), and what speech to text makes
     python tools/voice_e2e.py                          (the reference, then the microphones in MICS)
     python tools/voice_e2e.py stereo-inverted quiet    (the reference, then these)
     python tools/voice_e2e.py --list                   (every simulated microphone)
+    python tools/voice_e2e.py --noise strong quiet     (A's noise suppression: off, standard - the default - or strong)
 
 Needs: Python 3 with numpy, cargo (it builds koetama and the stand-in relay; SHERPA_ONNX_LIB_DIR is found in
 app/target when unset), the English speech model in Koetama's data folder (the first run downloads it, 670 MB), and
@@ -25,7 +26,8 @@ RELAY = os.path.join(APP, 'target', 'debug', 'examples', 'standin_relay' + EXE)
 CLIP = os.path.join(ROOT, 'export', 'asrbench', 'clips', 'en01_clean.wav')
 MICS = ['stereo-inverted', 'stereo-silent-right', 'array-4-one-inverted', 'quiet', 'hot', '44k1-i16']
 SPEAK = 10.0          # s that A talks once its microphone is open
-TOLERANCE = 3.0       # dB against the reference
+TOLERANCE = 4.0       # dB against the reference (noise suppression on a hissy microphone takes the quiet parts of
+                      #  its speech with the hiss and the automatic gain lifts the rest: it comes through 2-3 dB louder)
 RECALL = 0.6          # of the recording's words found in what B heard
 
 
@@ -109,9 +111,13 @@ class Player:
 
 
 def speech_db(x):
-    """the level of the speech (dBFS): the power of the 20 ms windows with sound in them"""
+    """the level of the speech (dBFS): the power of the 20 ms windows within 20 dB of the loudest ones (the 95th
+    percentile) - the speech proper, not its quiet tails or what is left between words (counting every window with
+    sound made a microphone with noise suppression look ~3 dB louder than it was: its tails are quieter)"""
     w = np.array([np.mean(x[i:i + 960] ** 2) for i in range(0, len(x) - 959, 960)]) if len(x) >= 960 else np.zeros(1)
-    on = w[w > w.max() * 1e-4] if w.max() > 0 else w
+    if w.max() <= 0:
+        return -240.0
+    on = w[w > np.percentile(w, 95) * 1e-2]
     return 10 * np.log10(np.mean(on) + 1e-24)
 
 
@@ -135,7 +141,7 @@ def run(mic, relay_url, tmp, use_clip):
     """A says the recording into `mic`; returns (B's speech level dBFS, what speech to text made of it)."""
     profiles = tempfile.mkdtemp(dir=tmp)
     b_wav, a_wav = os.path.join(tmp, f'{mic}-heard-by-b.wav'), os.path.join(tmp, f'{mic}-a.wav')
-    a_args = ['--sim-mic', mic] + (['--mic-wav', CLIP] if use_clip else [])
+    a_args = ['--sim-mic', mic, '--noise', NOISE] + (['--mic-wav', CLIP] if use_clip else [])
     a = Player('a', a_args, profiles, relay_url, a_wav)
     b = Player('b', ['--no-mic'], profiles, relay_url, b_wav)
     seed = f'voice-e2e {time.time()} {mic}'
@@ -173,8 +179,17 @@ def run(mic, relay_url, tmp, use_clip):
     return speech_db(heard), transcribe(b_wav), b_wav
 
 
+NOISE = 'standard'
+
+
 def main():
-    names = [a for a in sys.argv[1:] if not a.startswith('-')]
+    global NOISE
+    args = sys.argv[1:]
+    if '--noise' in args:
+        i = args.index('--noise')
+        NOISE = args[i + 1]
+        del args[i:i + 2]
+    names = [a for a in args if not a.startswith('-')]
     build()
     if '--list' in sys.argv:
         subprocess.run([KOETAMA, '--cli', '--list-sim-mics'], env=env())

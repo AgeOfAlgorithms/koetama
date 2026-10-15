@@ -13,6 +13,7 @@
 //! queues its blocks (Voice::push_mic); the audio output's callback decodes as it plays (Playback, under a short lock).
 pub mod codec;
 pub mod crypto;
+pub mod denoise;
 pub mod frames;
 pub mod hub;
 pub mod agc;

@@ -14,7 +14,8 @@ const MAX_WAIT: usize = 48000 * 3 / 10;
 #[derive(Default)]
 pub struct Monitor {
     on: AtomicBool,
-    inner: Mutex<(VecDeque<f32>, Agc)>,
+    /// what waits to be played, the automatic gain, noise suppression (as the voice sent)
+    inner: Mutex<(VecDeque<f32>, Agc, kd_voice::denoise::Switch)>,
 }
 
 impl Monitor {
@@ -29,11 +30,16 @@ impl Monitor {
         self.on.load(Ordering::SeqCst)
     }
 
+    /// Noise suppression, as for the voice sent (made on a thread of its own: the test hears it once it is ready).
+    pub fn set_noise(&self, level: kd_voice::denoise::Level, log: &kd_common::Log) {
+        self.lock().2.want(level, log);
+    }
+
     pub fn set_boost_db(&self, db: f32) {
         self.lock().1.set_boost_db(db);
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, (VecDeque<f32>, Agc)> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, (VecDeque<f32>, Agc, kd_voice::denoise::Switch)> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -43,7 +49,8 @@ impl Monitor {
             return;
         }
         let mut g = self.lock();
-        let mut y = x.to_vec();
+        // (the microphone's callback: no waiting for the noise suppression - a block late comes with the next)
+        let mut y = g.2.process(x, std::time::Duration::ZERO);
         g.1.process(&mut y);
         g.0.extend(y);
         let over = g.0.len().saturating_sub(MAX_WAIT);

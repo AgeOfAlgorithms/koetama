@@ -548,3 +548,20 @@ Not yet confirmed on his PC (his mic model unknown); the symptoms fit and nothin
   only falls), gain range +30 / -20 dB (was +18 / -6). The target stays -20 dBFS (normal microphones as before).
   Measured: every voice_zoo microphone within 1.5 dB of the reference; the shape of real speech kept (0.995 offline,
   the old one 0.987 - a version that followed every 10 ms flattened syllables to 0.73).
+
+**2026-10-15: noise suppression (the user: "very impressive", after listening to bench/denoise.py's files).** The
+window's Microphone card: "Noise suppression" Off / Standard (RNNoise, `nnnoiseless`: 0.5 % of a core, 10 ms; the
+default) / Strong (DeepFilterNet 3, libDF at its last commit with tract pinned to 0.21.4: 7.8 %, 30 ms; its model, 8 MB,
+downloaded the first time, SHA-256 checked, into models/deepfilternet3/). `kd-voice/src/denoise.rs`: each level runs on
+a worker thread of its own (DeepFilterNet's model is not Send), made off the voice thread and taken over once loaded;
+the sender waits up to 4 ms for a block back, "Hear yourself" not at all. Before the gate in `Sender::push`; speech to
+text keeps the raw microphone. Debug builds compile tract optimised and without debug assertions (one made the model
+fail to load: "running pass codegen"). `--noise` on the command line (and tools/voice_e2e.py). Notices: DeepFilterNet 3
+as a model, the crates (425).
+- **Does it help speech to text?** (the user doubted it doesn't) `bench/denoise_stt.py`, the benchmark's computer
+  voices, every line, noise at +5 / 0 / -5 dB: in loud noise yes, a lot (vacuum 0 dB 39 % -> 17 %, -5 dB 95 % -> 62 %;
+  keyboard -5 dB 17 % -> 8 %; Russian keyboard -5 dB 34 % -> 13 %); in milder noise the raw microphone is a little
+  better (keyboard +5 dB 0 % / 0.6 % / 1.3 %), and the fan is mixed. Real people next: `bench/datasets.py` - the 40
+  worst-pronounced utterances of speechocean762 (Mandarin-speaking learners, scores 0-3 of 10; CC BY 4.0) and 40 of
+  Golos far-field (Russian to a smart speaker across a room) - in export/datasets/ (not committed).
+

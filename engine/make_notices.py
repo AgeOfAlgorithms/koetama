@@ -63,6 +63,12 @@ MODELS = [
          source='https://github.com/mozilla/translations (the files: Mozilla Remote Settings, collection translations-models)',
          use='chat translation (only the directions a translation rule needs)',
          changes="None: downloaded as Mozilla publishes them and run by Koetama's own engine (app/crates/kd-translate)."),
+    dict(name='DeepFilterNet 3', by='Hendrik Schroeter and the DeepFilterNet authors',
+         license='MIT or Apache License 2.0, at your option (the licenses of the DeepFilterNet repository; Apache-2.0 text below)',
+         text='Apache-2.0.txt', source='https://github.com/Rikorose/DeepFilterNet (models/DeepFilterNet3_onnx.tar.gz)',
+         use='noise suppression, "Strong" (downloaded the first time it is chosen)',
+         changes='None: the published ONNX model, run by the DeepFilterNet library (libDF) and tract. '
+                 '"Standard" noise suppression is RNNoise (Xiph.Org, Jean-Marc Valin), built into the nnnoiseless crate.'),
 ]
 
 

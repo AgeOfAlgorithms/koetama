@@ -40,6 +40,9 @@ struct Args {
     /// list the simulated microphones
     #[arg(long = "list-sim-mics")]
     list_sim_mics: bool,
+    /// noise suppression for the voice sent: off, standard (RNNoise), strong (DeepFilterNet 3)
+    #[arg(long, default_value = "standard")]
+    noise: String,
     /// play into this wav file (48 kHz stereo) instead of a sound device: what this player hears, kept (tests)
     #[arg(long = "out-wav", value_name = "WAV")]
     out_wav: Option<String>,
@@ -459,6 +462,13 @@ pub fn main(argv: Vec<String>) -> i32 {
         mic_boost_db: 0.0,
         translate_also: Vec::new(),
         out_wav: args.out_wav.clone().map(Into::into),
+        noise: match kd_voice::denoise::Level::from_name(&args.noise) {
+            Some(l) => l,
+            None => {
+                eprintln!("--noise: off, standard or strong");
+                return 1;
+            }
+        },
     };
     println!("preparing...");
     let kind = match &args.join {
