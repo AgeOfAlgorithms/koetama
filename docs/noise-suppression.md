@@ -8,17 +8,15 @@ source states. "Not published" = searched for and not found. No number here is e
 ## Summary
 
 **Build first: "Standard" = RNNoise through `nnnoiseless`.** Pure Rust (BSD-3, code and weights), 48 kHz native,
-480-sample (10 ms) frames, about 10 ms added, about 0.3-1.3 % of one core, weights about 85 kB inside the binary. It is
-what Mumble, OBS and (since September 2026) Vivox use. It removes fans and hum well and keyboard clicks poorly.
+480-sample (10 ms) frames, weights about 85 kB inside the binary. It is what Mumble, OBS and (since September 2026)
+Vivox use. **Measured** (2026-10-15, below): 10 ms delay, 0.5 % of one core; removes a vacuum cleaner well (38-43 dB),
+keyboard (18-19 dB) and mouse clicks (9-12 dB) less.
 
-**As an option: "Strong" = a DeepFilterNet-class model, downloaded when the player picks it.** Two candidates:
-- **DPDFNet `dpdfnet2_48khz_hr`** through the sherpa-onnx streaming denoiser Koetama already ships. It needs no new
-  code dependency, only a 10.6 MB model file. Apache-2.0 code and weights. Best published quality of the open models.
-  But it costs 2.42 GMAC/s, about 7x DeepFilterNet3, and no CPU figure exists for it.
-- **DeepFilterNet3** through libDF (git dependency, tract runtime). 0.35 GMAC/s, 40 ms latency. MIT/Apache. But no
-  release since 2023-08.
-
-Try DPDFNet first because it is cheaper to wire in. Fall back to DFN3 if DPDFNet is too heavy next to a game.
+**As an option: "Strong" = DeepFilterNet 3 (measured 2026-10-15, below).** 7.8 % of one core and 30 ms on the
+user's Ryzen 7 3700X; it keeps speech best of the three, removes keyboard and mouse noise well, but leaves a steady
+fan's hum. MIT/Apache, but its library is unmaintained (last commit 2024-10; it builds only with tract pinned to
+0.21.4), so it would be vendored or kept on a pinned git revision. **DPDFNet** removes the most noise (the pauses
+go silent) but costs a third of a core and 40 ms: not beside a game for now.
 
 **Skip:**
 - GTCRN and UL-UNAS: 16 kHz only. GTCRN scored below RNNoise on a hard multilingual set and hurt our speech to text.
@@ -32,14 +30,64 @@ Try DPDFNet first because it is cheaper to wire in. Fall back to DFN3 if DPDFNet
 **Speech to text stays on the raw microphone.** It already does: the 16 kHz branch is taken before the voice path.
 Denoisers raised Whisper's errors in two 2025-2026 studies, and in our own benchmark.
 
-**Must be measured on the user's PC before choosing "Strong":**
-- Per-10-ms CPU time of `dpdfnet2_48khz_hr` and DFN3 in a paced real-time loop, with a game running and Koetama below
-  its priority. A file-speed benchmark understates the cost (one 2026 paper: 4.2x).
-- DPDFNet's true delay: the README says 20 ms, its deep filter looks 2 frames ahead (40 ms?).
+**Still to measure** (the rest was measured 2026-10-15, "Measured on our PC"):
+- The CPU cost with a game running and Koetama below its priority (measured without one: `bench/denoise.py --cpu-only`).
 - How each model treats keyboard clicks, game sound leaking from speakers, laughter and shouting. No source covers
   these.
 - Whether `nnnoiseless` can load the 2024 RNNoise 0.2 weights. It bundles the 2017 ones.
 - Which bandwidth Opus picks at 24 kbit/s VOIP: it decides how much a full-band model buys over a 16 kHz one.
+
+## Measured on our PC (2026-10-15)
+
+`bench/denoise.py` (with `bench/denoise/`, a Rust program that runs each model as the app would: one thread, the
+model's own 10 ms frame) on the user's PC: Ryzen 7 3700X, no game running. Eight English benchmark sentences (48 s,
+computer voices recorded at 16 kHz, so nothing above 8 kHz: this cannot show what the 48 kHz models do to high
+frequencies), speech at -20 dBFS, mixed with real keyboard typing, mouse clicks and a vacuum cleaner (ESC-50, local
+only: CC BY-NC) and a synthetic fan (pink noise and a 120 Hz hum), at 5 and 15 dB under the speech. Models:
+RNNoise (`nnnoiseless` 0.5, its 2017 weights), DPDFNet `dpdfnet2_48khz_hr` (sherpa-onnx 1.13.8 streaming), DeepFilterNet
+3 (libDF at its last commit, tract pinned to 0.21.4 - newer tract releases no longer build with it - and the
+thresholds of DeepFilterNet's own command line, -15 / 35 / 35: with the library's defaults, -10 / 30 / 20, it
+skipped most noisy frames as "clean speech" and scored worse than no processing; that first run is kept in
+`export/noise/results-run1-dfn3-library-defaults.md`). Listening files (each noise at 5 dB, before and after each
+model): `export/noise/listen/`.
+
+**Cost and delay** (paced in real time: each frame waits for the moment a microphone would hand it over):
+
+| model | delay | CPU per 10 ms frame: mean / p99 / max | share of one core | load |
+|---|---|---|---|---|
+| RNNoise | 10 ms | 0.05 / 0.07 / 0.21 ms | **0.5 %** | instant |
+| DeepFilterNet 3 | 30 ms | 0.78 / 1.19 / 1.91 ms | **7.8 %** | 0.4 s |
+| DPDFNet 48 kHz | 40 ms | 3.37 / 3.66 / 5.10 ms | **33.7 %** | 0.2 s |
+
+DPDFNet's delay is 40 ms, not the README's 20 (the [i] above holds). Its cost is a third of a core, ~4x
+DeepFilterNet 3's: too much to run beside a game by default.
+
+**What each does** (noise removed = the noise alone through the model; SI-SDR = the noisy speech through the model
+against the clean speech, higher is better; WER = Koetama's speech to text on the result):
+
+| noise | no processing: SI-SDR / WER | RNNoise: removed / SI-SDR / WER | DeepFilterNet 3 | DPDFNet 48 kHz |
+|---|---|---|---|---|
+| keyboard, 5 dB | 0.6 / 1 % | 19 dB / 8.2 / 0 % | 27 dB / **14.2** / 3 % | **56 dB** / 12.3 / 1 % |
+| keyboard, 15 dB | 10.6 / 0 % | 18 dB / 11.5 / 0 % | 22 dB / **19.7** / 0 % | **59 dB** / 13.8 / 1 % |
+| mouse, 5 dB | 0.6 / 1 % | 12 dB / 8.3 / 1 % | 23 dB / **15.3** / 1 % | **27 dB** / 12.6 / 0 % |
+| mouse, 15 dB | 10.6 / 0 % | 9 dB / 11.3 / 1 % | 17 dB / **20.6** / 0 % | **48 dB** / 14.0 / 0 % |
+| vacuum, 5 dB | 0.6 / 1 % | 43 dB / 7.5 / 8 % | 22 dB / **11.5** / 12 % | **45 dB** / 10.6 / 4 % |
+| vacuum, 15 dB | 10.6 / 1 % | 38 dB / 11.4 / 1 % | 22 dB / **17.4** / 0 % | **45 dB** / 13.4 / 0 % |
+| fan, 5 dB | 0.5 / 0 % | 13 dB / 8.7 / 1 % | 7 dB / 7.0 / 3 % | **59 dB** / **11.6** / 1 % |
+| fan, 15 dB | 10.6 / 0 % | 43 dB / 11.9 / 0 % | 5 dB / **14.1** / 1 % | **59 dB** / 13.7 / 0 % |
+| clean speech kept (SI-SDR) | - | 13.0 | **40.3** | 13.7 |
+
+What it says:
+- **DPDFNet removes the most noise by far** (45-59 dB: the pauses go silent), on every noise, but changes clean speech
+  as much as RNNoise does (13.7 dB) and costs a third of a core.
+- **DeepFilterNet 3 keeps speech best** (clean speech nearly untouched, 40 dB; the best SI-SDR on every real noise)
+  but leaves more noise between words (17-27 dB removed) and barely touches the steady fan with its hum (5-7 dB).
+- **RNNoise is ~70x cheaper than DeepFilterNet 3** and good on steady noise (vacuum 38-43 dB), weak on clicks
+  (keyboard 18-19 dB, mouse 9-12 dB), and changes clean speech somewhat (13 dB).
+- **Speech to text barely cares**: Parakeet already understood the raw mixes (0-1 % WER), and the denoisers made it
+  worse at the vacuum's 5 dB (RNNoise 8 %, DeepFilterNet 3 12 %). Keeping speech to text on the raw microphone is
+  right.
+- SI-SDR punishes any change to the waveform, audible or not: what players hear needs the listening files.
 
 ## What players compare us to
 
