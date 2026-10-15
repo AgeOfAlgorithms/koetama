@@ -569,3 +569,9 @@ as a model, the crates (425).
   72 % with no noise (the user listened: "the pronunciation is horrible"; scores 0-2 are mostly near silence).
   docs/noise-suppression.md "Does it help speech to text?". Open: give speech to text the cleaned voice with Strong?
 
+- **2026-10-15 evening, gentler cleaning for speech to text** (the user: mix raw back in, clean less deeply). `bench/denoise_stt.py
+  edacc --variants raw,dfn3,mix20,mix40,lim12,lim6 --noises keyboard,vacuum,fans --snrs 5,0 --none` - stopped at 18:55 for
+  the user (only the first three rows). EdAcc word errors, raw / DeepFilterNet 3 / mix 20 % raw / mix 40 % / limit 12 dB /
+  limit 6 dB: no noise 18.4 / 19.9 / 20.5 / 20.2 / 18.9 / **18.6**; keyboard +5 dB 32.8 / 39.8 / 36.5 / 35.0 / 33.9 /
+  **32.0**; keyboard 0 dB 66.3 / 50.4 / 44.8 / **39.7** / 41.9 / 41.7. So far the 6 dB limit is as good as raw where raw
+  was best and nearly as good as the best where cleaning helps. Next: the vacuum and fan rows, the other three sets.
