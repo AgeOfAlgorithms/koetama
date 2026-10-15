@@ -121,6 +121,35 @@ pronunciation scored 3 of 10 - the worst still spoken). Word error rate of Koeta
 - So "speech to text stays on the raw microphone" (above) is right for mild noise and wrong for loud typing. Whether to
   give speech to text the cleaned voice when the player picks Strong - or when the room is loud - is the next question.
 
+### On real voices only (2026-10-15, later)
+
+The user asked for real voices throughout, with accents. Four real-speech sets (`bench/datasets.py`, local only):
+EdAcc (conversations in English: Kenyan, Indian, Ghanaian, Nigerian, Romanian, Latin American and Spanish accents, 56
+sentences), LibriSpeech test-clean (native English, 40 speakers), Golos crowd (Russian, read close to a phone) and Golos
+far-field. Real noise only: keyboard, vacuum (ESC-50) and 7 real fans and air conditioners (Wikimedia Commons, CC BY /
+BY-SA), mixed digitally. Word error rate, raw -> DeepFilterNet 3:
+
+| noise | EdAcc (accents) | LibriSpeech (native) | Golos crowd (Russian) | Golos far-field (Russian) |
+|---|---|---|---|---|
+| none | 18.4 -> 19.9 % | 3.9 -> 3.0 % | 20.0 -> 19.6 % | 6.0 -> 6.5 % |
+| keyboard +5 dB | 32.8 -> 39.8 % | 12.1 -> 6.4 % | 48.0 -> 35.1 % | 32.7 -> 18.6 % |
+| keyboard 0 dB | 66.3 -> 50.4 % | 25.4 -> 21.2 % | 70.2 -> 39.6 % | 80.4 -> 28.1 % |
+| vacuum +5 dB | 49.8 -> 63.8 % | 19.4 -> 30.7 % | 75.1 -> 54.7 % | 36.7 -> 36.2 % |
+| vacuum 0 dB | 84.6 -> 81.1 % | 58.0 -> 63.1 % | 83.6 -> 74.2 % | 72.4 -> 60.3 % |
+| real fans +5 dB | 63.6 -> 69.1 % | 52.7 -> 44.9 % | 59.1 -> 66.7 % | 37.7 -> 54.8 % |
+| real fans 0 dB | 76.6 -> 74.5 % | 66.3 -> 61.8 % | 77.3 -> 80.9 % | 63.8 -> 75.4 % |
+
+- With no noise it costs nothing that matters (-0.9 to +1.5 points).
+- **Typing**: cleaning helps almost everywhere, a lot when loud (Golos far-field 80 -> 28 %).
+- **Steady noise (vacuum, fans)**: a coin flip - it often hurts English (LibriSpeech vacuum +5 dB 19 -> 31 %).
+- The spread is wide: which noise lands under which sentence moves results (Golos far-field, real fans 0 dB: -7
+  points in one run, +12 in the next). **Decision (2026-10-15): speech to text stays on the raw microphone** - giving it
+  the cleaned voice would help loud typists and hurt some players with a fan. Switching only for clicky noise would need
+  its own design and tests.
+- Voice quality on EdAcc (`export/noise/results-all-edacc.md`, listening files in `export/noise/listen-edacc/`): the
+  "clean speech kept" scores are not meaningful there (EdAcc's recordings carry room noise, which the models remove);
+  CPU paced: RNNoise 0.6 %, DeepFilterNet 3 10.6 %, DPDFNet 34.8 % of one core.
+
 ## What players compare us to
 
 Players hear Discord, so the bar is Krisp: an ML model on the player's CPU, on by default since 2020. Game voice SDKs

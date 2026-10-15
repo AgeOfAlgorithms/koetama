@@ -7,6 +7,8 @@ rate for Chinese).
 
     python bench/denoise_stt.py              (en, ru, zh; ~20 min; heavy - not while someone plays)
     python bench/denoise_stt.py en           (one language)
+    python bench/denoise_stt.py golos en --noises fans,fan --snrs 10,5,0,-5 --none
+                                             (the noises and levels chosen; --none: also with no noise at all)
     python bench/denoise_stt.py so762 golos  (real people: bench/datasets.py's speechocean762 - English from learners,
                                               the worst-pronounced - and Golos far-field Russian)
 
@@ -21,7 +23,12 @@ import denoise as D
 LANGS = {'en': 'word', 'ru': 'word', 'zh': 'char'}
 # (real speech, bench/datasets.py: name -> its language and manifest)
 SETS = {'so762': ('en', 'export/datasets/speechocean762/subset/manifest.json'),
-        'golos': ('ru', 'export/datasets/golos_farfield/subset/manifest.json')}
+        'golos': ('ru', 'export/datasets/golos_farfield/subset/manifest.json'),
+        'edacc': ('en', 'export/datasets/edacc/subset/manifest.json'),
+        'libri': ('en', 'export/datasets/librispeech/subset/manifest.json'),
+        'golos_crowd': ('ru', 'export/datasets/golos_crowd/subset/manifest.json')}
+# (hesitations a transcript writes and speech to text leaves out: not counted either way)
+FILLERS = {'uh', 'um', 'umm', 'erm', 'er', 'ah', 'hmm', 'mm', 'mhm', 'eh', 'uhm'}
 NOISES = ['keyboard', 'vacuum', 'fan']
 SNRS = [5, 0, -5]
 MODELS = ['raw', 'rnnoise', 'dfn3']
@@ -55,7 +62,7 @@ def units(t, how):
     t = t.lower()
     if how == 'char':
         return [c for c in t if c.strip() and c.isalnum()]
-    return re.findall(r"[\w']+", t)
+    return [w for w in re.findall(r"[\w']+", t) if w not in FILLERS]
 
 
 def error_rate(refs, hyp, how):
@@ -76,7 +83,16 @@ def transcribe(path, lang):
     return ' '.join(m.group(1) for m in re.finditer(r'^LINE \d+: (.*?)   \[', out, re.M) if m.group(1) != '(nothing)')
 
 
+def option(name, default):
+    if name in sys.argv:
+        return sys.argv[sys.argv.index(name) + 1].split(',')
+    return default
+
+
 def main():
+    global NOISES, SNRS
+    NOISES = option('--noises', NOISES)
+    SNRS = [int(v) for v in option('--snrs', SNRS)]
     langs = [a for a in sys.argv[1:] if a in LANGS or a in SETS] or list(LANGS)
     os.makedirs(OUT, exist_ok=True)
     rng = np.random.default_rng(11)
@@ -92,6 +108,19 @@ def main():
         D.write(pc, speech)
         res[name]['clean'] = error_rate(refs, transcribe(pc, lang), how)
         print(f'{name}: {len(refs)} lines, clean speech {res[name]["clean"]:.1%}', flush=True)
+        if '--none' in sys.argv:
+            # (no noise: does a suppressor cost anything on clean speech?)
+            row = {'raw': res[name]['clean']}
+            for m in MODELS[1:]:
+                o = os.path.join(OUT, f'{name}-none-{m}.f32.wav')
+                D.run_model(m, pc, o)
+                p = o.replace('.f32.wav', '.wav')
+                D.write(p, D.read_f32(o))
+                row[m] = error_rate(refs, transcribe(p, lang), how)
+                for f in (o, p):
+                    os.remove(f)  # (a run made 5 GB of these and filled the disk: 2026-10-15)
+            res[name]['no noise'] = row
+            print(f'  {"no noise":<16} ' + '  '.join(f'{m} {v:6.1%}' for m, v in row.items()), flush=True)
         for kind in NOISES:
             base = D.noise_track(kind, n, rng)
             for snr in SNRS:
@@ -108,7 +137,11 @@ def main():
                         D.run_model(m, pm, o)
                         p = o.replace('.f32.wav', '.wav')
                         D.write(p, D.read_f32(o))
+                        os.remove(o)
                     row[m] = error_rate(refs, transcribe(p, lang), how)
+                    if p != pm:
+                        os.remove(p)
+                os.remove(pm)  # (only the results are kept: the audio is made again in seconds)
                 res[name][key] = row
                 print(f'  {key:<16} ' + '  '.join(f'{m} {v:6.1%}' for m, v in row.items()), flush=True)
     res['when'] = time.strftime('%Y-%m-%d %H:%M')

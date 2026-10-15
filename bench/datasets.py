@@ -5,10 +5,18 @@ committed; their licenses allow research use with attribution):
     (scores 0-2 are 20 recordings, mostly near silence: -46 to -29 dB), drawn at random.
   - Golos far-field (Sber, OpenSLR 114; the 100 h far-field split's test set from Hugging Face,
     bond005/sberdevices_golos_100h_farfield): Russian spoken to a smart speaker from across a room.
-Each becomes export/datasets/<name>/subset/: 16 kHz wav files and manifest.json ([{id, text, file, score?}]).
+  - EdAcc (the Edinburgh International Accents of English Corpus, CC BY-SA 4.0; test chunks from Hugging Face,
+    edinburghcstr/edacc): conversations; an even number of whole sentences per accent (Kenyan, Indian, Ghanaian,
+    Nigerian, Romanian, Latin American, Spanish in the chunks here).
+  - LibriSpeech test-clean (OpenSLR 12, CC BY 4.0): native English read from audiobooks, one sentence per speaker.
+  - Golos crowd (as Golos far-field, the 10 h crowd split): Russian read close to a phone's microphone.
+Each becomes export/datasets/<name>/subset/: 16 kHz wav files and manifest.json ([{id, text, file, score?, accent?}]).
 
     python bench/datasets.py so762 [N]     (speechocean762: N of the worst spoken, default 40)
     python bench/datasets.py golos [N]     (needs pyarrow and soundfile: the pcbench env)
+    python bench/datasets.py edacc [N]     (N per accent, default 8; pcbench)
+    python bench/datasets.py libri [N]     (pcbench: FLAC)
+    python bench/datasets.py golos_crowd [N]   (pcbench)
 """
 import io, json, os, random, sys, wave
 
@@ -49,12 +57,12 @@ def so762(n):
     print(f'speechocean762: {len(man)} utterances, total pronunciation scores {man[0]["score"]}..{man[-1]["score"]} of 10')
 
 
-def golos(n):
+def golos(n, folder='golos_farfield', parquet='test.parquet'):
     import pyarrow.parquet as pq
     import soundfile as sf
-    t = pq.read_table(os.path.join(DATA, 'golos_farfield', 'test.parquet')).to_pylist()
+    t = pq.read_table(os.path.join(DATA, folder, parquet)).to_pylist()
     random.Random(5).shuffle(t)
-    out = os.path.join(DATA, 'golos_farfield', 'subset')
+    out = os.path.join(DATA, folder, 'subset')
     os.makedirs(out, exist_ok=True)
     man = []
     for i, r in enumerate(t):
@@ -68,9 +76,69 @@ def golos(n):
         write16(f, x.tobytes(), sr)
         man.append({'id': f'golos{i:04d}', 'text': text, 'file': f})
     json.dump(man, open(os.path.join(out, 'manifest.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    print(f'golos far-field: {len(man)} utterances')
+    print(f'{folder}: {len(man)} utterances')
+
+
+def edacc(n):
+    import glob, re
+    import pyarrow.parquet as pq
+    import soundfile as sf
+    rows = []
+    for f in sorted(glob.glob(os.path.join(DATA, 'edacc', '*.parquet'))):
+        rows += pq.read_table(f).to_pylist()
+    random.Random(7).shuffle(rows)
+    out = os.path.join(DATA, 'edacc', 'subset')
+    os.makedirs(out, exist_ok=True)
+    man, per = [], {}
+    for i, r in enumerate(rows):
+        text = re.sub(r'[<\[][^>\]]*[>\]]', ' ', r['text'] or '')  # (no <laugh>, [noise] and the like)
+        text = ' '.join(text.split())
+        if len(text.split()) < 6 or per.get(r['accent'], 0) >= n or not re.fullmatch(r"[A-Za-z' ,.?!-]+", text):
+            continue
+        x, sr = sf.read(io.BytesIO(r['audio']['bytes']), dtype='int16')
+        if x.ndim > 1:
+            x = x[:, 0]
+        if not 2 <= len(x) / sr <= 12:
+            continue
+        uid = f'edacc{i:05d}'
+        f = os.path.join(out, f'{uid}.wav')
+        write16(f, x.tobytes(), sr)
+        man.append({'id': uid, 'text': text, 'file': f, 'accent': r['accent'], 'speaker': r['speaker']})
+        per[r['accent']] = per.get(r['accent'], 0) + 1
+    json.dump(man, open(os.path.join(out, 'manifest.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    print(f'edacc: {len(man)} sentences: ' + ', '.join(f'{a} {c}' for a, c in sorted(per.items())))
+
+
+def libri(n):
+    import glob
+    import soundfile as sf
+    base = os.path.join(DATA, 'librispeech', 'LibriSpeech', 'test-clean')
+    out = os.path.join(DATA, 'librispeech', 'subset')
+    os.makedirs(out, exist_ok=True)
+    man = []
+    for spk in sorted(os.listdir(base)):
+        if len(man) >= n:
+            break
+        # (one sentence of 3-12 s per speaker: as many voices as there are lines)
+        for trans in sorted(glob.glob(os.path.join(base, spk, '*', '*.trans.txt'))):
+            done = False
+            for line in open(trans, encoding='utf-8'):
+                uid, text = line.strip().split(' ', 1)
+                x, sr = sf.read(os.path.join(os.path.dirname(trans), uid + '.flac'), dtype='int16')
+                if 3 <= len(x) / sr <= 12:
+                    f = os.path.join(out, f'{uid}.wav')
+                    write16(f, x.tobytes(), sr)
+                    man.append({'id': uid, 'text': text, 'file': f})
+                    done = True
+                    break
+            if done:
+                break
+    json.dump(man, open(os.path.join(out, 'manifest.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    print(f'librispeech: {len(man)} sentences, one per speaker')
 
 
 if __name__ == '__main__':
-    which, n = sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 40
-    {'so762': so762, 'golos': golos}[which](n)
+    which = sys.argv[1]
+    n = int(sys.argv[2]) if len(sys.argv) > 2 else (8 if which == 'edacc' else 40)
+    {'so762': so762, 'golos': golos, 'edacc': edacc, 'libri': libri,
+     'golos_crowd': lambda n: golos(n, 'golos_crowd', 'test0.parquet')}[which](n)

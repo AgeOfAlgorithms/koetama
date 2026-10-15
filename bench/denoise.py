@@ -14,6 +14,8 @@ time: mean, p99, max, and the share of one core. Listening files for each model:
 
     python bench/denoise.py              (everything; ~15 min; heavy - not while someone plays)
     python bench/denoise.py --cpu-only   (only the paced CPU runs: e.g. again with a game open)
+    python bench/denoise.py --speech edacc   (real voices instead of the computer voices: a bench/datasets.py set -
+                                              edacc, libri, golos, golos_crowd, so762; 30 of its lines)
 
 Needs: export/asrbench/clips (bench/make_clips.py), export/noise/esc50 (ESC-50's keyboard_typing, mouse_click,
 vacuum_cleaner: CC BY-NC 3.0 as a whole - local tests only, never committed), export/noise/models
@@ -37,7 +39,7 @@ LISTEN = os.path.join(ROOT, 'export', 'noise', 'listen')
 RATE = 48000
 MODEL_NAMES = ['rnnoise', 'dpdfnet', 'dfn3']
 LINES = ['en01', 'en02', 'en03', 'en04', 'en06', 'en08', 'en09', 'en10']  # (sentences: one-word lines are unstable in STT)
-NOISES = ['keyboard', 'mouse', 'vacuum', 'fan']
+NOISES = ['keyboard', 'mouse', 'vacuum', 'fans']  # (fans: real recordings; the synthetic 'fan' - pink noise and a hum - still works by name)
 SNRS = [5, 15]
 
 
@@ -109,6 +111,24 @@ def db(p):
     return 10 * np.log10(max(p, 1e-20))
 
 
+SPEECH_SETS = {'edacc': 'edacc', 'libri': 'librispeech', 'golos': 'golos_farfield', 'golos_crowd': 'golos_crowd',
+               'so762': 'speechocean762'}
+
+
+def speech_set(name, n=30):
+    """real voices: a bench/datasets.py set's first n lines, as speech_track"""
+    man = json.load(open(os.path.join(ROOT, 'export', 'datasets', SPEECH_SETS[name], 'subset', 'manifest.json'),
+                         encoding='utf-8'))[:n]
+    parts, words = [np.zeros(int(1.5 * RATE))], []
+    for m in man:
+        x, sr = read(m['file'])
+        parts += [to48(x, sr), np.zeros(int(0.8 * RATE))]
+        words.append(m['text'])
+    parts.append(np.zeros(int(1.5 * RATE)))
+    s = np.concatenate(parts)
+    return s * np.sqrt(0.01 / active_power(s)), ' '.join(words)
+
+
 def speech_track(texts):
     clips = json.load(open(os.path.join(ROOT, 'export', 'asrbench', 'clips.json'), encoding='utf-8'))
     ref = {c['id']: c['text'] for c in clips}
@@ -133,8 +153,12 @@ def noise_track(kind, n, rng):
         hum = sum(np.sin(2 * np.pi * 120 * k * t) / k for k in (1, 2, 3))
         x = pink / pink.std() + 0.5 * hum / hum.std()
     else:
-        folder = {'keyboard': 'keyboard_typing', 'mouse': 'mouse_click', 'vacuum': 'vacuum_cleaner'}[kind]
-        files = sorted(glob.glob(os.path.join(ESC, folder, '*.wav')))
+        if kind == 'fans':
+            # (real fans and air conditioners from Wikimedia Commons, CC BY / BY-SA: export/noise/fans - local only)
+            files = sorted(glob.glob(os.path.join(ROOT, 'export', 'noise', 'fans', '*.wav')))
+        else:
+            folder = {'keyboard': 'keyboard_typing', 'mouse': 'mouse_click', 'vacuum': 'vacuum_cleaner'}[kind]
+            files = sorted(glob.glob(os.path.join(ESC, folder, '*.wav')))
         rng.shuffle(files)
         parts, total = [], 0
         for f in files:
@@ -212,12 +236,17 @@ def cpu_runs(track_path):
 
 
 def main():
+    global LISTEN
     cpu_only = '--cpu-only' in sys.argv
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(LISTEN, exist_ok=True)
     build()
     rng = np.random.default_rng(7)
-    speech, text = speech_track(LINES)
+    which = sys.argv[sys.argv.index('--speech') + 1] if '--speech' in sys.argv else None
+    speech, text = speech_set(which) if which else speech_track(LINES)
+    if which:
+        LISTEN = LISTEN + '-' + which  # (export/noise/listen-edacc: the computer voices' files stay)
+        os.makedirs(LISTEN, exist_ok=True)
     n = len(speech)
     clean_path = os.path.join(OUT, 'clean.wav')
     write(clean_path, speech)
@@ -271,7 +300,8 @@ def main():
         write(track, speech + noise)
     results['paced'] = cpu_runs(track)
     results['when'] = time.strftime('%Y-%m-%d %H:%M')
-    tag = 'cpu' if cpu_only else 'all'
+    tag = ('cpu' if cpu_only else 'all') + (f'-{which}' if which else '')
+    results['speech'] = which or 'computer voices'
     with open(os.path.join(ROOT, 'export', 'noise', f'results-{tag}.json'), 'w') as f:
         json.dump(results, f, indent=1)
     report(results, os.path.join(ROOT, 'export', 'noise', f'results-{tag}.md'))
@@ -279,8 +309,8 @@ def main():
 
 def report(r, path):
     L = [f'# Noise suppression benchmark ({r["when"]})', '',
-         f'{len(r["lines"])} English sentences ({r["speech_s"]:.0f} s, computer voices recorded at 16 kHz: nothing above '
-         '8 kHz), speech at -20 dBFS. Noise level against the speech\'s active level.', '']
+         f'Speech: {r.get("speech", "computer voices")} ({r["speech_s"]:.0f} s, recorded at 16 kHz: nothing above 8 kHz), '
+         'at -20 dBFS. Noise level against the speech\'s active level.', '']
     if r['models']:
         L += ['| model | delay (ms) | clean speech kept (SI-SDR dB) | clean speech level change (dB) |', '|---|---|---|---|']
         for m, v in r['models'].items():
