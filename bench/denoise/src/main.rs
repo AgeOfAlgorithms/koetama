@@ -2,7 +2,8 @@
 //! optionally paced in real time (each frame waits for the moment a microphone would deliver it), timing every frame.
 //! Prints a JSON line: the model's load time, frame size, and per-frame processing time (mean, p50, p99, max), its
 //! share of one core at real time, and the real-time factor. bench/denoise.py runs it.
-//!     denoise_bench <rnnoise|dpdfnet|dfn3> <in.wav> <out.wav> [--paced] [--models DIR]
+//!     denoise_bench <rnnoise|dpdfnet|dfn3> <in.wav> <out.wav> [--paced] [--models DIR] [--atten DB]
+//! (--atten: DeepFilterNet 3 takes away at most this much - its attenuation limit; default none)
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -68,7 +69,7 @@ impl Denoiser for Dfn3 {
     }
 }
 
-fn open(name: &str, models: &PathBuf) -> Box<dyn Denoiser> {
+fn open(name: &str, models: &PathBuf, atten: Option<f32>) -> Box<dyn Denoiser> {
     match name {
         "rnnoise" => {
             let n = nnnoiseless::DenoiseState::FRAME_SIZE;
@@ -95,7 +96,10 @@ fn open(name: &str, models: &PathBuf) -> Box<dyn Denoiser> {
             let p = df::tract::DfParams::new(models.join("DeepFilterNet3_onnx.tar.gz")).expect("DeepFilterNet 3: the model");
             // (the thresholds of DeepFilterNet's own command line, enhance_wav.rs: -15 / 35 / 35 - the library's defaults,
             //  -10 / 30 / 20, left a steady fan nearly untouched: it took the frames for clean speech)
-            let rp = df::tract::RuntimeParams::default_with_ch(1).with_thresholds(-15.0, 35.0, 35.0);
+            let mut rp = df::tract::RuntimeParams::default_with_ch(1).with_thresholds(-15.0, 35.0, 35.0);
+            if let Some(db) = atten {
+                rp = rp.with_atten_lim(db);
+            }
             let m = df::tract::DfTract::new(p, &rp).expect("DeepFilterNet 3: init");
             assert_eq!(m.sr, RATE as usize, "DeepFilterNet 3: not 48 kHz");
             let hop = m.hop_size;
@@ -129,7 +133,8 @@ fn main() {
         }
     };
     let t0 = Instant::now();
-    let mut d = open(&args[1], &models);
+    let atten = args.iter().position(|a| a == "--atten").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f32>().ok());
+    let mut d = open(&args[1], &models, atten);
     let load_s = t0.elapsed().as_secs_f64();
     let n = d.frame();
     let frame_ms = n as f64 * 1000.0 / RATE as f64;

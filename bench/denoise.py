@@ -175,8 +175,8 @@ def noise_track(kind, n, rng):
     return x / np.sqrt(np.mean(x ** 2))
 
 
-def run_model(model, wav_in, wav_out, paced=False):
-    args = [TOOL, model, wav_in, wav_out, '--models', MODELS] + (['--paced'] if paced else [])
+def run_model(model, wav_in, wav_out, paced=False, extra=()):
+    args = [TOOL, model, wav_in, wav_out, '--models', MODELS] + (['--paced'] if paced else []) + list(extra)
     p = subprocess.run(args, env=env(), capture_output=True, text=True)
     if p.returncode != 0:
         raise SystemExit(f'{model} failed:\n{p.stdout}\n{p.stderr}')

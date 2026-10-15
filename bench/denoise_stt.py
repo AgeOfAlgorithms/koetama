@@ -32,6 +32,33 @@ FILLERS = {'uh', 'um', 'umm', 'erm', 'er', 'ah', 'hmm', 'mm', 'mhm', 'eh', 'uhm'
 NOISES = ['keyboard', 'vacuum', 'fan']
 SNRS = [5, 0, -5]
 MODELS = ['raw', 'rnnoise', 'dfn3']
+# (--variants: what speech to text is given - raw; a model's output (rnnoise, dfn3); mixNN: DeepFilterNet 3's output
+#  with NN % of the raw microphone mixed back in, lined up; limNN: DeepFilterNet 3 taking away at most NN dB)
+
+
+def variant(v, pm, noisy, stem, lag, cache):
+    """the wav speech to text gets for variant v of the noisy file pm (noisy: its samples); files made are deleted
+    by the caller"""
+    if v == 'raw':
+        return pm
+    out = os.path.join(OUT, f'{stem}-{v}.wav')
+    if v.startswith('mix'):
+        if 'dfn3' not in cache:
+            o = os.path.join(OUT, f'{stem}-dfn3-for-mix.f32.wav')
+            D.run_model('dfn3', pm, o)
+            cache['dfn3'] = D.align(D.read_f32(o), lag, len(noisy))
+            os.remove(o)
+        a = int(v[3:]) / 100
+        D.write(out, (1 - a) * cache['dfn3'] + a * noisy)
+        return out
+    o = os.path.join(OUT, f'{stem}-{v}.f32.wav')
+    if v.startswith('lim'):
+        D.run_model('dfn3', pm, o, extra=['--atten', v[3:]])
+    else:
+        D.run_model(v, pm, o)
+    D.write(out, D.read_f32(o))
+    os.remove(o)
+    return out
 OUT = os.path.join(D.ROOT, 'export', 'noise', 'stt')
 
 
@@ -90,7 +117,8 @@ def option(name, default):
 
 
 def main():
-    global NOISES, SNRS
+    global NOISES, SNRS, MODELS
+    MODELS = option('--variants', MODELS)
     NOISES = option('--noises', NOISES)
     SNRS = [int(v) for v in option('--snrs', SNRS)]
     langs = [a for a in sys.argv[1:] if a in LANGS or a in SETS] or list(LANGS)
@@ -108,17 +136,22 @@ def main():
         D.write(pc, speech)
         res[name]['clean'] = error_rate(refs, transcribe(pc, lang), how)
         print(f'{name}: {len(refs)} lines, clean speech {res[name]["clean"]:.1%}', flush=True)
+        # (DeepFilterNet 3's delay on this speech: to line its output up with the raw microphone for the mixes)
+        lag = 0
+        if any(v.startswith('mix') for v in MODELS):
+            o = os.path.join(OUT, f'{name}-lag.f32.wav')
+            D.run_model('dfn3', pc, o)
+            lag = D.delay(speech, D.read_f32(o))
+            os.remove(o)
+            print(f'  (DeepFilterNet 3 delay here: {lag / D.RATE * 1000:.1f} ms)', flush=True)
         if '--none' in sys.argv:
             # (no noise: does a suppressor cost anything on clean speech?)
-            row = {'raw': res[name]['clean']}
-            for m in MODELS[1:]:
-                o = os.path.join(OUT, f'{name}-none-{m}.f32.wav')
-                D.run_model(m, pc, o)
-                p = o.replace('.f32.wav', '.wav')
-                D.write(p, D.read_f32(o))
+            row, cache = {}, {}
+            for m in MODELS:
+                p = variant(m, pc, speech, f'{name}-none', lag, cache)
                 row[m] = error_rate(refs, transcribe(p, lang), how)
-                for f in (o, p):
-                    os.remove(f)  # (a run made 5 GB of these and filled the disk: 2026-10-15)
+                if p != pc:
+                    os.remove(p)  # (a run made 5 GB of these and filled the disk: 2026-10-15)
             res[name]['no noise'] = row
             print(f'  {"no noise":<16} ' + '  '.join(f'{m} {v:6.1%}' for m, v in row.items()), flush=True)
         for kind in NOISES:
@@ -128,16 +161,9 @@ def main():
                 noisy = speech + base * np.sqrt(D.active_power(speech) / 10 ** (snr / 10))
                 pm = os.path.join(OUT, f'{name}-{kind}{snr:+d}.wav')
                 D.write(pm, noisy)
-                row = {}
+                row, cache = {}, {}
                 for m in MODELS:
-                    if m == 'raw':
-                        p = pm
-                    else:
-                        o = os.path.join(OUT, f'{name}-{kind}{snr:+d}-{m}.f32.wav')
-                        D.run_model(m, pm, o)
-                        p = o.replace('.f32.wav', '.wav')
-                        D.write(p, D.read_f32(o))
-                        os.remove(o)
+                    p = variant(m, pm, noisy, f'{name}-{kind}{snr:+d}', lag, cache)
                     row[m] = error_rate(refs, transcribe(p, lang), how)
                     if p != pm:
                         os.remove(p)
@@ -154,7 +180,7 @@ def main():
     for lang in langs:
         r = res[lang]
         L += [f'**{lang}** ({r["lines"]} lines; clean speech {r["clean"]:.1%})', '',
-              '| noise | no suppression | RNNoise | DeepFilterNet 3 |', '|---|---|---|---|']
+              '| noise | ' + ' | '.join(MODELS) + ' |', '|---|' + '---|' * len(MODELS)]
         for k, row in r.items():
             if isinstance(row, dict):
                 best = min(row.values())
