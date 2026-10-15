@@ -39,12 +39,12 @@ fn the_profiles_folder() {
     assert_eq!(ids(), ["teardown-proximity-babble-chat", "dont-starve-together-proximity-comms"]);
     assert!(bad_profiles().is_empty());
     let td = by_id("teardown-proximity-babble-chat");
-    assert!(td.builtin && td.source.is_none() && td.voices && td.speech && td.name == "Teardown" && td.author == "AgeOfAlgorithms(+Opus5.5)");
+    assert!(td.builtin && td.source.is_none() && td.voices && td.speech && td.name == "Teardown" && td.author == "AgeOfAlgorithms");
     assert!(td.summary.iter().any(|l| l.contains("pcvx_*")), "{:?}", td.summary);
     // Don't Starve Together's Proximity Comms: built in too (HTTP on 47170, its three test voices)
     let dst = by_id("dont-starve-together-proximity-comms");
     assert!(dst.builtin && dst.source.is_none() && dst.voices && dst.speech && dst.translate, "{dst:?}");
-    assert!(dst.name == "Don't Starve Together" && dst.mod_name == "Proximity Comms" && dst.author == "AgeOfAlgorithms(+Opus5.5)");
+    assert!(dst.name == "Don't Starve Together" && dst.mod_name == "Proximity Comms" && dst.author == "AgeOfAlgorithms");
     assert!(dst.summary.iter().any(|l| l == "answers HTTP on 127.0.0.1:47170 (this computer only)"), "{:?}", dst.summary);
     assert_eq!(dst.profile.test_voices.len(), 3);
     assert!(remove_profile("dont-starve-together-proximity-comms").is_err(), "a built-in cannot be removed");
