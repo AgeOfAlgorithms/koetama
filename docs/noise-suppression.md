@@ -27,8 +27,9 @@ go silent) but costs a third of a core and 40 ms: not beside a game for now.
 - The tonarino `webrtc-audio-processing` crate: no MSVC build.
 - Windows Voice Clarity as the main route: Windows 11 only, and the user's PC runs Windows 10.
 
-**Speech to text stays on the raw microphone.** It already does: the 16 kHz branch is taken before the voice path.
-Denoisers raised Whisper's errors in two 2025-2026 studies, and in our own benchmark.
+**Speech to text stays on the raw microphone - for now.** It already does: the 16 kHz branch is taken before the
+voice path. Denoisers raised Whisper's errors in two 2025-2026 studies, and ours in mild noise; but on real speech in
+loud typing DeepFilterNet 3 cut our errors to a third ("Does it help speech to text?", below).
 
 **Still to measure** (the rest was measured 2026-10-15, "Measured on our PC"):
 - The CPU cost with a game running and Koetama below its priority (measured without one: `bench/denoise.py --cpu-only`).
@@ -88,6 +89,37 @@ What it says:
   worse at the vacuum's 5 dB (RNNoise 8 %, DeepFilterNet 3 12 %). Keeping speech to text on the raw microphone is
   right.
 - SI-SDR punishes any change to the waveform, audible or not: what players hear needs the listening files.
+
+### Does it help speech to text? (2026-10-15, `bench/denoise_stt.py`)
+
+The user doubted the first benchmark's "speech to text barely cares" - rightly: its speech (computer voices) was too
+clean and its noise too quiet to tell (0-1 % word errors with no suppression). Harder: every line, noise at the speech's
+own level and louder, and real people (`bench/datasets.py`; local only): Golos far-field (Sber; Russian spoken to a
+smart speaker across a room) and speechocean762 (English read by Mandarin-speaking learners, half of them children,
+pronunciation scored 3 of 10 - the worst still spoken). Word error rate of Koetama's own speech to text:
+
+| noise | Golos far-field, Russian (no noise: 6 %): raw / RNNoise / DeepFilterNet 3 | computer voices, English (1.3 %) | speechocean762, English (72 %) |
+|---|---|---|---|
+| keyboard +5 dB | 30 / 17 / **15** % | **0** / 0.6 / 1.3 % | 82 / 82 / 81 % |
+| keyboard 0 dB | 74 / 25 / **21** % | **0.6** / 1.3 / 3.2 % | 94 / **82** / 83 % |
+| keyboard -5 dB | 91 / 43 / **35** % | 17 / 17 / **8** % | 98 / **86** / 88 % |
+| vacuum +5 dB | 40 / 45 / **38** % | **1.9** / 2.6 / 5.2 % | 91 / 89 / 89 % |
+| vacuum 0 dB | 73 / 68 / **60** % | 39 / 34 / **17** % | 97 / 93 / **91** % |
+| vacuum -5 dB | 99 / 96 / **88** % | 95 / 83 / **62** % | 98 / 97 / **95** % |
+| fan +5 dB | 23 / 27 / **22** % | **0.6** / 3.2 / 1.9 % | **84** / 87 / 89 % |
+| fan 0 dB | **31** / 39 / 38 % | **5.8** / 9.0 / 11 % | **88** / 92 / 91 % |
+| fan -5 dB | 66 / 78 / **61** % | **36** / 46 / 45 % | (not run) |
+
+(Russian and Chinese computer voices: the same picture as English - export/noise/stt-results-en-ru-zh.md.)
+
+- **On real speech in keyboard or vacuum noise, DeepFilterNet 3 helps speech to text a lot**: Golos with typing at
+  the speech's level, 74 % -> 21 %. RNNoise helps nearly as much on typing, less on the vacuum.
+- **In mild noise on clean speech it costs a little** (computer voices, +5 dB: 0 -> 1.3 %), and **a steady fan with
+  its hum is the exception everywhere**: suppression is neutral or worse there.
+- speechocean762 is near the floor (72 % with no noise at all: the words are mispronounced, the reading halting -
+  "He reached for her hand" came out "He Rodder. Fat for here."): it says little either way.
+- So "speech to text stays on the raw microphone" (above) is right for mild noise and wrong for loud typing. Whether to
+  give speech to text the cleaned voice when the player picks Strong - or when the room is loud - is the next question.
 
 ## What players compare us to
 

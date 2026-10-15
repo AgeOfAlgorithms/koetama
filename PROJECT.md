@@ -563,5 +563,9 @@ as a model, the crates (425).
   keyboard -5 dB 17 % -> 8 %; Russian keyboard -5 dB 34 % -> 13 %); in milder noise the raw microphone is a little
   better (keyboard +5 dB 0 % / 0.6 % / 1.3 %), and the fan is mixed. Real people next: `bench/datasets.py` - the 40
   worst-pronounced utterances of speechocean762 (Mandarin-speaking learners, scores 0-3 of 10; CC BY 4.0) and 40 of
-  Golos far-field (Russian to a smart speaker across a room) - in export/datasets/ (not committed).
+  Golos far-field (Russian to a smart speaker across a room) - in export/datasets/ (not committed). **Result: on real
+  speech it helps a lot** - Golos with typing at the speech's level 74 % -> 21 % (DeepFilterNet 3; RNNoise 25 %),
+  vacuum 0 dB 73 % -> 60 % - except a steady fan (neutral or worse). speechocean762 (score 3 of 10) is near the floor:
+  72 % with no noise (the user listened: "the pronunciation is horrible"; scores 0-2 are mostly near silence).
+  docs/noise-suppression.md "Does it help speech to text?". Open: give speech to text the cleaned voice with Strong?
 
