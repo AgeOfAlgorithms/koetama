@@ -16,8 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AgeOfAlgorithms/koetama/releases"><img src="https://img.shields.io/github/downloads/AgeOfAlgorithms/koetama/total?label=downloads&color=f26d2a" alt="Downloads"></a>
-  <a href="https://github.com/AgeOfAlgorithms/koetama/stargazers"><img src="https://img.shields.io/github/stars/AgeOfAlgorithms/koetama?label=stars&color=f59e0b&style=flat" alt="Stars"></a>
+  <a href="https://github.com/AgeOfAlgorithms/koetama/stargazers"><img src="https://badgen.net/github/stars/AgeOfAlgorithms/koetama?label=stars&color=f59e0b" alt="Stars"></a>
   <a href="https://ko-fi.com/ageofalgorithms"><img src="https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-f26d2a?logo=kofi&logoColor=white" alt="Buy me a coffee on Ko-fi"></a>
 </p>
 
@@ -28,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AgeOfAlgorithms/koetama/releases"><img src="https://img.shields.io/github/v/release/AgeOfAlgorithms/koetama?include_prereleases&label=release&color=f26d2a" alt="Release"></a>
+  <a href="https://github.com/AgeOfAlgorithms/koetama/releases"><img src="https://badgen.net/github/release/AgeOfAlgorithms/koetama?label=release&color=f26d2a" alt="Release"></a>
   <a href="https://github.com/AgeOfAlgorithms/koetama/actions/workflows/build.yml"><img src="https://github.com/AgeOfAlgorithms/koetama/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3a2c2b" alt="Windows | Linux">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f59e0b" alt="MIT license"></a>
