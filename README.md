@@ -16,6 +16,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/AgeOfAlgorithms/koetama/releases"><img src="https://img.shields.io/github/downloads/AgeOfAlgorithms/koetama/total?label=downloads&color=f26d2a" alt="Downloads"></a>
   <a href="https://github.com/AgeOfAlgorithms/koetama/stargazers"><img src="https://badgen.net/github/stars/AgeOfAlgorithms/koetama?label=stars&color=f59e0b" alt="Stars"></a>
   <a href="https://ko-fi.com/ageofalgorithms"><img src="https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-f26d2a?logo=kofi&logoColor=white" alt="Buy me a coffee on Ko-fi"></a>
 </p>
