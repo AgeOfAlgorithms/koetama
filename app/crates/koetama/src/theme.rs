@@ -284,7 +284,7 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 
 /// A game mod as the picker shows it: a tile with the game's initial in the gradient, the game, the mod under it,
 /// and a badge (a community profile).
-fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: bool, selected: bool, badge: Option<&str>) {
+fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, author: &str, hovered: bool, selected: bool, badge: Option<&str>) {
     let p = ui.painter();
     let fill = if hovered { WIDGET_HOVER } else if selected { CARD } else { WIDGET };
     p.rect_filled(rect, CornerRadius::same(10), fill);
@@ -296,7 +296,16 @@ fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: boo
     let letter = mod_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
     p.text(tile.center(), egui::Align2::CENTER_CENTER, letter, FontId::new(16.0, semibold()), Color32::WHITE);
     let x = tile.right() + 10.0;
-    p.text(Pos2::new(x, rect.center().y - 9.0), egui::Align2::LEFT_CENTER, mod_name, FontId::new(14.5, semibold()), FG);
+    let title = p.text(Pos2::new(x, rect.center().y - 9.0), egui::Align2::LEFT_CENTER, mod_name, FontId::new(14.5, semibold()), FG);
+    // (who made it, after the mod's name - in the same card, the user 2026-10-16; cut short with "…" where the row has
+    //  no room, clear of the check mark or chevron on its right)
+    let room = rect.right() - 34.0 - (title.right() + 6.0);
+    if !author.is_empty() && room > 24.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(format!("by {author}"), FontId::new(12.5, FontFamily::Proportional), MUTED);
+        job.wrap = egui::text::TextWrapping { max_width: room, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let g = p.layout_job(job);
+        p.galley(Pos2::new(title.right() + 6.0, title.bottom() - g.size().y - 1.0), g, MUTED);
+    }
     let sub = p.text(
         Pos2::new(x, rect.center().y + 9.0),
         egui::Align2::LEFT_CENTER,
@@ -313,9 +322,9 @@ fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, hovered: boo
 }
 
 /// The game mod picker's button: the chosen one, and a chevron.
-pub fn game_button(ui: &mut egui::Ui, game: &str, mod_name: &str, width: f32) -> egui::Response {
+pub fn game_button(ui: &mut egui::Ui, game: &str, mod_name: &str, author: &str, width: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 46.0), Sense::click());
-    game_face(ui, rect, game, mod_name, resp.hovered(), false, None);
+    game_face(ui, rect, game, mod_name, author, resp.hovered(), false, None);
     let c = Pos2::new(rect.right() - 18.0, rect.center().y);
     ui.painter().line(vec![c + Vec2::new(-5.0, -2.5), c + Vec2::new(0.0, 2.5), c + Vec2::new(5.0, -2.5)], Stroke::new(1.8, MUTED));
     if resp.hovered() {
@@ -325,9 +334,9 @@ pub fn game_button(ui: &mut egui::Ui, game: &str, mod_name: &str, width: f32) ->
 }
 
 /// A game mod in the picker's list (community: a profile file, not built in).
-pub fn game_row(ui: &mut egui::Ui, game: &str, mod_name: &str, selected: bool, community: bool, width: f32) -> egui::Response {
+pub fn game_row(ui: &mut egui::Ui, game: &str, mod_name: &str, author: &str, selected: bool, community: bool, width: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 46.0), Sense::click());
-    game_face(ui, rect, game, mod_name, resp.hovered(), selected, community.then_some("community"));
+    game_face(ui, rect, game, mod_name, author, resp.hovered(), selected, community.then_some("community"));
     if selected {
         let c = Pos2::new(rect.right() - 18.0, rect.center().y);
         ui.painter().line(vec![c + Vec2::new(-5.0, 0.0), c + Vec2::new(-1.5, 3.5), c + Vec2::new(5.0, -4.0)], Stroke::new(2.0, ACCENT_TEXT));

@@ -312,8 +312,8 @@ impl App {
                 match &r {
                     Ok(k) => {
                         ui.label(RichText::new("Add this game mod?").size(18.0).family(theme::semibold()));
-                        theme::game_row(ui, &k.name, &k.mod_name, false, true, 500.0);
-                        ui.label(RichText::new(format!("by {} · {}", k.author, k.mod_url)).size(12.5).color(theme::MUTED));
+                        theme::game_row(ui, &k.name, &k.mod_name, &k.author, false, true, 500.0);
+                        ui.label(RichText::new(&k.mod_url).size(12.5).color(theme::MUTED));
                         ui.add_space(4.0);
                         ui.label(RichText::new("What it does on this PC").family(theme::semibold()));
                         for line in &k.summary {
@@ -628,29 +628,24 @@ impl App {
         let mut add = false;
         let mut join = None;
         ui.horizontal(|ui| {
-            let resp = theme::game_button(ui, &kind.name, &kind.mod_name, 330.0);
+            let resp = theme::game_button(ui, &kind.name, &kind.mod_name, &kind.author, 330.0);
             egui::Popup::from_toggle_button_response(&resp).width(360.0).show(|ui| {
                 ui.label(RichText::new("GAME MODS").size(11.5).family(theme::semibold()).color(theme::MUTED));
                 for g in &self.kinds {
                     // (the mod's page: a link symbol right of its row, where it has one)
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
-                        if theme::game_row(ui, &g.name, &g.mod_name, g.id == self.game_id, !g.builtin, 316.0).clicked() && g.id != self.game_id {
+                        if theme::game_row(ui, &g.name, &g.mod_name, &g.author, g.id == self.game_id, !g.builtin, 316.0).clicked() && g.id != self.game_id {
                             switch = Some(g.id.clone());
                         }
                         if !g.mod_url.is_empty() && theme::link_button(ui, 46.0).on_hover_text("Mod page").clicked() {
                             open_url(&g.mod_url);
                         }
                     });
-                    // (who made it: every profile names its author)
-                    ui.horizontal(|ui| {
-                        if !g.author.is_empty() {
-                            ui.label(RichText::new(format!("by {}", g.author)).size(12.0).color(theme::MUTED));
-                        }
-                        if !g.builtin && ui.link(RichText::new("Remove").size(12.5).color(theme::MUTED)).clicked() {
-                            remove = Some(g.clone());
-                        }
-                    });
+                    // (a community profile can be removed; who made it is in its card)
+                    if !g.builtin && ui.link(RichText::new("Remove").size(12.5).color(theme::MUTED)).clicked() {
+                        remove = Some(g.clone());
+                    }
                     ui.add_space(2.0);
                 }
                 for (path, why) in kd_games::bad_profiles() {
@@ -721,9 +716,6 @@ impl App {
                 && ui.link(RichText::new(format!("Get the {} mod ↗", kind.mod_name)).size(12.5).color(theme::ACCENT_TEXT)).clicked()
             {
                 open_url(&kind.mod_url);
-            }
-            if !kind.author.is_empty() {
-                ui.label(RichText::new(format!("{} by {}", kind.mod_name, kind.author)).size(12.5).color(theme::MUTED));
             }
             if !self.profile_msg.is_empty() {
                 ui.label(RichText::new(&self.profile_msg).size(12.5).color(theme::MUTED));
