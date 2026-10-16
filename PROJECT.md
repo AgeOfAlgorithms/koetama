@@ -575,3 +575,8 @@ as a model, the crates (425).
   limit 6 dB: no noise 18.4 / 19.9 / 20.5 / 20.2 / 18.9 / **18.6**; keyboard +5 dB 32.8 / 39.8 / 36.5 / 35.0 / 33.9 /
   **32.0**; keyboard 0 dB 66.3 / 50.4 / 44.8 / **39.7** / 41.9 / 41.7. So far the 6 dB limit is as good as raw where raw
   was best and nearly as good as the best where cleaning helps. Next: the vacuum and fan rows, the other three sets.
+  **The rest ran overnight (2026-10-16 01:29)**: over all four sets (28 rows), word errors raw 50.0 % / dfn3 45.6 % /
+  mix20 41.4 % / mix40 41.2 % / **lim12 40.5 %** / lim6 41.9 %; rows more than a point worse than raw: dfn3 9, lim12 4,
+  lim6 3. Vacuum raw 59.9 % -> lim12 44.9 % (full dfn3 57.4 %); keyboard 41.7 -> 25.2 %; no noise 12.1 -> 11.7 %. The
+  weak spot: Golos far-field with fans (raw 46.2 % / lim12 52.8 % at +5 dB). docs/noise-suppression.md "Gentler cleaning
+  for speech to text". Open: the user decides - speech to text on DeepFilterNet 3 limited to 12 dB (or 6 dB, safer)?

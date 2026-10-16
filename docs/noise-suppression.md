@@ -150,6 +150,40 @@ BY-SA), mixed digitally. Word error rate, raw -> DeepFilterNet 3:
   "clean speech kept" scores are not meaningful there (EdAcc's recordings carry room noise, which the models remove);
   CPU paced: RNNoise 0.6 %, DeepFilterNet 3 10.6 %, DPDFNet 34.8 % of one core.
 
+### Gentler cleaning for speech to text (2026-10-15/16)
+
+The user asked: mix raw audio back in, and clean less deeply. `bench/denoise_stt.py <set> --variants
+raw,dfn3,mix20,mix40,lim12,lim6 --noises keyboard,vacuum,fans --snrs 5,0 --none`, the same four real-speech sets and
+real noises as above. `mixNN`: DeepFilterNet 3's output (lined up: its delay, 30 ms) with NN % of the raw mix added back;
+`limNN`: DeepFilterNet 3 told to take off at most NN dB (`denoise_bench --atten NN`, libDF's attenuation limit). Every
+variant hears the same noisy mix within a set, so they compare fairly; the raw and dfn3 numbers differ from the table
+above because the noise lands differently each run. Word error rate, averaged over the four sets (28 rows: 4 sets x no
+noise + 6 noisy):
+
+| noise | raw | dfn3 | mix20 | mix40 | lim12 | lim6 |
+|---|---|---|---|---|---|---|
+| none | 12.1 % | 12.2 % | 12.4 % | 12.3 % | **11.7 %** | 11.8 % |
+| keyboard | 41.7 % | 27.7 % | 27.1 % | 26.7 % | **25.2 %** | 27.2 % |
+| vacuum | 59.9 % | 57.4 % | 46.0 % | 46.0 % | **44.9 %** | 48.2 % |
+| fans | 67.4 % | 68.5 % | 65.6 % | **65.3 %** | 65.7 % | 65.5 % |
+| all 28 | 50.0 % | 45.6 % | 41.4 % | 41.2 % | **40.5 %** | 41.9 % |
+| rows > 1 point worse than raw | - | 9 | 6 | 6 | 4 | **3** |
+| worst row vs raw | - | +15.1 | +8.3 | +6.1 | +8.1 | **+5.6** |
+
+- **Cleaning less deeply beats cleaning fully everywhere.** Full DeepFilterNet 3 turned the steady noises into a coin
+  flip; with a 12 dB limit vacuum goes 59.9 -> 44.9 % (full: 57.4 %), and no noise costs nothing (11.7 vs 12.1 %).
+- **lim12 is the best overall** (40.5 % against raw 50.0 %), and mixing back in does about as well (41.2-41.4 %). lim6 is
+  the safest (3 rows worse than raw, at most +5.6 points) and gives up some of the gain in loud noise (Golos crowd vacuum
+  0 dB: 75.1 % against lim12 65.8 %).
+- **The weak spot is Golos far-field with fans**: everything cleaned is worse than raw there (fans +5 dB raw 46.2 %, lim12
+  52.8 %, lim6 49.7 %; 0 dB raw 67.3 %, lim12 75.4 %). Far-field speech under a fan is the one case where the model takes
+  speech for noise. EdAcc with fans is at the floor (91-94 % for every variant): it says nothing.
+- Per set, the logs: `export/noise/stt-variants.log`, `-2.log` (EdAcc), `-3.log` (LibriSpeech, Golos crowd, Golos
+  far-field); not committed.
+- Cost: speech to text on a cleaned voice needs its own DeepFilterNet 3 run (limited) beside the one for the voice sent -
+  another 8-11 % of one core - unless the player picked Strong, where the two could share one run only if the voice sent
+  also used the limit.
+
 ## What players compare us to
 
 Players hear Discord, so the bar is Krisp: an ML model on the player's CPU, on by default since 2020. Game voice SDKs
