@@ -111,6 +111,8 @@ again until users reinstall a build with a new key by hand. Releasing (from `app
    `release_key` example: it refuses without the version line or with a key that is not the built-in one), verifies
    the signature, uploads `SHA256SUMS.txt.sig`, takes the release notes from README.md's `### <version>` section and
    publishes. `--no-publish` stops after the upload (the draft stays a draft). First write README's What's new entry.
+   **0.5.7 (the user, 2026-10-16):** also retake `docs/screenshot.png` (it shows 0.5.4's window, without the Noise
+   suppression row) and update its alt text in README.md.
 
 A new key (only if the old one is lost or leaked): `cargo run -p kd-update --example release_key -- new-key <file>`
 (never overwrites a file) prints the `pub const RELEASE_KEY` line to paste into `app/crates/kd-update/src/lib.rs`.
