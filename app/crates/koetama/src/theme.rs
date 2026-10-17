@@ -347,6 +347,25 @@ pub fn game_row(ui: &mut egui::Ui, game: &str, mod_name: &str, author: &str, sel
     resp
 }
 
+/// A bin as a button `height` tall, next to a game row: removes a community game mod.
+pub fn remove_button(ui: &mut egui::Ui, height: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(26.0, height), Sense::click());
+    let colour = if resp.hovered() { BAD } else { MUTED };
+    let stroke = Stroke::new(1.6, colour);
+    let c = rect.center();
+    let p = ui.painter();
+    // (the lid and its handle, then the can with two slats)
+    p.line_segment([Pos2::new(c.x - 7.0, c.y - 4.5), Pos2::new(c.x + 7.0, c.y - 4.5)], stroke);
+    p.line(vec![Pos2::new(c.x - 2.5, c.y - 4.5), Pos2::new(c.x - 2.5, c.y - 7.0), Pos2::new(c.x + 2.5, c.y - 7.0), Pos2::new(c.x + 2.5, c.y - 4.5)], stroke);
+    p.line(vec![Pos2::new(c.x - 5.0, c.y - 4.5), Pos2::new(c.x - 4.0, c.y + 7.0), Pos2::new(c.x + 4.0, c.y + 7.0), Pos2::new(c.x + 5.0, c.y - 4.5)], stroke);
+    p.line_segment([Pos2::new(c.x - 1.5, c.y - 1.5), Pos2::new(c.x - 1.5, c.y + 4.0)], stroke);
+    p.line_segment([Pos2::new(c.x + 1.5, c.y - 1.5), Pos2::new(c.x + 1.5, c.y + 4.0)], stroke);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
 /// A link symbol (a box, an arrow out of its corner) as a button `height` tall, next to a game row: its mod's page.
 pub fn link_button(ui: &mut egui::Ui, height: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(26.0, height), Sense::click());
