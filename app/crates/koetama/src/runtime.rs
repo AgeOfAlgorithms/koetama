@@ -116,8 +116,10 @@ pub struct SpeakerStatus {
 
 /// A speech model as the window shows it.
 pub struct ModelRow {
+    pub name: &'static str,
     pub title: &'static str,
     pub memory_mb: u32,
+    pub download_mb: u32,
     /// the chosen languages need it
     pub needed: bool,
     pub state: ModelState,
@@ -592,6 +594,25 @@ impl Runtime {
         });
     }
 
+    /// The player freed a speech model's memory (or is deleting it): let go of it now. One the languages need is
+    /// loaded again the next time the game wants the voice (downloaded again if it was deleted), as at the start.
+    pub fn free_speech_model(&mut self, name: &str) -> bool {
+        let Some(l) = &self.listener else { return false };
+        let gone = l.models().unload(name);
+        let (langs, _) = self.languages();
+        if kd_speech::models_for(&langs).contains(&name) && !self.warming.load(Ordering::SeqCst) {
+            *self.ready.lock().unwrap() = Ready::NotAsked;
+        }
+        gone
+    }
+
+    /// The player freed a translation model's memory (or is deleting it): "ja-en", with the pairs through it.
+    pub fn free_translation(&self, key: &str) {
+        if let Some(t) = &self.translator {
+            t.free(key);
+        }
+    }
+
     /// Once per game session (a new session in the feed, the game connected): a fresh voice room for it, kind 'r'
     /// "<room>:<key>". The game's host keeps the first one its session gets and hands it to every player.
     fn send_room(&mut self) {
@@ -797,8 +818,10 @@ impl Runtime {
         let rows = MODEL_INFO
             .iter()
             .map(|m| ModelRow {
+                name: m.name,
                 title: m.title,
                 memory_mb: m.memory_mb,
+                download_mb: m.download_mb,
                 needed: need.contains(&m.name),
                 state: models
                     .as_ref()

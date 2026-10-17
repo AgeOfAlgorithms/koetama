@@ -131,7 +131,10 @@ pub struct Models;  impl Models {
 }
 pub struct Lang { code, name, english, tier: Tier }  pub enum Tier { Full, Soft, Weak }  pub const LANGS: [Lang; 29];
 pub fn plan(langs: &[String]) -> (String, Vec<String>);  pub fn models_for(langs: &[String]) -> Vec<&'static str>;
-pub const MODEL_INFO: [ModelInfo; 4];   // name, title, memory_mb (for the window)
+pub const MODEL_INFO: [ModelInfo; 4];   // name, title, memory_mb, download_mb (for the window)
+pub struct OnDisk { dir, bytes, ours }  pub fn on_disk(name) -> Option<OnDisk>;   // all its files there: the HF cache
+                                        // first (ours: false), else Koetama's models folder (ours: true)
+pub fn delete_model(name) -> Result<u64, String>;   // ours only: the repo's folder (every revision) / the detector's files
 pub fn segments_in(langs: &[String], x, fallback, cache, probs) -> ...;   // segments among the player's languages
 pub fn segments(x: &[f32], fallback: &str, cache: Option<&mut HashMap<i64, Vec<f64>>>,
                 probs: &mut dyn FnMut(&[f32]) -> Result<Vec<f64>, String>) -> Result<Vec<(String, f64, f64)>, String>;
@@ -435,12 +438,13 @@ pub mod service {                      // the translator
     enum State { Ready, Downloading(0..1), Loading, Unavailable, NotDownloaded, Error }
                                                    // .wire() "downloading 42", .word() (NotDownloaded: "unavailable")
     PairStatus { from, to, state } .wire(), .common() -> kd_common::feed::RuleState;  status_text(&[PairStatus]),
-    Status { into ("" off), pairs } .wire() "en:ja>en=ready",
+    Status { into ("" off), pairs, loaded (direction ids in memory: not on the wire) } .wire() "en:ja>en=ready",
     enum Event { Reply { id, text, rule: Option<(from, to)> }, Status(Status) },
     #[derive(Clone)] Translator::start(provider, on_event, log) / Translator::mozilla(on_event, log);
         .set_target(into: Option<String>, known: Vec<String>, allow_downloads)   // cheap when unchanged
         .request(id, text) -> bool (false: id already queued / answered)
         .new_session()  .status() -> Status  .stop()
+        .free(key)   // "ja-en": its model and the pairs through it let go now (a line that needs one makes it again)
     MAX_PAIRS = 4, STATUS_EVERY = 0.5 s, RETRY_AFTER = 60 s, HOLD_MAX = 120 s, join_pieces, percent }
 ```
 
@@ -494,8 +498,13 @@ event (Game::send_translations_state(into, pairs)) and again in tick() when the 
 in. A joined player's Koetama uses its own setting (nothing of it comes from the host). Runtime::stop stops the
 translator before taking the game's lock (its thread may be waiting on that lock to send a reply). The window's
 "Translation" card: "Translate chat into" (Off, or catalog::offered_targets), "Download translation models when
-needed", each pair in use ("Japanese → English" and its state), and "Downloaded": every model on this PC
-(catalog::downloaded, the folder looked at every 3 s) with its size and a bin (catalog::delete); the command line's status line "translate: into
+needed", then "Translation models · about N MB in memory · N MB on disk": one row per direction on this PC or on its
+way (catalog::downloaded, the folder looked at every 3 s; Status.loaded; the pairs downloading or loading) - in
+memory / on disk / downloading, its size, "Free memory" (Runtime::free_translation -> Translator::free) and a bin
+(after a confirmation: freed, then catalog::delete) - and the pairs without a model (unavailable, not downloaded,
+failed). The "Speech to text" card lists its models the same way (kd_speech::on_disk, Runtime::free_speech_model -
+Models::unload, and a model the languages need loads again the next time the game wants the voice -
+kd_speech::delete_model); the command line's status line "translate: into
 en: ja → en ready, ko → en 42 %". Tests: tests/catalog.rs (a canned list, a fake CDN), tests/detect.rs (NTREX, chat
 lines, mixed lines, the preference), tests/service.rs (a fake engine and model source: own languages left alone, a
 new language fetched and its line held, downloads off, off, the least recently used pair let go, "ok" not

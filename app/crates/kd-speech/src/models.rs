@@ -92,6 +92,67 @@ pub fn lid_dir() -> Result<PathBuf, String> {
     Err(format!("the language detector ({LID_NAME}.onnx) is missing: build it with engine/export_lid.py"))
 }
 
+/// A speech model's files on this PC: their folder, their size, and whether they are Koetama's own (in its models
+/// folder: they can be deleted) - else the Hugging Face cache (a developer's PC) or the detector the install ships.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OnDisk {
+    pub dir: PathBuf,
+    pub bytes: u64,
+    pub ours: bool,
+}
+
+/// Where a model's files are, if all of them are on this PC (as Models finds them: the Hugging Face cache first).
+pub fn on_disk(name: &str) -> Option<OnDisk> {
+    on_disk_in(name, &paths::models_dir(), true)
+}
+
+/// on_disk with Koetama's models folder given, and the Hugging Face cache looked in or not (tests).
+pub fn on_disk_in(name: &str, models: &Path, hf: bool) -> Option<OnDisk> {
+    let size = |dir: &Path, files: &[&str]| -> Option<u64> {
+        files.iter().map(|f| std::fs::metadata(dir.join(f)).ok().filter(|m| m.is_file()).map(|m| m.len())).sum()
+    };
+    if name == "langid" {
+        let files = [format!("{LID_NAME}.onnx"), format!("{LID_NAME}.json")];
+        let files: Vec<&str> = files.iter().map(String::as_str).collect();
+        if let Some(bytes) = size(models, &files) {
+            return Some(OnDisk { dir: models.to_path_buf(), bytes, ours: true });
+        }
+        let dir = if hf { lid_dir().ok()? } else { return None };
+        return size(&dir, &files).map(|bytes| OnDisk { dir, bytes, ours: false });
+    }
+    let spec = MODELS.iter().find(|m| m.name == name)?;
+    if hf {
+        if let Some(d) = fetch::hf_cache_dir(spec.repo, spec.revision) {
+            if let Some(bytes) = size(&d, spec.files) {
+                return Some(OnDisk { dir: d, bytes, ours: false });
+            }
+        }
+    }
+    let d = models.join(spec.repo.replace('/', "__")).join(spec.revision);
+    size(&d, spec.files).map(|bytes| OnDisk { dir: d, bytes, ours: true })
+}
+
+/// Deletes a model's files from Koetama's models folder (every revision; the language detector: its two files) and
+/// says how many bytes went. Unload it first (Models::unload). Files Koetama does not own are left alone (an error).
+pub fn delete_model(name: &str) -> Result<u64, String> {
+    delete_in(name, &paths::models_dir(), true)
+}
+
+fn delete_in(name: &str, models: &Path, hf: bool) -> Result<u64, String> {
+    let d = on_disk_in(name, models, hf).ok_or_else(|| format!("the speech model \"{name}\" is not on this PC"))?;
+    if !d.ours {
+        return Err(format!("the speech model \"{name}\" is not in Koetama's folder ({}): left alone", d.dir.display()));
+    }
+    let r = if name == "langid" {
+        [format!("{LID_NAME}.onnx"), format!("{LID_NAME}.json")].iter().try_for_each(|f| std::fs::remove_file(models.join(f)))
+    } else {
+        // (the repo's folder: every revision under it)
+        let spec = MODELS.iter().find(|m| m.name == name).ok_or_else(|| format!("no speech model \"{name}\""))?;
+        std::fs::remove_dir_all(models.join(spec.repo.replace('/', "__")))
+    };
+    r.map(|_| d.bytes).map_err(|e| format!("the speech model \"{name}\" could not be deleted: {e}"))
+}
+
 fn path_str(p: &Path) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
 }
@@ -412,5 +473,42 @@ mod pace_tests {
             m.note_pass(0.1);
         }
         assert_eq!(m.every(), ROLL_EVERY, "the load gone: back to every {ROLL_EVERY} s");
+    }
+}
+
+#[cfg(test)]
+mod disk_tests {
+    use super::*;
+
+    /// A model counts as on this PC only when all its files are; deleting takes its folder (every revision), the
+    /// detector its two files, and nothing else.
+    #[test]
+    fn on_disk_and_deleted() {
+        let root = std::env::temp_dir().join(format!("kd-speech-ondisk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let spec = MODELS.iter().find(|m| m.name == "parakeet").unwrap();
+        let dir = root.join(spec.repo.replace('/', "__")).join(spec.revision);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (i, f) in spec.files.iter().enumerate() {
+            if i > 0 {
+                assert_eq!(on_disk_in("parakeet", &root, false), None, "{i} of its files: not on this PC");
+            }
+            std::fs::write(dir.join(f), vec![0u8; 100]).unwrap();
+        }
+        let d = on_disk_in("parakeet", &root, false).unwrap();
+        assert_eq!((d.bytes, d.ours), (100 * spec.files.len() as u64, true));
+        std::fs::create_dir_all(root.join(spec.repo.replace('/', "__")).join("an-old-revision")).unwrap();
+        std::fs::write(root.join(format!("{LID_NAME}.onnx")), [0u8; 30]).unwrap();
+        std::fs::write(root.join(format!("{LID_NAME}.json")), [0u8; 3]).unwrap();
+        std::fs::write(root.join("silero_vad_v5.onnx"), [0u8; 7]).unwrap();
+        assert_eq!(on_disk_in("langid", &root, false).map(|d| d.bytes), Some(33));
+        assert_eq!(on_disk_in("sensevoice", &root, false), None);
+        assert_eq!(on_disk_in("nothing", &root, false), None);
+        assert_eq!(delete_in("parakeet", &root, false), Ok(100 * spec.files.len() as u64));
+        assert!(!root.join(spec.repo.replace('/', "__")).exists(), "every revision");
+        assert_eq!(delete_in("langid", &root, false), Ok(33));
+        assert!(delete_in("sensevoice", &root, false).is_err());
+        assert!(root.join("silero_vad_v5.onnx").exists(), "the rest of the folder left alone");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -234,6 +234,8 @@ pub struct Status {
     /// the language chat is translated into; "": off
     pub into: String,
     pub pairs: Vec<PairStatus>,
+    /// the directions whose models are in memory now ("ja-en/2.0"), sorted (not on the wire: for the window)
+    pub loaded: Vec<String>,
 }
 
 impl Status {
@@ -272,6 +274,7 @@ enum Msg {
     Request { session: u64, id: i64, text: String },
     Progress { job: u64, frac: f64 },
     Prepared { job: u64, result: Prepared },
+    Free(String),
     Stop,
 }
 
@@ -396,6 +399,12 @@ impl Translator {
         self.inner.session.fetch_add(1, Ordering::SeqCst);
     }
 
+    /// Lets go of a direction's model now (`key` as "ja-en": every version) and of the pairs through it; a line that
+    /// needs one again makes it again (from this PC, or downloaded).
+    pub fn free(&self, key: &str) {
+        self.send(Msg::Free(key.to_string()));
+    }
+
     /// The target and the pairs' states as last told.
     pub fn status(&self) -> Status {
         lock(&self.inner.status).clone()
@@ -497,6 +506,7 @@ impl Worker {
                     }
                 }
                 Ok(Msg::Prepared { job, result }) => self.prepared(job, result),
+                Ok(Msg::Free(key)) => self.free(&key),
                 Err(RecvTimeoutError::Timeout) => {}
             }
             self.retry_failed();
@@ -661,6 +671,23 @@ impl Worker {
         }
     }
 
+    /// The player let go of a direction ("ja-en"): its model, and the pairs through it.
+    fn free(&mut self, key: &str) {
+        let of_key = |id: &String| id.split_once('/').map_or(id.as_str(), |(k, _)| k) == key;
+        let before = self.slots.len();
+        self.slots.retain(|s| !s.route.iter().any(of_key));
+        if self.slots.len() < before {
+            (self.log)(&format!("translation: let go of the pairs through {key} (the player freed its memory)"));
+        }
+        let gone: Vec<String> = self.models.keys().filter(|k| of_key(k)).cloned().collect();
+        for k in gone {
+            self.models.remove(&k);
+            (self.log)(&format!("translation: let go of the {k} model"));
+        }
+        // (and what only those pairs used: a pivot's other half)
+        self.unload_unused();
+    }
+
     /// Lets go of the models no pair goes through.
     fn unload_unused(&mut self) {
         let used: HashSet<&String> = self.slots.iter().flat_map(|s| s.route.iter()).collect();
@@ -755,10 +782,9 @@ impl Worker {
 
     /// Tells the status when it changed (a download's progress alone: at most every STATUS_EVERY).
     fn tell(&mut self) {
-        let now = Status {
-            into: self.target.into.clone().unwrap_or_default(),
-            pairs: self.slots.iter().map(Slot::status).collect(),
-        };
+        let mut loaded: Vec<String> = self.models.keys().cloned().collect();
+        loaded.sort();
+        let now = Status { into: self.target.into.clone().unwrap_or_default(), pairs: self.slots.iter().map(Slot::status).collect(), loaded };
         // (compared whole, not on the wire: NotDownloaded and Unavailable read the same there, the window tells them apart)
         if now == self.told {
             return;
@@ -766,7 +792,7 @@ impl Worker {
         let shape = |s: &Status| {
             let pairs: Vec<_> =
                 s.pairs.iter().map(|p| (p.from.clone(), p.to.clone(), std::mem::discriminant(&p.state))).collect();
-            (s.into.clone(), pairs)
+            (s.into.clone(), pairs, s.loaded.clone())
         };
         let progress_only = shape(&now) == shape(&self.told);
         if progress_only && self.told_at.is_some_and(|t| t.elapsed() < STATUS_EVERY) {
@@ -894,8 +920,9 @@ mod tests {
         assert_eq!(kd_common::feed::translations_wire(&common), status_text(&all), "the connectors write the same");
         assert_eq!((percent(1.0), percent(0.999), percent(-1.0), percent(f64::NAN)), (100, 99, 0, 0));
         assert_eq!(Status::default().wire(), "");
-        assert_eq!(Status { into: "en".into(), pairs: vec![] }.wire(), "en:");
-        assert_eq!(Status { into: "en".into(), pairs: all[..1].to_vec() }.wire(), "en:ja>en=ready");
+        assert_eq!(Status { into: "en".into(), pairs: vec![], loaded: vec![] }.wire(), "en:");
+        let one = Status { into: "en".into(), pairs: all[..1].to_vec(), loaded: vec!["ja-en/1".into()] };
+        assert_eq!(one.wire(), "en:ja>en=ready", "the models in memory are not on the wire");
     }
 
     #[test]

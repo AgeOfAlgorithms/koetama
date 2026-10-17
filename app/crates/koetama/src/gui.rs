@@ -21,19 +21,73 @@ fn lang_name(code: &str) -> String {
 }
 
 /// A model's state in words, and its colour.
-fn model_state(row: &crate::runtime::ModelRow) -> (String, Color32) {
+fn model_state(row: &crate::runtime::ModelRow, on_disk: bool) -> (String, Color32) {
     use kd_speech::ModelState::*;
-    match &row.state {
-        Loaded if row.needed => ("loaded".into(), theme::GOOD),
-        Loaded => ("letting go".into(), theme::MUTED),
-        Loading => ("loading".into(), theme::WARN),
-        Downloading(f, d, t) => (
-            format!("downloading {}", download_text(&(f.clone(), *d, *t))),
-            theme::WARN,
-        ),
-        NotLoaded if row.needed => ("loads when the game wants your voice".into(), theme::MUTED),
-        NotLoaded => ("not needed".into(), theme::MUTED),
+    match (&row.state, on_disk) {
+        (Loaded, _) if row.needed => ("in memory".into(), theme::GOOD),
+        (Loaded, _) => ("in memory · letting go".into(), theme::MUTED),
+        (Loading, _) => ("loading".into(), theme::WARN),
+        (Downloading(f, d, t), _) => (format!("downloading {}", download_text(&(f.clone(), *d, *t))), theme::WARN),
+        (NotLoaded, true) if row.needed => ("on disk".into(), theme::MUTED),
+        (NotLoaded, true) => ("on disk · not needed".into(), theme::MUTED),
+        (NotLoaded, false) => ("not downloaded".into(), theme::MUTED),
     }
+}
+
+/// Sizes as the model lists say them: "1.2 GB", "670 MB", "37 MB".
+fn gb(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.1} GB", bytes as f64 / 1e9)
+    } else {
+        mb(bytes)
+    }
+}
+
+fn mb(bytes: u64) -> String {
+    format!("{} MB", (bytes + 500_000) / 1_000_000)
+}
+
+/// The translation directions a pair goes through, by folder ("ja-en"; two through English, as catalog::route).
+fn pair_keys(from: &str, to: &str) -> Vec<String> {
+    use kd_translate::catalog::mozilla_code;
+    let (Some(f), Some(t)) = (mozilla_code(from, true), mozilla_code(to, false)) else { return Vec::new() };
+    if f == "en" || t == "en" {
+        vec![format!("{f}-{t}")]
+    } else {
+        vec![format!("{f}-en"), format!("en-{t}")]
+    }
+}
+
+/// A model the player asked to delete, until they confirm.
+#[derive(Clone)]
+enum Deleting {
+    Speech { name: &'static str, title: &'static str, bytes: u64 },
+    Translation { key: String, label: String, bytes: u64 },
+}
+
+/// What a click in a model list asks for (done once the list is drawn).
+enum ModelAction {
+    FreeSpeech(&'static str),
+    FreeTranslation(String),
+    Delete(Deleting),
+}
+
+/// A model's two buttons: Free memory (when it is in memory) and the bin (Ok: Koetama may delete its files, and the
+/// hover text; Err: why not). Clicked: (free, delete).
+fn model_buttons(ui: &mut egui::Ui, in_memory: bool, free_hint: &str, delete: Result<String, String>) -> (bool, bool) {
+    let free = ui
+        .add_enabled(in_memory, egui::Button::new(RichText::new("Free memory").size(12.0)).small())
+        .on_hover_text(free_hint)
+        .on_disabled_hover_text("Not in memory")
+        .clicked();
+    let (ok, hint) = match delete {
+        Ok(h) => (true, h),
+        Err(h) => (false, h),
+    };
+    let del = ui
+        .add_enabled_ui(ok, |ui| theme::remove_button(ui, 22.0).on_hover_text(&hint).on_disabled_hover_text(&hint).clicked())
+        .inner;
+    (free, del)
 }
 
 /// (file, bytes done, bytes total) -> "42 % of 640 MB" (or "120 MB" when the size is not known)
@@ -159,6 +213,11 @@ struct App {
     /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
     downloaded: Vec<kd_translate::catalog::OnDisk>,
     downloaded_at: Option<Instant>,
+    /// the speech models' files on this PC (looked at every few seconds, as the translation models')
+    speech_disk: Vec<(&'static str, Option<kd_speech::OnDisk>)>,
+    speech_disk_at: Option<Instant>,
+    /// a model to delete, once the player confirms
+    deleting: Option<Deleting>,
     /// the window's look done once it exists (its dark title bar)
     dressed: bool,
     /// the game mods (built-in, then profile files) and the one in use
@@ -224,6 +283,9 @@ impl App {
             targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
             downloaded: Vec::new(),
             downloaded_at: None,
+            speech_disk: Vec::new(),
+            speech_disk_at: None,
+            deleting: None,
             dressed: false,
             kinds: Vec::new(),
             kind: kd_games::by_id(""),
@@ -472,7 +534,7 @@ impl App {
                     .size(12.5)
                     .color(theme::MUTED),
             );
-            self.downloaded_ui(ui);
+            self.translation_models_ui(ui);
             return;
         }
         let st = self.status.as_ref().and_then(|s| s.translate.clone()).unwrap_or_default();
@@ -485,55 +547,191 @@ impl App {
                 .size(12.5)
                 .color(theme::MUTED),
             );
-        } else {
-            egui::Grid::new("translation").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                for r in &st.pairs {
-                    let (pair, state, colour) = pair_text(r);
-                    ui.label(RichText::new(pair).color(theme::FG));
-                    theme::pill(ui, &state, colour);
-                    ui.end_row();
-                }
-            });
         }
-        self.downloaded_ui(ui);
+        self.translation_models_ui(ui);
         ui.label(RichText::new("on this PC, with Mozilla's translation models").size(12.0).color(theme::MUTED));
     }
 
-    /// "Downloaded": the translation models on this PC (the folder looked at every few seconds), each with its size and
-    /// a bin - a deleted one downloads again the next time a line needs it.
-    fn downloaded_ui(&mut self, ui: &mut egui::Ui) {
+    /// The translation models: every one on this PC or on its way, each in memory / on disk / downloading, with Free
+    /// memory and a bin; then the pairs that have no model (none exists, downloads off, failed).
+    fn translation_models_ui(&mut self, ui: &mut egui::Ui) {
         use kd_translate::catalog;
+        use kd_translate::service::State;
         if self.downloaded_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
             self.downloaded = catalog::downloaded(&catalog::root());
-            self.downloaded.sort_by_cached_key(|d| (model_lang(&d.from), model_lang(&d.to)));
             self.downloaded_at = Some(Instant::now());
         }
-        if self.downloaded.is_empty() {
+        let st = self.status.as_ref().and_then(|s| s.translate.clone()).unwrap_or_default();
+        struct Row {
+            key: String,
+            label: String,
+            bytes: Option<u64>,
+            memory: bool,
+            busy: Option<(String, Color32)>,
+        }
+        fn row_for(rows: &mut Vec<Row>, key: &str) -> usize {
+            if let Some(i) = rows.iter().position(|r| r.key == key) {
+                return i;
+            }
+            let (f, t) = match (key.strip_suffix("-en"), key.strip_prefix("en-")) {
+                (Some(f), _) => (f, "en"),
+                (_, Some(t)) => ("en", t),
+                _ => (key, ""),
+            };
+            let label = format!("{} → {}", model_lang(f), model_lang(t));
+            rows.push(Row { key: key.to_string(), label, bytes: None, memory: false, busy: None });
+            rows.len() - 1
+        }
+        let mut rows: Vec<Row> = Vec::new();
+        for d in &self.downloaded {
+            let i = row_for(&mut rows, &d.key());
+            rows[i].bytes = Some(rows[i].bytes.unwrap_or(0) + d.bytes);
+        }
+        for id in &st.loaded {
+            let i = row_for(&mut rows, id.split_once('/').map_or(id.as_str(), |(k, _)| k));
+            rows[i].memory = true;
+        }
+        let mut problems = Vec::new();
+        for p in &st.pairs {
+            match p.state {
+                State::Downloading(_) | State::Loading => {
+                    let (_, text, colour) = pair_text(p);
+                    for k in pair_keys(&p.from, &p.to) {
+                        let i = row_for(&mut rows, &k);
+                        if !rows[i].memory {
+                            rows[i].busy = Some((text.clone(), colour));
+                        }
+                    }
+                }
+                State::Unavailable | State::NotDownloaded | State::Error => problems.push(pair_text(p)),
+                State::Ready => {}
+            }
+        }
+        if rows.is_empty() && problems.is_empty() {
             return;
         }
-        let mb = |b: u64| (b + 500_000) / 1_000_000;
-        let total: u64 = self.downloaded.iter().map(|d| d.bytes).sum();
+        rows.sort_by(|a, b| a.label.cmp(&b.label));
+        let memory: u64 = rows.iter().filter(|r| r.memory).filter_map(|r| r.bytes).sum();
+        let disk: u64 = rows.iter().filter_map(|r| r.bytes).sum();
         ui.add_space(4.0);
-        ui.label(RichText::new(format!("DOWNLOADED · {} MB", mb(total))).size(11.5).family(theme::semibold()).color(theme::MUTED));
-        let mut delete = None;
-        egui::Grid::new("translation-downloaded").num_columns(3).spacing([12.0, 0.0]).show(ui, |ui| {
-            for d in &self.downloaded {
-                ui.label(RichText::new(format!("{} → {}", model_lang(&d.from), model_lang(&d.to))).color(theme::FG));
-                ui.label(RichText::new(format!("{} MB", mb(d.bytes))).color(theme::MUTED));
-                if theme::remove_button(ui, 24.0).on_hover_text("Delete it (it downloads again the next time it is needed)").clicked() {
-                    delete = Some(d.clone());
+        ui.label(
+            RichText::new(format!("Translation models · about {} in memory · {} on disk", mb(memory), mb(disk)))
+                .size(12.5)
+                .color(theme::MUTED),
+        );
+        let mut act = None;
+        egui::Grid::new("translation-models").num_columns(5).spacing([10.0, 4.0]).show(ui, |ui| {
+            for r in &rows {
+                ui.label(RichText::new(&r.label).color(theme::FG));
+                ui.label(RichText::new(r.bytes.map(mb).unwrap_or_default()).color(theme::MUTED));
+                let (text, colour) = match (&r.busy, r.memory, r.bytes.is_some()) {
+                    (Some(b), _, _) => b.clone(),
+                    (None, true, _) => ("in memory".to_string(), theme::GOOD),
+                    (None, false, true) => ("on disk".to_string(), theme::MUTED),
+                    (None, false, false) => ("not on disk".to_string(), theme::MUTED),
+                };
+                theme::pill(ui, &text, colour);
+                let delete = match (r.bytes, &r.busy) {
+                    (_, Some(_)) => Err("Wait until it is ready".to_string()),
+                    (Some(b), None) => Ok(format!("Delete it ({}): it downloads again the next time a chat line needs it", mb(b))),
+                    (None, None) => Err("Not on disk".to_string()),
+                };
+                let hint = "Let go of it now: it loads again the next time a chat line needs it";
+                let (free, del) = model_buttons(ui, r.memory, hint, delete);
+                if free {
+                    act = Some(ModelAction::FreeTranslation(r.key.clone()));
+                }
+                if del {
+                    let bytes = r.bytes.unwrap_or(0);
+                    act = Some(ModelAction::Delete(Deleting::Translation { key: r.key.clone(), label: r.label.clone(), bytes }));
                 }
                 ui.end_row();
             }
+            for (pair, text, colour) in &problems {
+                ui.label(RichText::new(pair).color(theme::FG));
+                ui.label("");
+                theme::pill(ui, text, *colour);
+                ui.end_row();
+            }
         });
-        if let Some(d) = delete {
-            let what = format!("{} → {}", model_lang(&d.from), model_lang(&d.to));
-            let line = match catalog::delete(&catalog::root(), &d.key()) {
-                Ok(()) => format!("translation: deleted the {what} model ({} MB)", mb(d.bytes)),
-                Err(e) => format!("translation: could not delete the {what} model: {e}"),
-            };
-            let _ = self.log_tx.send(line);
-            self.downloaded_at = None;
+        if let Some(a) = act {
+            self.model_action(a);
+        }
+    }
+
+    /// A click in a model list: free a model's memory now, or ask before deleting it.
+    fn model_action(&mut self, a: ModelAction) {
+        match a {
+            ModelAction::FreeSpeech(name) => {
+                if let Some(rt) = self.rt.as_mut() {
+                    rt.free_speech_model(name);
+                }
+            }
+            ModelAction::FreeTranslation(key) => {
+                if let Some(rt) = self.rt.as_ref() {
+                    rt.free_translation(&key);
+                }
+            }
+            ModelAction::Delete(d) => self.deleting = Some(d),
+        }
+    }
+
+    /// Deleting a model, once the player confirms: its memory let go first, then its files.
+    fn delete_modal(&mut self, ctx: &egui::Context) {
+        let Some(d) = self.deleting.clone() else { return };
+        let (title, body) = match &d {
+            Deleting::Speech { title, bytes, .. } => (
+                format!("Delete {title}?"),
+                format!(
+                    "Its files ({}) are deleted from this PC. It downloads again the next time the game wants your voice \
+                     in a language that needs it.",
+                    gb(*bytes)
+                ),
+            ),
+            Deleting::Translation { label, bytes, .. } => (
+                format!("Delete the {label} model?"),
+                format!("Its files ({}) are deleted from this PC. It downloads again the next time a chat line needs it.", mb(*bytes)),
+            ),
+        };
+        let mut close = false;
+        egui::Modal::new(egui::Id::new("model-delete")).show(ctx, |ui| {
+            ui.set_width(420.0);
+            ui.label(RichText::new(&title).size(16.0).family(theme::semibold()));
+            ui.label(RichText::new(&body).color(theme::MUTED));
+            ui.horizontal(|ui| {
+                if ui.button("Delete").clicked() {
+                    let line = match &d {
+                        Deleting::Speech { name, title, .. } => {
+                            if let Some(rt) = self.rt.as_mut() {
+                                rt.free_speech_model(name);
+                            }
+                            match kd_speech::delete_model(name) {
+                                Ok(b) => format!("deleted the speech model {title} ({})", gb(b)),
+                                Err(e) => format!("could not delete: {e}"),
+                            }
+                        }
+                        Deleting::Translation { key, label, bytes } => {
+                            if let Some(rt) = self.rt.as_ref() {
+                                rt.free_translation(key);
+                            }
+                            match kd_translate::catalog::delete(&kd_translate::catalog::root(), key) {
+                                Ok(()) => format!("translation: deleted the {label} model ({})", mb(*bytes)),
+                                Err(e) => format!("translation: could not delete the {label} model: {e}"),
+                            }
+                        }
+                    };
+                    let _ = self.log_tx.send(line);
+                    self.downloaded_at = None;
+                    self.speech_disk_at = None;
+                    close = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if close {
+            self.deleting = None;
         }
     }
 
@@ -614,46 +812,68 @@ impl App {
         }
     }
 
-    /// The speech models: which the languages need, which are loaded, and about how much memory each takes.
-    fn models_ui(&self, ui: &mut egui::Ui) {
+    /// The speech models: each the languages need or that is on this PC - in memory / on disk / not downloaded, its
+    /// size (on disk, else its download), Free memory and a bin.
+    fn models_ui(&mut self, ui: &mut egui::Ui) {
+        if self.speech_disk_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+            self.speech_disk = kd_speech::MODEL_INFO.iter().map(|m| (m.name, kd_speech::on_disk(m.name))).collect();
+            self.speech_disk_at = Some(Instant::now());
+        }
         let Some(st) = &self.status else { return };
-        let loaded: u32 = st
-            .models
-            .iter()
-            .filter(|m| m.state == kd_speech::ModelState::Loaded)
-            .map(|m| m.memory_mb)
-            .sum();
+        let disk = |name: &str| self.speech_disk.iter().find(|(n, _)| *n == name).and_then(|(_, d)| d.clone());
+        let memory: u32 = st.models.iter().filter(|m| m.state == kd_speech::ModelState::Loaded).map(|m| m.memory_mb).sum();
+        let on_disk: u64 = self.speech_disk.iter().filter_map(|(_, d)| d.as_ref().map(|d| d.bytes)).sum();
         ui.label(
             RichText::new(format!(
-                "Speech models · about {:.1} GB in memory",
-                loaded as f64 / 1000.0
+                "Speech models · about {} in memory · {} on disk. The ones your languages need load when the game \
+                 wants your voice (downloaded the first time).",
+                gb(memory as u64 * 1_000_000),
+                gb(on_disk)
             ))
-            .size(12.5)
-            .color(theme::MUTED),
+                .size(12.5)
+                .color(theme::MUTED),
         );
-        egui::Grid::new("models")
-            .num_columns(4)
-            .spacing([8.0, 4.0])
-            .show(ui, |ui| {
-                for row in &st.models {
-                    if !row.needed && row.state == kd_speech::ModelState::NotLoaded {
-                        continue; // (not needed, not loaded: nothing to show)
-                    }
-                    let (text, colour) = model_state(row);
-                    theme::dot(
-                        ui,
-                        colour,
-                        row.state == kd_speech::ModelState::Loaded && row.needed,
-                    );
-                    ui.label(row.title);
-                    ui.label(
-                        RichText::new(format!("{:.1} GB", row.memory_mb as f64 / 1000.0))
-                            .color(theme::MUTED),
-                    );
-                    theme::pill(ui, &text, colour);
-                    ui.end_row();
+        let mut act = None;
+        egui::Grid::new("models").num_columns(6).spacing([8.0, 4.0]).show(ui, |ui| {
+            for row in &st.models {
+                let d = disk(row.name);
+                if !row.needed && row.state == kd_speech::ModelState::NotLoaded && d.is_none() {
+                    continue; // (not needed, not loaded, not on this PC: nothing to show)
                 }
-            });
+                let loaded = row.state == kd_speech::ModelState::Loaded;
+                let busy = matches!(row.state, kd_speech::ModelState::Loading | kd_speech::ModelState::Downloading(..));
+                let (text, colour) = model_state(row, d.is_some());
+                theme::dot(ui, colour, loaded && row.needed);
+                ui.label(row.title);
+                let size = d.as_ref().map_or(row.download_mb as u64 * 1_000_000, |d| d.bytes);
+                ui.label(RichText::new(gb(size)).color(theme::MUTED));
+                theme::pill(ui, &text, colour);
+                let delete = match &d {
+                    _ if busy => Err("Wait until it is ready".to_string()),
+                    Some(d) if d.ours => Ok(format!("Delete its files ({}): it downloads again when it is needed", gb(d.bytes))),
+                    Some(_) if row.name == "langid" => Err("It comes with Koetama".to_string()),
+                    Some(_) => Err("It is in the Hugging Face cache, not Koetama's folder: left alone".to_string()),
+                    None => Err("Not downloaded".to_string()),
+                };
+                let hint = if row.needed {
+                    "Let go of it now: it loads again the next time the game wants your voice"
+                } else {
+                    "Let go of it now"
+                };
+                let (free, del) = model_buttons(ui, loaded, hint, delete);
+                if free {
+                    act = Some(ModelAction::FreeSpeech(row.name));
+                }
+                if del {
+                    let bytes = d.map_or(0, |d| d.bytes);
+                    act = Some(ModelAction::Delete(Deleting::Speech { name: row.name, title: row.title, bytes }));
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(a) = act {
+            self.model_action(a);
+        }
     }
 
     /// The bottom row: updates (the gradient: the main action) and what the update check says. (No licenses button -
@@ -990,6 +1210,7 @@ impl eframe::App for App {
         }
         self.handle_updates(&ctx);
         self.profiles_ui(&ctx);
+        self.delete_modal(&ctx);
         ctx.request_repaint_after(Duration::from_millis(250));
 
         if !self.dressed {

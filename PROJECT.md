@@ -112,7 +112,8 @@ again until users reinstall a build with a new key by hand. Releasing (from `app
    the signature, uploads `SHA256SUMS.txt.sig`, takes the release notes from README.md's `### <version>` section and
    publishes. `--no-publish` stops after the upload (the draft stays a draft). First write README's What's new entry.
    **0.5.8 (in main, 2026-10-17):** the game mod cards in three lines (the mod, "by" its author, the game; the user)
-   with the bin apart from the link; the Translation card's "Downloaded" list (each model, its size, a bin).
+   with the bin apart from the link; every speech and translation model listed as in memory / on disk / not downloaded
+   with its size, "Free memory" and a bin (the user: "a free memory button and delete button for each model").
 
 A new key (only if the old one is lost or leaked): `cargo run -p kd-update --example release_key -- new-key <file>`
 (never overwrites a file) prints the `pub const RELEASE_KEY` line to paste into `app/crates/kd-update/src/lib.rs`.

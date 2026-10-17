@@ -32,7 +32,7 @@ mod stitch;
 
 pub use listener::{low_priority, Callbacks, Listener, OnFinal, OnLive, OnStart, PTT_TAIL};
 pub use mics::{Mic, PlaylistMicrophone, WavMicrophone};
-pub use models::{init_onnxruntime, lid_dir, ModelState, Models};
+pub use models::{delete_model, init_onnxruntime, lid_dir, on_disk, on_disk_in, ModelState, Models, OnDisk};
 pub use rolling::{FinalInfo, LineInfo, RollingLine};
 pub use stitch::{quiet_point, segments, segments_in, transcribe_mixed, transcribe_mixed_in, Mixed, Probs};
 
@@ -173,19 +173,26 @@ pub fn detector_label(lang: &str) -> &str {
     }
 }
 
-/// A model as the window shows it: its name, what it is for, about how much memory it takes when loaded (MB).
+/// A model as the window shows it: its name, what it is for, about how much memory it takes when loaded (MB), and
+/// how much it downloads (MB: the files MODELS names, from their pinned revisions; the detector ships with Koetama).
 #[derive(Clone, Copy, Debug)]
 pub struct ModelInfo {
     pub name: &'static str,
     pub title: &'static str,
     pub memory_mb: u32,
+    pub download_mb: u32,
 }
 
 pub const MODEL_INFO: [ModelInfo; 4] = [
-    ModelInfo { name: "parakeet", title: "Parakeet v3 (English and the other European languages)", memory_mb: 680 },
-    ModelInfo { name: "sensevoice", title: "SenseVoice (Mandarin, Cantonese, Japanese, Korean)", memory_mb: 260 },
-    ModelInfo { name: "gigaam", title: "GigaAM v3 (Russian)", memory_mb: 250 },
-    ModelInfo { name: "langid", title: "Language detector (when you speak several languages)", memory_mb: 100 },
+    ModelInfo {
+        name: "parakeet",
+        title: "Parakeet v3 (English and the other European languages)",
+        memory_mb: 680,
+        download_mb: 670,
+    },
+    ModelInfo { name: "sensevoice", title: "SenseVoice (Mandarin, Cantonese, Japanese, Korean)", memory_mb: 260, download_mb: 240 },
+    ModelInfo { name: "gigaam", title: "GigaAM v3 (Russian)", memory_mb: 250, download_mb: 225 },
+    ModelInfo { name: "langid", title: "Language detector (when you speak several languages)", memory_mb: 100, download_mb: 43 },
 ];
 
 /// The languages a player speaks -> how the listener runs: one language - that language; several - "auto" among

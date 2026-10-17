@@ -297,6 +297,32 @@ fn a_language_now_spoken_lets_go_of_its_pair() {
 }
 
 #[test]
+fn freeing_a_model_lets_go_of_its_pairs() {
+    let r = rig();
+    r.set("ja", &["de"]);
+    assert_eq!(r.ask(1, KO), format!("ja(en({KO}))"));
+    assert_eq!(r.ask(2, ES), format!("ja(en({ES}))"));
+    r.status_is("ja:ko>ja=ready,es>ja=ready");
+    assert_eq!(r.t.status().loaded, ["en-ja/1", "es-en/1", "ko-en/1"], "the models in memory, sorted");
+    // (en-ja: both pairs go through it - both let go, and every model: none has a pair left)
+    r.t.free("en-ja");
+    r.status_is("ja:");
+    r.wait("nothing in memory", |ev| matches!(ev.iter().rev().find_map(|e| match e {
+        Event::Status(s) => Some(s.loaded.is_empty()),
+        _ => None,
+    }), Some(true)));
+    assert!(!r.src.alive("en-ja/1") && !r.src.alive("ko-en/1") && !r.src.alive("es-en/1"));
+    // (a line needs it again: made again)
+    assert_eq!(r.ask(3, KO), format!("ja(en({KO}))"));
+    assert_eq!(r.t.status().loaded, ["en-ja/1", "ko-en/1"]);
+    // (a direction not in memory: nothing happens)
+    r.t.free("fr-en");
+    assert_eq!(r.ask(4, KO), format!("ja(en({KO}))"));
+    assert_eq!(r.t.status().pairs.len(), 1);
+    r.t.stop();
+}
+
+#[test]
 fn pivots_through_english() {
     let r = rig();
     r.set("ko", &["en"]);
