@@ -130,6 +130,65 @@ impl Direction {
     }
 }
 
+/// A direction whose files are on this PC (the window's "Downloaded" list).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OnDisk {
+    /// Mozilla's codes ("ja", "zh-Hans"); one of them is "en"
+    pub from: String,
+    pub to: String,
+    pub version: String,
+    pub bytes: u64,
+}
+
+impl OnDisk {
+    /// its folder's name: "ja-en", "zh-Hans-en"
+    pub fn key(&self) -> String {
+        format!("{}-{}", self.from, self.to)
+    }
+}
+
+/// The directions downloaded under `root`, as <from>-<to>/<version> folders, sorted by folder; a version with a
+/// download under way (a `.dl` or `.part` file) or with no files is left out. Every model has English on one side, so
+/// a folder's name splits at its "-en" end or "en-" start.
+pub fn downloaded(root: &Path) -> Vec<OnDisk> {
+    let mut out = Vec::new();
+    let Ok(dirs) = std::fs::read_dir(root) else {
+        return out;
+    };
+    let mut keys: Vec<String> =
+        dirs.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    keys.sort();
+    for key in keys {
+        let (from, to) = match (key.strip_suffix("-en"), key.strip_prefix("en-")) {
+            (Some(f), _) if !f.is_empty() => (f.to_string(), "en".to_string()),
+            (_, Some(t)) if !t.is_empty() => ("en".to_string(), t.to_string()),
+            _ => continue,
+        };
+        let Ok(versions) = std::fs::read_dir(root.join(&key)) else { continue };
+        for v in versions.flatten().filter(|e| e.path().is_dir()) {
+            let files: Vec<_> = std::fs::read_dir(v.path()).into_iter().flatten().flatten().collect();
+            let partial = files.iter().any(|f| {
+                let n = f.file_name().to_string_lossy().to_string();
+                n.ends_with(".dl") || n.ends_with(".part")
+            });
+            let bytes: u64 = files.iter().filter_map(|f| f.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum();
+            if !partial && bytes > 0 {
+                out.push(OnDisk { from: from.clone(), to: to.clone(), version: v.file_name().to_string_lossy().to_string(), bytes });
+            }
+        }
+    }
+    out
+}
+
+/// Deletes a downloaded direction (`key`, as OnDisk::key) with all its versions; it downloads again the next time a
+/// line needs it. Only a plain folder name under `root` is accepted.
+pub fn delete(root: &Path, key: &str) -> io::Result<()> {
+    if key.is_empty() || key.contains(['/', '\\', ':']) || key.starts_with('.') {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("not a model folder: {key:?}")));
+    }
+    std::fs::remove_dir_all(root.join(key))
+}
+
 #[derive(Clone, Debug)]
 struct Record {
     from: String,
@@ -423,6 +482,38 @@ mod tests {
             assert_eq!(numeric_version(v), None, "{v}");
         }
         assert!(numeric_version("2.10") > numeric_version("2.9"));
+    }
+
+    #[test]
+    fn downloaded_and_deleted() {
+        let root = std::env::temp_dir().join(format!("kd-translate-ondisk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let put = |rel: &str, n: usize| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, vec![0u8; n]).unwrap();
+        };
+        put("ja-en/2.0/model.jaen.bin", 300);
+        put("ja-en/2.0/vocab.jaen.spm", 20);
+        put("zh-Hans-en/2.0/model.bin", 100);
+        put("en-de/1.0/model.bin", 50);
+        put("ru-en/2.0/model.bin.part", 10); // (a download under way: not listed)
+        put("notes/x.txt", 5); // (not a model folder)
+        std::fs::write(root.join(LIST_FILE), b"{}").unwrap();
+        let got = downloaded(&root);
+        let keys: Vec<(String, String, u64)> = got.iter().map(|d| (d.from.clone(), d.to.clone(), d.bytes)).collect();
+        assert_eq!(
+            keys,
+            vec![("en".into(), "de".into(), 50), ("ja".into(), "en".into(), 320), ("zh-Hans".into(), "en".into(), 100)]
+        );
+        assert_eq!(got[2].key(), "zh-Hans-en");
+        delete(&root, "ja-en").unwrap();
+        assert!(!root.join("ja-en").exists());
+        assert_eq!(downloaded(&root).len(), 2);
+        for bad in ["", "..", "../x", "a/b", "a\\b", "C:x", ".hidden"] {
+            assert!(delete(&root, bad).is_err(), "{bad}");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -111,8 +111,8 @@ again until users reinstall a build with a new key by hand. Releasing (from `app
    `release_key` example: it refuses without the version line or with a key that is not the built-in one), verifies
    the signature, uploads `SHA256SUMS.txt.sig`, takes the release notes from README.md's `### <version>` section and
    publishes. `--no-publish` stops after the upload (the draft stays a draft). First write README's What's new entry.
-   **0.5.7 (the user, 2026-10-16):** also retake `docs/screenshot.png` (it shows 0.5.4's window, without the Noise
-   suppression row) and update its alt text in README.md.
+   **0.5.8 (in main, 2026-10-17):** the game mod cards in three lines (the mod, "by" its author, the game; the user)
+   with the bin apart from the link; the Translation card's "Downloaded" list (each model, its size, a bin).
 
 A new key (only if the old one is lost or leaked): `cargo run -p kd-update --example release_key -- new-key <file>`
 (never overwrites a file) prints the `pub const RELEASE_KEY` line to paste into `app/crates/kd-update/src/lib.rs`.
@@ -581,4 +581,4 @@ as a model, the crates (425).
   mix20 41.4 % / mix40 41.2 % / **lim12 40.5 %** / lim6 41.9 %; rows more than a point worse than raw: dfn3 9, lim12 4,
   lim6 3. Vacuum raw 59.9 % -> lim12 44.9 % (full dfn3 57.4 %); keyboard 41.7 -> 25.2 %; no noise 12.1 -> 11.7 %. The
   weak spot: Golos far-field with fans (raw 46.2 % / lim12 52.8 % at +5 dB). docs/noise-suppression.md "Gentler cleaning
-  for speech to text". Open: the user decides - speech to text on DeepFilterNet 3 limited to 12 dB (or 6 dB, safer)?
+  for speech to text". **The user, 2026-10-17: no cleaning for speech to text** - it stays on the raw microphone.

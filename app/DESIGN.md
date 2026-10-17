@@ -414,6 +414,8 @@ pub mod catalog {                      // Mozilla's list and the downloads
     .targets() -> the languages to translate INTO (en, and each with an en -> it model),
     TARGETS (what Mozilla offered, 2026-10: all but yue and mt), offered_targets(root) -> the kept list's targets, else TARGETS
                                                    // (the window's picker: never fetches the list)
+    OnDisk { from, to, version, bytes } .key(), downloaded(root) -> Vec<OnDisk>,   // whole versions on this PC
+    delete(root, key)?                             // a direction's folder; it downloads again when needed
     load_list(root, max_age, get, log) -> Catalog  // kept in <root>/models.json, fetched at most daily, offline: the kept one
     fetch_route(root, &[Direction], progress(done, total), download, log) -> folders
                                                    // <root>/<from>-<to>/<version>/<own name>, via <name>.dl, sha256 checked,
@@ -492,7 +494,8 @@ event (Game::send_translations_state(into, pairs)) and again in tick() when the 
 in. A joined player's Koetama uses its own setting (nothing of it comes from the host). Runtime::stop stops the
 translator before taking the game's lock (its thread may be waiting on that lock to send a reply). The window's
 "Translation" card: "Translate chat into" (Off, or catalog::offered_targets), "Download translation models when
-needed", and each pair in use ("Japanese → English" and its state); the command line's status line "translate: into
+needed", each pair in use ("Japanese → English" and its state), and "Downloaded": every model on this PC
+(catalog::downloaded, the folder looked at every 3 s) with its size and a bin (catalog::delete); the command line's status line "translate: into
 en: ja → en ready, ko → en 42 %". Tests: tests/catalog.rs (a canned list, a fake CDN), tests/detect.rs (NTREX, chat
 lines, mixed lines, the preference), tests/service.rs (a fake engine and model source: own languages left alone, a
 new language fetched and its line held, downloads off, off, the least recently used pair let go, "ok" not

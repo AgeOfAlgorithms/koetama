@@ -53,6 +53,15 @@ fn english_name(code: &str) -> String {
     kd_speech::lang_info(code).map_or_else(|| code.to_string(), |l| l.english.to_string())
 }
 
+/// A translation model's language by Mozilla's code (the models translate writing: Chinese by its script).
+fn model_lang(code: &str) -> String {
+    match code {
+        "zh-Hans" => "Chinese (Simplified)".to_string(),
+        "zh-Hant" => "Chinese (Traditional)".to_string(),
+        c => english_name(c),
+    }
+}
+
 /// A translation pair as the window says it: "Japanese → English", its state in words and its colour.
 pub fn pair_text(r: &kd_translate::service::PairStatus) -> (String, String, Color32) {
     use kd_translate::service::State;
@@ -147,6 +156,9 @@ struct App {
     /// languages the player speaks but has translated anyway ("translate_also")
     translate_also: Vec<String>,
     targets: Vec<&'static str>,
+    /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
+    downloaded: Vec<kd_translate::catalog::OnDisk>,
+    downloaded_at: Option<Instant>,
     /// the window's look done once it exists (its dark title bar)
     dressed: bool,
     /// the game mods (built-in, then profile files) and the one in use
@@ -210,6 +222,8 @@ impl App {
             translate_downloads: true,
             translate_also: Vec::new(),
             targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
+            downloaded: Vec::new(),
+            downloaded_at: None,
             dressed: false,
             kinds: Vec::new(),
             kind: kd_games::by_id(""),
@@ -458,6 +472,7 @@ impl App {
                     .size(12.5)
                     .color(theme::MUTED),
             );
+            self.downloaded_ui(ui);
             return;
         }
         let st = self.status.as_ref().and_then(|s| s.translate.clone()).unwrap_or_default();
@@ -480,7 +495,46 @@ impl App {
                 }
             });
         }
+        self.downloaded_ui(ui);
         ui.label(RichText::new("on this PC, with Mozilla's translation models").size(12.0).color(theme::MUTED));
+    }
+
+    /// "Downloaded": the translation models on this PC (the folder looked at every few seconds), each with its size and
+    /// a bin - a deleted one downloads again the next time a line needs it.
+    fn downloaded_ui(&mut self, ui: &mut egui::Ui) {
+        use kd_translate::catalog;
+        if self.downloaded_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+            self.downloaded = catalog::downloaded(&catalog::root());
+            self.downloaded.sort_by_cached_key(|d| (model_lang(&d.from), model_lang(&d.to)));
+            self.downloaded_at = Some(Instant::now());
+        }
+        if self.downloaded.is_empty() {
+            return;
+        }
+        let mb = |b: u64| (b + 500_000) / 1_000_000;
+        let total: u64 = self.downloaded.iter().map(|d| d.bytes).sum();
+        ui.add_space(4.0);
+        ui.label(RichText::new(format!("DOWNLOADED · {} MB", mb(total))).size(11.5).family(theme::semibold()).color(theme::MUTED));
+        let mut delete = None;
+        egui::Grid::new("translation-downloaded").num_columns(3).spacing([12.0, 0.0]).show(ui, |ui| {
+            for d in &self.downloaded {
+                ui.label(RichText::new(format!("{} → {}", model_lang(&d.from), model_lang(&d.to))).color(theme::FG));
+                ui.label(RichText::new(format!("{} MB", mb(d.bytes))).color(theme::MUTED));
+                if theme::remove_button(ui, 24.0).on_hover_text("Delete it (it downloads again the next time it is needed)").clicked() {
+                    delete = Some(d.clone());
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(d) = delete {
+            let what = format!("{} → {}", model_lang(&d.from), model_lang(&d.to));
+            let line = match catalog::delete(&catalog::root(), &d.key()) {
+                Ok(()) => format!("translation: deleted the {what} model ({} MB)", mb(d.bytes)),
+                Err(e) => format!("translation: could not delete the {what} model: {e}"),
+            };
+            let _ = self.log_tx.send(line);
+            self.downloaded_at = None;
+        }
     }
 
     /// "Languages I speak": what is in use (chips), and (Choose) every language by how well it is written.
@@ -629,7 +683,7 @@ impl App {
         let mut join = None;
         ui.horizontal(|ui| {
             let resp = theme::game_button(ui, &kind.name, &kind.mod_name, &kind.author, 330.0);
-            egui::Popup::from_toggle_button_response(&resp).width(420.0).show(|ui| {
+            egui::Popup::from_toggle_button_response(&resp).width(440.0).show(|ui| {
                 ui.label(RichText::new("GAME MODS").size(11.5).family(theme::semibold()).color(theme::MUTED));
                 for g in &self.kinds {
                     // (right of its row: the mod's page, where it has one, then Remove for a community profile;
@@ -641,10 +695,12 @@ impl App {
                         }
                         if g.mod_url.is_empty() {
                             ui.add_space(26.0);
-                        } else if theme::link_button(ui, 46.0).on_hover_text("Mod page").clicked() {
+                        } else if theme::link_button(ui, theme::CARD_H).on_hover_text("Mod page").clicked() {
                             open_url(&g.mod_url);
                         }
-                        if !g.builtin && theme::remove_button(ui, 46.0).on_hover_text("Remove this game mod").clicked() {
+                        // (apart from the link: a click meant for one doesn't land on the other)
+                        ui.add_space(10.0);
+                        if !g.builtin && theme::remove_button(ui, theme::CARD_H).on_hover_text("Remove this game mod").clicked() {
                             remove = Some(g.clone());
                         }
                     });

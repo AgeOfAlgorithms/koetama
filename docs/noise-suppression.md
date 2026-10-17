@@ -183,6 +183,8 @@ noise + 6 noisy):
 - Cost: speech to text on a cleaned voice needs its own DeepFilterNet 3 run (limited) beside the one for the voice sent -
   another 8-11 % of one core - unless the player picked Strong, where the two could share one run only if the voice sent
   also used the limit.
+- **Decision (the user, 2026-10-17): no cleaning for speech to text.** It stays on the raw microphone; lim12 is not
+  built.
 
 ## What players compare us to
 
