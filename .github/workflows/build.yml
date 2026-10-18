@@ -1,6 +1,7 @@
 # Builds Koetama (the Rust app, app/) on GitHub: Windows (the folder + its installer) and Linux (a .tar.gz), with
 # SHA256SUMS.txt. Every push to main that changes the app (not the docs): the builds as artifacts (Actions tab -> the
-# run -> Artifacts). The Rust build cache is kept between runs. A tag v<version> (matching app/Cargo.toml's version):
+# run -> Artifacts; kept 7 days: they count against the account's Actions storage, and a release keeps its own
+# copies). The Rust build cache is kept between runs. A tag v<version> (matching app/Cargo.toml's version):
 # also a DRAFT release with the files - nothing is public until it is published by hand. Code signing (SignPath) slots
 # in after the Windows build once the project is accepted.
 name: build
@@ -94,6 +95,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: koetama-windows
+          retention-days: 7
           path: |
             dist/Koetama-Setup*.exe
             dist/SHA256SUMS.txt
@@ -145,6 +147,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: koetama-linux
+          retention-days: 7
           path: |
             dist/Koetama*linux.tar.gz
             dist/SHA256SUMS.txt
