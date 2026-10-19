@@ -49,8 +49,13 @@ def notes(version):
     m = re.search(r'^### %s\b.*?\n(.*?)(?=^### |\Z)' % re.escape(version), s, re.S | re.M)
     if not m:
         sys.exit('README.md has no "### %s" section in What\'s new' % version)
+    # (README keeps the three newest versions - the user, 2026-10-19; the older ones are at the top of CHANGELOG.md)
+    n = len(re.findall(r'^### \d', s, re.M))
+    if n > 3:
+        sys.exit('README.md\'s What\'s new has %d versions: keep the three newest, move the rest to CHANGELOG.md' % n)
     body = re.sub(r'\n  (?=\S)', ' ', m.group(1).strip())
-    body = body.replace('](PROTOCOL.md)', '](https://github.com/%s/blob/main/PROTOCOL.md)' % REPO)
+    for doc in ('PROTOCOL.md', 'CHANGELOG.md'):
+        body = body.replace('](%s)' % doc, '](https://github.com/%s/blob/main/%s)' % (REPO, doc))
     return body + ('\n\nWindows: `Koetama-Setup-%s.exe` (not code-signed yet: Windows may warn on first install). '
                    'Linux / Steam Deck: the `.tar.gz`. Checksums in `SHA256SUMS.txt`, signed by the release key '
                    '(`SHA256SUMS.txt.sig`).\n' % version)

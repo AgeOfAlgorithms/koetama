@@ -110,7 +110,9 @@ again until users reinstall a build with a new key by hand. Releasing (from `app
    `SHA256SUMS.txt` and installer, checks the installer against it, signs it with the release key (kd-update's
    `release_key` example: it refuses without the version line or with a key that is not the built-in one), verifies
    the signature, uploads `SHA256SUMS.txt.sig`, takes the release notes from README.md's `### <version>` section and
-   publishes. `--no-publish` stops after the upload (the draft stays a draft). First write README's What's new entry.
+   publishes. `--no-publish` stops after the upload (the draft stays a draft). First write README's What's new entry
+   and move the oldest of README's versions to the top of CHANGELOG.md (README keeps the three newest - the user,
+   2026-10-19; release.py refuses more).
    **0.5.8 (in main, 2026-10-17):** the game mod cards in three lines (the mod, "by" its author, the game; the user)
    with the bin apart from the link; every speech and translation model listed as in memory / on disk / not downloaded
    with its size, "Free memory" and a bin (the user: "a free memory button and delete button for each model").
