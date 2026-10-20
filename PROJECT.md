@@ -115,9 +115,10 @@ again until users reinstall a build with a new key by hand. Releasing (from `app
    2026-10-19; release.py refuses more).
 4. The relay's usage (the user, 2026-10-20): `python relay/usage.py` (wrangler's login; read-only) - each UTC day's
    Durable Object requests against the Free plan's 100,000 (raw and 20:1: Cloudflare does not say which the Free plan
-   counts). Past ~50 % raw on a busy day, or before a launch (a post, a new game's mod), tell the user: the Workers
-   Paid plan ($5 a month) is the fix; on the Free plan the voice stops for everyone until 00:00 UTC once a limit is
-   hit. 2026-10-20: busiest day 30,766 (31 % raw, our own tests), no errors since it went live.
+   counts) and the month so far against Workers Paid. **The account is on Workers Paid since 2026-10-20** (the user:
+   $5 a month; 1 million Durable Object requests a month included, incoming WebSocket messages billed 20:1, then $0.15
+   a million): no daily limit any more. Tell the user when a month heads past the included million. 2026-10-20:
+   busiest day 30,766 raw (our own tests), no errors since it went live.
    **0.5.8 (in main, 2026-10-17):** the game mod cards in three lines (the mod, "by" its author, the game; the user)
    with the bin apart from the link; every speech and translation model listed as in memory / on disk / not downloaded
    with its size, "Free memory" and a bin (the user: "a free memory button and delete button for each model").
