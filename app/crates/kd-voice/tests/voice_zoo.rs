@@ -74,6 +74,8 @@ fn every_kind_of_microphone_through_the_voice_chat() {
     let voice = test_voice(2.0);
     let reference = speech_db(&heard(&relay.url, &sim_mic("mono").unwrap(), &voice));
     assert!(reference > -40.0, "the reference microphone was not heard: {reference:.1} dBFS");
+    // (and loud enough next to a game: -21.3 dBFS until 0.5.8, when players heard each other "barely" - now -15.7)
+    assert!(reference > -18.0, "voices are heard too quietly: {reference:.1} dBFS (want above -18)");
     println!("reference (mono): {reference:.1} dBFS heard");
     let mut bad = Vec::new();
     // (one of each kind of capture; kd-audio's mic_zoo runs all of them through the capture alone)
@@ -84,6 +86,7 @@ fn every_kind_of_microphone_through_the_voice_chat() {
         "array-4-one-inverted",
         "quad-voice-in-one",
         "quiet",
+        "very-quiet",
         "hot",
         "noisy",
         "16k-i16",

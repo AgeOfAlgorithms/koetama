@@ -66,6 +66,8 @@ pub struct VoiceStatus {
     pub heard: usize,
     /// other players in the room (Voice::players)
     pub players: usize,
+    /// how far the automatic gain raises this player's voice (dB), once they have spoken: far up is a quiet microphone
+    pub mic_gain_db: Option<f32>,
 }
 
 /// What happened in the voice chat, for the game (PROTOCOL.md "Koetama -> game": talking).
@@ -217,6 +219,8 @@ struct Shared {
     running: AtomicBool,
     epoch: Instant,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// the automatic gain's part (Agc::auto_gain_db), as f32 bits; NaN until the player has spoken
+    mic_gain: std::sync::atomic::AtomicU32,
 }
 
 impl Shared {
@@ -234,6 +238,7 @@ impl Shared {
             running: AtomicBool::new(true),
             epoch: Instant::now(),
             thread: Mutex::new(None),
+            mic_gain: std::sync::atomic::AtomicU32::new(f32::NAN.to_bits()),
         }
     }
 
@@ -311,7 +316,7 @@ impl Voice {
     /// the speech detector hears speech now (kd_speech::Listener::talking).
     /// The player's Mic boost in dB (0..=20), before the voice's automatic gain.
     pub fn set_mic_boost(&self, db: f32) {
-        lock(&self.sh.cfg).boost_db = db.clamp(0.0, 20.0);
+        lock(&self.sh.cfg).boost_db = db.clamp(0.0, crate::agc::BOOST_MAX_DB);
     }
 
     /// Noise suppression for the voice sent (denoise.rs): a new level is made ready on a thread of its own and taken
@@ -341,7 +346,8 @@ impl Voice {
         };
         let now = self.sh.now();
         let heard = lock(&self.sh.peers).values().filter(|p| now - p.jitter.last_arrival() <= HEARD).count();
-        VoiceStatus { state, heard, players: self.players().len() }
+        let g = f32::from_bits(self.sh.mic_gain.load(Ordering::Relaxed));
+        VoiceStatus { state, heard, players: self.players().len(), mic_gain_db: (!g.is_nan()).then_some(g) }
     }
 
     /// The other players in the room: heard from (any packet) in the last PRESENT s, by their id - the feed's for
@@ -643,6 +649,9 @@ fn run(sh: Arc<Shared>, rx: Receiver<Block>, relay: String, log: Log) {
             }
             block = rx.try_recv().ok();
         }
+        if let Some(g) = sender.as_ref().and_then(|s| s.agc.auto_gain_db()) {
+            sh.mic_gain.store(g.to_bits(), Ordering::Relaxed);
+        }
         if let Some(e) = dropped {
             if let Some(l) = link.take() {
                 let lasted = l.since.elapsed();
@@ -802,7 +811,7 @@ mod tests {
         assert!(!lock(&v.sh.cfg).wanted(), "no room");
         assert_eq!(lock(&v.sh.cfg).me_id, None, "no room: no id");
         v.stop();
-        assert_eq!(v.status(), VoiceStatus { state: "off", heard: 0, players: 0 });
+        assert_eq!(v.status(), VoiceStatus { state: "off", heard: 0, players: 0, mic_gain_db: None });
     }
 
     const ROOM: &str = "0123456789abcdef0123456789abcdef";

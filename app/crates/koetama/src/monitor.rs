@@ -14,8 +14,31 @@ const MAX_WAIT: usize = 48000 * 3 / 10;
 #[derive(Default)]
 pub struct Monitor {
     on: AtomicBool,
-    /// what waits to be played, the automatic gain, noise suppression (as the voice sent)
-    inner: Mutex<(VecDeque<f32>, Agc, kd_voice::denoise::Switch)>,
+    /// what waits to be played, the automatic gain, noise suppression (as the voice sent), and the room's noise floor
+    inner: Mutex<(VecDeque<f32>, Agc, kd_voice::denoise::Switch, Floor)>,
+}
+
+/// The room's noise level under a microphone with no gate (the test): follows the quietest blocks down at once and
+/// creeps up slowly, so a block well above it is speech. (The voice sent has the gate for that: the automatic gain only
+/// hears what it lets through. The test played the room's noise raised by up to +28 dB between words, 2026-10-21.)
+#[derive(Default)]
+struct Floor(Option<f32>);
+
+impl Floor {
+    /// speech: this many times the floor's power (12 dB)
+    const OVER: f32 = 16.0;
+    /// how fast the floor creeps up, per block (~20 ms: ~3 dB a second)
+    const RISE: f32 = 1.035;
+
+    fn speech(&mut self, x: &[f32]) -> bool {
+        let p = x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32;
+        let f = match self.0 {
+            Some(f) if p >= f => f * Self::RISE,
+            _ => p.max(1e-12),
+        };
+        self.0 = Some(f);
+        p > f * Self::OVER
+    }
 }
 
 impl Monitor {
@@ -39,7 +62,12 @@ impl Monitor {
         self.lock().1.set_boost_db(db);
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, (VecDeque<f32>, Agc, kd_voice::denoise::Switch)> {
+    /// How far the automatic gain raises the voice (dB), once speech was heard in this test.
+    pub fn gain_db(&self) -> Option<f32> {
+        self.lock().1.auto_gain_db()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, (VecDeque<f32>, Agc, kd_voice::denoise::Switch, Floor)> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -51,7 +79,8 @@ impl Monitor {
         let mut g = self.lock();
         // (the microphone's callback: no waiting for the noise suppression - a block late comes with the next)
         let mut y = g.2.process(x, std::time::Duration::ZERO);
-        g.1.process(&mut y);
+        let speech = g.3.speech(&y);
+        g.1.process_as(&mut y, speech);
         g.0.extend(y);
         let over = g.0.len().saturating_sub(MAX_WAIT);
         g.0.drain(..over);

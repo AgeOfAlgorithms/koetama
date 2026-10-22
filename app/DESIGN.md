@@ -273,7 +273,9 @@ pub mod codec  { Encoder::new()?.encode(&[f32; FRAME]) -> Vec<u8>; Decoder; trai
 pub mod gate   { PTT_TAIL, PREROLL; enum Mode { Off, PushToTalk(held), Detector(talking) }; Gate::push(x, mode) -> Gated { audio, end } }
 pub mod jitter { START, MAX, END_AFTER; Jitter<D: FrameDecoder>::insert(Packet, now); pull(out, now) -> bool }
 pub mod relay  { Conn::open(relay, room, me)?; send(frame); ping(); poll(&mut Vec<frame>); close() }
-pub mod agc    { TARGET (-20 dBFS), MAX_GAIN, MIN_GAIN; Agc::process(&mut x) }   // the voice sent's automatic gain
+pub mod agc    { TARGET (-14 dBFS; -20 until 0.5.8), MAX_GAIN (+40 dB), MIN_GAIN, SPEECH (-70 dBFS), BOOST_MAX_DB (10:
+                 Mic boost, after the gain); Agc::process(&mut x), process_as(x, speech) (an ungated microphone: the
+                 test), auto_gain_db() }   // the voice sent's automatic gain
 pub mod denoise { enum Level { Off, Standard /* RNNoise */, Strong /* DeepFilterNet 3 */ }; Denoiser; dfn3_model(log);
                   Switch::want(level, log); Switch::process(x, wait) -> Vec<f32> }   // a worker thread per level
 pub struct Sender;  Sender::new()?.push(x_48k, Mode) -> Vec<Packet>;   // noise suppression + gate + gain + Opus + packets

@@ -168,8 +168,12 @@ fn four_players(relay: &str, delivered: Option<Counts>, x: &[f32], is_speech: bo
     // (about as loud as the sender's automatic gain makes it: toward agc::TARGET, within its limits)
     let (target, lo, hi) = (kd_voice::agc::TARGET as f64, kd_voice::agc::MIN_GAIN as f64, kd_voice::agc::MAX_GAIN as f64);
     // (its level: of the 10 ms pieces with speech, as the gain control measures it)
+    // (above SPEECH, and not BELOW the speech's own level - the pauses between words)
+    let mean = |p: &[f64]| (p.iter().map(|r| r * r).sum::<f64>() / p.len().max(1) as f64).sqrt();
     let pieces: Vec<f64> = want.chunks(480).map(rms).filter(|r| *r > kd_voice::agc::SPEECH as f64).collect();
-    let speaking = (pieces.iter().map(|r| r * r).sum::<f64>() / pieces.len().max(1) as f64).sqrt();
+    let all = mean(&pieces);
+    let loud: Vec<f64> = pieces.iter().copied().filter(|r| r * r > all * all * kd_voice::agc::BELOW as f64).collect();
+    let speaking = mean(&loud);
     let expect = rw * (target / speaking).clamp(lo, hi);
     assert!((rg / expect - 1.0).abs() < 0.35, "level {rw:.4} -> {rg:.4} (the gain control aims at {expect:.4})");
     if is_speech {

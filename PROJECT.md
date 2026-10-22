@@ -128,6 +128,19 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
 
 ## Open
 
+- **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
+  hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and
+  `cargo run -p kd-voice --example mic_check` - Koetama's own capture and gain on a real microphone): the user's Mbox
+  gave speech at -45..-52 dBFS through Koetama's capture, the gain at +26..+28 dB of its +30; and the level itself was
+  low - the gain aimed at -20 dBFS and the mixer put a voice straight ahead 3 dB under (constant-power pan, HEADROOM
+  1.3): heard at -21.3 dBFS (voice_zoo's reference). Mic boost came BEFORE the gain, which took most of it back. Fixed:
+  agc TARGET -14 dBFS, MAX_GAIN +40 dB, SPEECH -70 dBFS, Mic boost after the gain (0..10 dB), HEADROOM 1.84 (engine
+  too; audio.json fixtures made again); the window's test (monitor.rs) follows the level only on speech (its own noise
+  floor: it raised the room's noise between words); the window says when the microphone is quiet (the gain past
+  +22 dB: status mic_gain_db); a "very-quiet" simulated microphone (-50 dBFS speech) in voice_zoo and voice_e2e.
+  Now heard at -15.7 dBFS (voice_zoo, +5.6 dB; it fails below -18), every microphone within 1.3 dB; voice_e2e: B hears
+  -14.7 dBFS, all words. Not tried in a game yet.
+
 - **Don't Starve Together (2026-10-13; the mod: github.com/AgeOfAlgorithms/dst-proximity-comms, private for now; its
   PROJECT.md):** for
   the next release: the HTTP connector answers `Expect: 100-continue` (DST's libcurl sends it with any body over 1 KB

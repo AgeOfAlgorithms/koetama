@@ -21,8 +21,9 @@ pub const PAN: f64 = 0.9;
 pub const BEHIND_MUFFLE: f64 = 0.25;
 /// a voice straight behind: this much quieter
 pub const BEHIND_QUIET: f64 = 0.2;
-/// gain before the soft limiter
-pub const HEADROOM: f64 = 1.3;
+/// gain before the soft limiter (1.3 until 0.5.8: +3 dB - the constant-power pan put a voice straight ahead 3 dB under
+/// its level, and players heard voices "barely", 2026-10-21)
+pub const HEADROOM: f64 = 1.84;
 /// longest low-pass impulse response kept (samples; the most muffled ~ 350)
 pub const LP_TAPS: usize = 400;
 

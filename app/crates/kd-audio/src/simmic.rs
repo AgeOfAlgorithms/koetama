@@ -131,6 +131,8 @@ pub fn sim_mics() -> Vec<SimMic> {
         m("array-4-one-inverted", "a microphone array with one capsule inverted", 48000, F32, &[(1.0, 0), (1.0, 0), (-1.0, 0), (1.0, 0)]),
         m("quad-voice-in-one", "four channels, the voice in the third only", 48000, I16, &[(0.0, 0), (0.0, 0), (1.0, 0), (0.0, 0)]),
         m("quiet", "a quiet microphone: 25 dB down", 48000, I16, &[(1.0, 0)]).level(-25.0, Some(-25.0)),
+        // (2026-10-21: a player's audio interface gave speech at -45..-52 dBFS; the automatic gain took it for silence)
+        m("very-quiet", "a very quiet microphone: 30 dB down (speech at -50 dBFS)", 44100, F32, &[(1.0, 0)]).level(-30.0, Some(-30.0)),
         m("hot", "a hot microphone: 20 dB up, clipping", 48000, I16, &[(1.0, 0)]).level(20.0, None),
         SimMic { dc: 0.02, ..m("dc-offset", "a DC offset (a cheap USB adapter)", 48000, I16, &[(1.0, 0)]) },
         SimMic { noise_db: Some(-45.0), ..m("noisy", "hiss at -45 dBFS", 48000, F32, &[(1.0, 0)]) },

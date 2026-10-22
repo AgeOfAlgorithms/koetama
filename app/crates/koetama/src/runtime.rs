@@ -146,6 +146,9 @@ pub struct Status {
     pub translate: Option<kd_translate::service::Status>,
     /// the microphone test: seconds left (None: not testing)
     pub mic_test: Option<f64>,
+    /// how far the automatic gain raises this player's voice (dB) - in the test, else in the voice chat - once they
+    /// have spoken (far up: a quiet microphone)
+    pub mic_gain_db: Option<f32>,
 }
 
 pub struct Runtime {
@@ -848,6 +851,12 @@ impl Runtime {
             voice: self.voice.as_ref().map(|v| v.status()),
             translate: self.translator.as_ref().map(|t| t.status()),
             mic_test: self.test_until.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_secs_f64()),
+            mic_gain_db: self
+                .monitor
+                .is_on()
+                .then(|| self.monitor.gain_db())
+                .flatten()
+                .or_else(|| self.voice.as_ref().and_then(|v| v.status().mic_gain_db)),
         }
     }
 

@@ -15,7 +15,7 @@ STALE = 1.5            # s without a new feed (the game paused or gone): the voi
 CUT_CLEAR, CUT_MUFFLED = 16000.0, 400.0   # low-pass cutoff (Hz) at muffle 0 and 1
 PAN = 0.9              # how far to one side a voice goes at 90 degrees (1 = that ear only)
 BEHIND_MUFFLE, BEHIND_QUIET = 0.25, 0.2   # a voice straight behind: this much duller and quieter
-HEADROOM = 1.3         # gain before the soft limiter
+HEADROOM = 1.84        # gain before the soft limiter (1.3 until 0.5.8: +3 dB, a voice ahead was 3 dB under its level)
 LP_TAPS = 400          # longest low-pass impulse response kept (samples; the most muffled ~ 350)
 
 

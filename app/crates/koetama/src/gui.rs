@@ -10,6 +10,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 const DEFAULT: &str = "(system default)";
+/// the automatic gain past this (dB): the window says the microphone is quiet (a normal one needs about +5..+15)
+const QUIET_MIC_DB: f32 = 22.0;
 
 /// A language as the window shows it: its own name, and the English one when it differs.
 fn lang_name(code: &str) -> String {
@@ -186,7 +188,7 @@ struct App {
     mic: String,
     out: String,
     volume: f64,
-    /// Mic boost, dB 0..=20 (the voice sent; saved as "mic_boost")
+    /// Mic boost, dB 0..=kd_voice::agc::BOOST_MAX_DB, after the automatic gain (the voice sent; saved as "mic_boost")
     mic_boost: f64,
     /// noise suppression for the voice sent (saved as "noise": off / standard / strong)
     noise: kd_voice::denoise::Level,
@@ -251,7 +253,7 @@ impl App {
             mic: pick(&ins, settings.str("mic")),
             out: pick(&outs, settings.str("out")),
             volume: settings.f64("volume", 1.0) * 100.0,
-            mic_boost: settings.f64("mic_boost", 0.0).clamp(0.0, 20.0),
+            mic_boost: settings.f64("mic_boost", 0.0).clamp(0.0, kd_voice::agc::BOOST_MAX_DB as f64),
             noise: settings.str("noise").as_deref().and_then(kd_voice::denoise::Level::from_name).unwrap_or(kd_voice::denoise::Level::Standard),
             hear_self: false,
             game_id: settings
@@ -1312,10 +1314,15 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                         ui.end_row();
                                     }
                                     if self.kind.voices {
-                                        // (the voice sent: its automatic gain evens players out; this raises a quiet
-                                        //  microphone further)
+                                        // (the voice sent: its automatic gain evens players out; this makes this
+                                        //  player louder than that, after it)
                                         ui.label(RichText::new("Mic boost").color(theme::MUTED));
-                                        if ui.add(egui::Slider::new(&mut self.mic_boost, 0.0..=20.0).show_value(false)).changed() {
+                                        let max = kd_voice::agc::BOOST_MAX_DB as f64;
+                                        if ui
+                                            .add(egui::Slider::new(&mut self.mic_boost, 0.0..=max).show_value(false))
+                                            .on_hover_text("Koetama already evens out quiet and loud microphones: this makes your voice louder than that.")
+                                            .changed()
+                                        {
                                             self.settings.set("mic_boost", self.mic_boost.round());
                                             if let Some(rt) = self.rt.as_mut() {
                                                 rt.set_mic_boost(self.mic_boost as f32);
@@ -1323,6 +1330,20 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                         }
                                         ui.label(RichText::new(format!("+{:.0} dB", self.mic_boost)).color(theme::MUTED));
                                         ui.end_row();
+                                        // (a quiet microphone: raised a long way, its room noise too - say where to fix it)
+                                        if let Some(g) = self.status.as_ref().and_then(|s| s.mic_gain_db).filter(|g| *g > QUIET_MIC_DB) {
+                                            ui.label("");
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "Your microphone is quiet: Koetama raises it by {g:+.0} dB, and the noise around you \
+                                                     with it. Turn its level up in Windows (Settings > Sound > your microphone > \
+                                                     Input volume), or with the gain knob on your audio interface."
+                                                ))
+                                                .size(12.0)
+                                                .color(theme::WARN),
+                                            );
+                                            ui.end_row();
+                                        }
                                         // (noise suppression for the voice sent: docs/noise-suppression.md)
                                         ui.label(RichText::new("Noise suppression").color(theme::MUTED));
                                         let before = self.noise;

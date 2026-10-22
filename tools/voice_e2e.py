@@ -24,7 +24,7 @@ EXE = '.exe' if os.name == 'nt' else ''
 KOETAMA = os.path.join(APP, 'target', 'debug', 'koetama' + EXE)
 RELAY = os.path.join(APP, 'target', 'debug', 'examples', 'standin_relay' + EXE)
 CLIP = os.path.join(ROOT, 'export', 'asrbench', 'clips', 'en01_clean.wav')
-MICS = ['stereo-inverted', 'stereo-silent-right', 'array-4-one-inverted', 'quiet', 'hot', '44k1-i16']
+MICS = ['stereo-inverted', 'stereo-silent-right', 'array-4-one-inverted', 'quiet', 'very-quiet', 'hot', '44k1-i16']
 SPEAK = 10.0          # s that A talks once its microphone is open
 TOLERANCE = 4.0       # dB against the reference (noise suppression on a hissy microphone takes the quiet parts of
                       #  its speech with the hiss and the automatic gain lifts the rest: it comes through 2-3 dB louder)

@@ -361,7 +361,7 @@ fix for leakage is echo cancellation with the game's output as reference (WASAPI
 e.g. sonora-aec3 or the `aec3` crate ([crates.io](https://crates.io/api/v1/crates/aec3)), or headphones. Treat this
 as a separate, later feature.
 
-**Gain and suppression interact.** Koetama's AGC (`agc.rs`) follows speech power only, with up to +30 dB of gain. So
+**Gain and suppression interact.** Koetama's AGC (`agc.rs`) follows speech power only, with up to +30 dB of gain (+40 dB since 0.5.8). So
 it does not chase noise, but whatever noise survives is raised by the same gain. A quiet microphone in a noisy room
 is therefore where suppression matters most [i]. Mumble's preprocessor lowers its Speex suppression strength as the
 current AGC gain rises (AudioInput.cpp, above). Copy the idea only if testing shows over-suppression on boosted
