@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "kd-audio"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "cpal",
  "hound",
@@ -2446,7 +2446,7 @@ dependencies = [
 
 [[package]]
 name = "kd-common"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "scrypt",
  "serde",
@@ -2457,7 +2457,7 @@ dependencies = [
 
 [[package]]
 name = "kd-games"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "kd-common",
  "kd-voice",
@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "kd-speech"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "hound",
  "kd-common",
@@ -2482,7 +2482,7 @@ dependencies = [
 
 [[package]]
 name = "kd-translate"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "kd-common",
  "serde_json",
@@ -2492,7 +2492,7 @@ dependencies = [
 
 [[package]]
 name = "kd-update"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.3.4",
@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "kd-voice"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "chacha20poly1305",
  "deep_filter",
@@ -2545,7 +2545,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "koetama"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "clap",
  "eframe",

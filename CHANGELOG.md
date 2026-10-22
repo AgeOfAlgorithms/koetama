@@ -2,6 +2,23 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.6: every microphone heard
+
+- **Headsets heard far too quietly: fixed.** Some headsets send their voice in two channels with one of them
+  inverted. Koetama averaged the two and the voice cancelled itself out: a player could yell into the microphone and
+  still be barely heard, though other games heard them fine. Koetama now averages a microphone's channels only when
+  they carry the same signal, and otherwise uses the one with the voice. The log at the bottom of the window says what
+  it does with your microphone, and shows its format when it opens.
+- **Quiet and loud microphones evened out.** The automatic gain on the voice you send now raises a quiet microphone by
+  up to 30 dB (was 18) and holds a clipping one back by up to 20 dB (was 6), so both come through within about 1.5 dB
+  of a normal one (they were about 10 dB under and 9 dB over). It follows your voice over a second or two instead of
+  each syllable, and is set from your first words. A normal microphone sounds as before; Mic boost is still there for
+  one quieter than even that.
+- 0.5.5 was not released on its own: its changes (below) come with this version.
+- **For developers:** simulated microphones (`--sim-mic`, `--list-sim-mics`) and `--out-wav` on the command line;
+  every kind of microphone is tested through the voice chat on every pull request; `tools/voice_e2e.py` runs two
+  Koetamas voice to voice on one PC.
+
 ### 0.5.5: safer voice chat
 
 - The game list shows who made each game mod.
