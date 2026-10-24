@@ -77,18 +77,20 @@ enum ModelAction {
 /// A model's two buttons: Free memory (when it is in memory) and the bin (Ok: Koetama may delete its files, and the
 /// hover text; Err: why not). Clicked: (free, delete).
 fn model_buttons(ui: &mut egui::Ui, in_memory: bool, free_hint: &str, delete: Result<String, String>) -> (bool, bool) {
-    let free = ui
-        .add_enabled(in_memory, egui::Button::new(RichText::new("Free memory").size(12.0)).small())
-        .on_hover_text(free_hint)
-        .on_disabled_hover_text("Not in memory")
-        .clicked();
-    let (ok, hint) = match delete {
-        Ok(h) => (true, h),
-        Err(h) => (false, h),
+    // (only the buttons that do something: greyed-out ones looked broken - the user, 2026-10-24; the status says why)
+    let free = if in_memory {
+        ui.add(egui::Button::new(RichText::new("Free memory").size(12.0)).small()).on_hover_text(free_hint).clicked()
+    } else {
+        ui.label("");
+        false
     };
-    let del = ui
-        .add_enabled_ui(ok, |ui| theme::remove_button(ui, 22.0).on_hover_text(&hint).on_disabled_hover_text(&hint).clicked())
-        .inner;
+    let del = match delete {
+        Ok(hint) => theme::remove_button(ui, 22.0).on_hover_text(hint).clicked(),
+        Err(_) => {
+            ui.label("");
+            false
+        }
+    };
     (free, del)
 }
 
@@ -1011,7 +1013,13 @@ impl App {
                 }
                 let loaded = row.state == kd_speech::ModelState::Loaded;
                 let busy = matches!(row.state, kd_speech::ModelState::Loading | kd_speech::ModelState::Downloading(..));
-                let (text, colour) = model_state(row, d.is_some());
+                let (mut text, colour) = model_state(row, d.is_some());
+                // (on disk but not Koetama's to delete: say whose)
+                match &d {
+                    Some(d) if !d.ours && row.name == "langid" => text.push_str(" · comes with Koetama"),
+                    Some(d) if !d.ours => text.push_str(" · Hugging Face cache"),
+                    _ => {}
+                }
                 theme::dot(ui, colour, loaded && row.needed);
                 ui.label(row.title);
                 let size = d.as_ref().map_or(row.download_mb as u64 * 1_000_000, |d| d.bytes);
