@@ -215,6 +215,10 @@ struct App {
     /// the host's LLM for game mods' agents (llm_setting.rs), and the key being typed (empty: the saved one stays)
     llm: crate::llm_setting::LlmSetting,
     llm_key: String,
+    /// "Try it": what was typed, the request under way, and its answer (or why there is none)
+    llm_try: String,
+    llm_trying: Option<Receiver<Result<kd_llm::Reply, String>>>,
+    llm_tried: Result<String, String>,
     /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
     downloaded: Vec<kd_translate::catalog::OnDisk>,
     downloaded_at: Option<Instant>,
@@ -289,6 +293,9 @@ impl App {
             targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
             llm,
             llm_key: String::new(),
+            llm_try: String::new(),
+            llm_trying: None,
+            llm_tried: Ok(String::new()),
             downloaded: Vec::new(),
             downloaded_at: None,
             speech_disk: Vec::new(),
@@ -819,6 +826,7 @@ impl App {
             });
             ui.end_row();
         });
+        self.llm_try_ui(ui);
         if on && !self.llm.complete() {
             ui.label(RichText::new("Add a model and a key to turn it on.").size(12.5).color(theme::WARN));
         }
@@ -845,6 +853,61 @@ impl App {
             } else if let (Some(cfg), Some(rt)) = (after, self.rt.as_mut()) {
                 rt.set_llm(cfg);
             }
+        }
+    }
+
+    /// "Try it": a message to the model as the card is set now (the switch need not be on) and its answer, or exactly
+    /// why there is none. What it costs counts in this month's spend.
+    fn llm_try_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(rx) = &self.llm_trying {
+            if let Ok(r) = rx.try_recv() {
+                self.llm_trying = None;
+                self.llm_tried = match r {
+                    Ok(reply) => {
+                        if let Some(cfg) = self.llm.config() {
+                            self.llm.set_spent(self.llm.spent_this_month() + cfg.cost(&reply));
+                            self.llm.save(&mut self.settings);
+                            self.settings.save();
+                        }
+                        let calls = if reply.calls.is_empty() { String::new() } else { format!(" ({} function calls)", reply.calls.len()) };
+                        Ok(format!("{}{calls}  ·  {} tokens in, {} out", reply.text, reply.tokens_in, reply.tokens_out))
+                    }
+                    Err(e) => Err(e),
+                };
+            } else {
+                ui.ctx().request_repaint_after(Duration::from_millis(200));
+            }
+        }
+        let cfg = self.llm.config();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Try it").color(theme::MUTED));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.llm_try).hint_text("say something to the model").desired_width(330.0));
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let ready = cfg.is_some() && self.llm_trying.is_none() && !self.llm_try.trim().is_empty();
+            let send = ui.add_enabled(ready, egui::Button::new(if self.llm_trying.is_some() { "Waiting..." } else { "Send" })).clicked();
+            if (send || enter) && ready {
+                let (tx, rx) = channel();
+                let (cfg, text) = (cfg.clone().expect("ready"), self.llm_try.trim().to_string());
+                std::thread::spawn(move || {
+                    let turns = [kd_llm::Turn::User(text)];
+                    let system = "You are being tried out from Koetama's settings. Answer briefly.";
+                    let _ = tx.send(kd_llm::api::complete(&cfg, system, &[], &turns, 300, Duration::from_secs(60)));
+                });
+                self.llm_trying = Some(rx);
+                self.llm_tried = Ok(String::new());
+            }
+        });
+        if cfg.is_none() {
+            ui.label(RichText::new("Add a model and a key to try it.").size(12.0).color(theme::MUTED));
+        }
+        match &self.llm_tried {
+            Ok(t) if !t.is_empty() => {
+                ui.label(RichText::new(t).color(theme::FG));
+            }
+            Err(e) => {
+                ui.label(RichText::new(e).size(12.5).color(theme::BAD));
+            }
+            _ => {}
         }
     }
 

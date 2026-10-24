@@ -109,7 +109,12 @@ impl LlmSetting {
 
     /// The service's config, for a game it is on for (None: off for it, or not complete).
     pub fn config_for(&self, game: &str) -> Option<kd_llm::Config> {
-        (self.on_for(game) && self.complete()).then(|| kd_llm::Config {
+        self.on_for(game).then(|| self.config()).flatten()
+    }
+
+    /// The config as the setting is now, whatever game (None: not complete) - the window's "Try it".
+    pub fn config(&self) -> Option<kd_llm::Config> {
+        self.complete().then(|| kd_llm::Config {
             api: self.api,
             url: self.url.trim().to_string(),
             model: self.model.trim().to_string(),

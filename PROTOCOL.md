@@ -313,8 +313,8 @@ next wave, a quest writer, a parser that turns what players say into commands). 
 Koetama's window ("Large Language Models": the API - OpenAI-compatible or Anthropic -, address, model, key, a monthly
 budget, the model's price, requests a minute), and the `hello` then names `llm`. Only the host's Koetama talks to the
 model: the game already carries every player's words to the host's script, which sends them on. The key never leaves
-the host's PC except to that API (sealed by Windows; never in a feed, a log or an object). Design and examples:
-docs/llm-agents.md.
+the host's PC except to that API (sealed by Windows; never in a feed, a log or an object). A how-to for mod makers,
+with examples: docs/agents-guide.md; the design: docs/llm-agents.md.
 
 **Game -> Koetama** (the top feed only; a hub's players' feeds carry none):
 
