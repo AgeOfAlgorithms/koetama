@@ -217,16 +217,17 @@ impl GameKind {
 
     /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
     /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
-    /// This game with its agents' LLM on only if `on` (the host's setting) and its profile asks for it: off, the hello
-    /// does not name "llm" and the feed's agent fields are dropped.
+    /// This game with the host's LLM for its agents on or off (the host's setting decides, for any mod - the user,
+    /// 2026-10-24: "it should be available for any mod"; a profile's "uses": "llm" only says the mod has agents): off,
+    /// the hello does not name "llm" and the feed's agent fields are dropped.
     pub fn with_llm(&self, on: bool) -> GameKind {
         let mut k = self.clone();
-        if k.profile.llm && !on {
+        if k.profile.llm != on {
             let mut p = (*k.profile).clone();
-            p.llm = false;
+            p.llm = on;
             k.profile = Arc::new(p);
         }
-        k.llm = k.profile.llm;
+        k.llm = on;
         k
     }
 

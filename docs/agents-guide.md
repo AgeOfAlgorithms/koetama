@@ -7,17 +7,13 @@ wants to call. Your mod decides who the agents are, what they hear, and what the
 
 The exact fields and rules: PROTOCOL.md, "Large language models: agents". This page is the quick start.
 
-## 1. Ask for it in your profile
+## 1. The host turns it on
 
-Add `"llm"` to `uses` (with whatever else your mod uses):
-
-```json
-"uses": ["speech", "translate", "llm"]
-```
-
-The host then sees a **Large Language Models** card in Koetama for your game: they pick the API (OpenAI-compatible or
-Anthropic), the model and their key, set a budget, try it, and tick "Let the <your mod> mod use my language model".
-Until they do, Koetama's `hello` does not list `llm` and ignores your agent fields - so check:
+Any mod can use agents. The host opens the **Large Language Models** card in Koetama with your game picked: they pick
+the API (OpenAI-compatible or Anthropic), the model and their key, set a budget, try it, and tick "Let the <your mod>
+mod use my language model". (You may add `"llm"` to your profile's `uses` to say your mod has agents; Koetama does
+not require it.) Until the host turns it on, Koetama's `hello` does not list `llm` and ignores your agent fields - so
+check:
 
 ```lua
 local llmOn = hello.features contains "llm"

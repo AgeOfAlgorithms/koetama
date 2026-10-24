@@ -334,8 +334,8 @@ fn hosted_games() {
     assert!(err(&with(socket_profile(), "/uses", Some(json!(["hosted"])))).contains("at least one"));
 }
 
-/// "llm": the mod's agents talk through the host's LLM (docs/llm-agents.md) - alone too; on only once the host turns it on
-/// (GameKind::with_llm), and only then does the hello name it.
+/// "llm": the mod has agents (docs/llm-agents.md) - alone too. Whether the host's LLM serves them is the host's setting, for
+/// any mod (GameKind::with_llm), and only then does the hello name it.
 #[test]
 fn llm_games() {
     let p = parse(&with(socket_profile(), "/uses", Some(json!(["speech", "llm"])))).unwrap();
@@ -348,6 +348,7 @@ fn llm_games() {
     let off = kind.with_llm(false);
     assert!(!off.llm && !kd_games::api::features(&off.profile).contains(&"llm"), "the host has it off");
     assert!(kind.with_llm(true).llm);
-    let never = kd_games::GameKind::from_profile(parse(&socket_profile()).unwrap(), false, None);
-    assert!(!never.with_llm(true).llm, "the host's setting cannot add it to a profile without it");
+    let any = kd_games::GameKind::from_profile(parse(&socket_profile()).unwrap(), false, None);
+    let on = any.with_llm(true);
+    assert!(on.llm && kd_games::api::features(&on.profile).contains(&"llm"), "any mod, once the host turns it on");
 }

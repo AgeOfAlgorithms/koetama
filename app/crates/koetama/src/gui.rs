@@ -364,7 +364,7 @@ impl App {
             translate_also: self.translate_also.clone(),
             translate_downloads: self.translate_downloads,
             // (the agents' LLM: the host's, for a game whose profile uses it and that they turned it on for)
-            llm: if kind.llm && self.joined.is_none() { self.llm.config_for(&kind.id) } else { None },
+            llm: if self.joined.is_none() { self.llm.config_for(&kind.id) } else { None },
             ..Default::default()
         };
         let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
@@ -1419,11 +1419,12 @@ impl eframe::App for App {
                 bottom: 0,
             })
             .show(ui, |ui| {
+                // (the game mod picker stays put while the rest scrolls - the user, 2026-10-24)
+                self.header_ui(ui);
+                ui.add_space(4.0);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        self.header_ui(ui);
-                        ui.add_space(4.0);
 
                         // ---- sound
                         // (a translate-only game mod: no sound to set)
@@ -1659,7 +1660,7 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                         }
 
                         // ---- large language models (a game whose profile uses "llm": its agents and more; the host's setting)
-                        if self.kind.llm && self.joined.is_none() {
+                        if self.joined.is_none() {
                             theme::card(ui, "Large Language Models", |ui| self.llm_ui(ui));
                             ui.add_space(2.0);
                         }
