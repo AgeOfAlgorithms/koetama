@@ -89,30 +89,33 @@ host's Koetama."
 
 ## Examples
 
-### Teardown (the files connector, Lua) - Proximity Comms' `voice.lua`
+### Teardown: any mod, through Proximity Comms
 
-The feed is built in `PC.voiceFeed` and Koetama's objects come to the `t == ...` branches of the object handler:
+Teardown mods can't talk to Koetama themselves (nor to each other): **Proximity Comms**, the chat mod, does it for every
+mod (its API version 17, the "Agents" section of its API.md). A mod sets registry keys on the host; the chat sends the
+agents and what players say near them to the host's Koetama, shows the replies as speech bubbles and chat lines, and
+hands the function calls back:
 
 ```lua
--- in PC.voiceFeed(vo, off), before SetString(PC.VOICE_FEED, ...):
-if not off and vo.llm then                                    -- (vo.llm: the hello listed "llm")
-	if GetTime() - (vo.agentsSentAt or -99) < 5 then          -- (for 5 s after each hello: see below)
-		f.agents = PC.jsonArray({PC.agentDef})
+-- server (host): a dog that obeys "Rex, follow me" / "Rex, stay"
+SetString("proxchat.agent.rex.persona", "You are Rex, a loyal dog. Answer with a short bark. ...")
+SetString("proxchat.agent.rex.name", "Rex")
+SetString("proxchat.agent.rex.at", "body:" .. dogBody)          -- (it hears lines said near it; its bubble shows there)
+SetString("proxchat.agent.rex.hears", "named")                  -- (only lines with its name in them)
+SetString("proxchat.agent.rex.functions", '[{"name":"follow","description":"Follow a player",' ..
+	'"parameters":{"type":"object","properties":{"player":{"type":"string"}},"required":["player"]}}]')
+
+-- each tick: the calls, checked against your rules, answered
+while seen < GetInt("proxchat.agentcall.last") do
+	seen = seen + 1
+	local k = "proxchat.agentcall." .. (seen % 16) .. "."
+	if GetString(k .. "agent") == "rex" and GetString(k .. "name") == "follow" then
+		SetString(k .. "result", startFollowing(GetString(k .. "arg.player")) and "ok: following" or "error: nobody by that name")
 	end
-	f.to_agent = PC.jsonArray(vo.agentLines)                  -- (lines waiting for a reply)
-	f.agent_results = PC.jsonArray(vo.agentResults)           -- (results waiting for the follow-up)
 end
-
--- where the hello is handled: vo.llm = <its features contain "llm">; vo.agentsSentAt = GetTime()
-
--- in the object handler:
-elseif t == "agent_reply" then
-	PC.agentReply(obj)          -- show obj.text; drop obj.ids from vo.agentLines; check and run obj.calls,
-	                            -- adding {call = c.call, result = "ok: ..." or "error: ..."} to vo.agentResults
-	                            -- (drop them when a reply with no calls comes for the same ids)
-elseif t == "agent_status" then
-	vo.agentState = obj.state
 ```
+
+`proxchat.agents` says whether it is on (`ready`, `busy`, `budget`, `error`, `off`).
 
 ### Any game with real code (the socket connector) - Python
 
