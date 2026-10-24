@@ -271,21 +271,36 @@ pub fn complete(cfg: &Config, system: &str, functions: &[NpcFunction], turns: &[
         .http_status_as_error(false)
         .build()
         .new_agent();
-    let b = body(cfg.api, cfg.url(), &cfg.model, system, functions, turns, max_tokens);
-    let mut req = agent.post(&url).header("Content-Type", "application/json").header("User-Agent", "Koetama");
-    req = match cfg.api {
-        Api::OpenAi => req.header("Authorization", &format!("Bearer {}", cfg.key)),
-        Api::Anthropic => req.header("x-api-key", &cfg.key).header("anthropic-version", "2023-06-01"),
+    let mut b = body(cfg.api, cfg.url(), &cfg.model, system, functions, turns, max_tokens);
+    let send = |b: &Value| -> Result<(u16, Value), String> {
+        let mut req = agent.post(&url).header("Content-Type", "application/json").header("User-Agent", "Koetama");
+        req = match cfg.api {
+            Api::OpenAi => req.header("Authorization", &format!("Bearer {}", cfg.key)),
+            Api::Anthropic => req.header("x-api-key", &cfg.key).header("anthropic-version", "2023-06-01"),
+        };
+        let resp = req.send(b.to_string()).map_err(|e| format!("the LLM could not be reached: {e}"))?;
+        let status = resp.status().as_u16();
+        let text = resp.into_body().read_to_string().map_err(|e| format!("the LLM's answer could not be read: {e}"))?;
+        let v: Value = serde_json::from_str(&text).map_err(|_| format!("the LLM answered {status}, not JSON"))?;
+        Ok((status, v))
     };
-    let resp = req.send(b.to_string()).map_err(|e| format!("the LLM could not be reached: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().map_err(|e| format!("the LLM's answer could not be read: {e}"))?;
-    let v: Value = serde_json::from_str(&text).map_err(|_| format!("the LLM answered {status}, not JSON"))?;
+    let (mut status, mut v) = send(&b)?;
+    if cfg.api == Api::OpenAi && status == 400 && b.get("reasoning_effort").is_none() && wants_no_reasoning(&v) {
+        // (a reasoning model refuses functions on chat completions unless its reasoning is off - and a character's
+        //  reply wants no long thinking anyway; a model that knows no reasoning_effort is never sent it)
+        b["reasoning_effort"] = json!("none");
+        (status, v) = send(&b)?;
+    }
     match parse_reply(cfg.api, &v) {
         Err(e) => Err(format!("the LLM answered {status}: {e}")),
         Ok(_) if status >= 400 => Err(format!("the LLM answered {status}")),
         r => r,
     }
+}
+
+/// The API refused the request over its reasoning (OpenAI: "... set reasoning_effort to 'none'").
+fn wants_no_reasoning(v: &Value) -> bool {
+    v.pointer("/error/message").and_then(Value::as_str).is_some_and(|m| m.contains("reasoning_effort"))
 }
 
 #[cfg(test)]

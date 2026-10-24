@@ -133,7 +133,14 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
   (personas, functions, game state, the lines), Koetama the plumbing (history, providers, caching, the key, the host's
   budget and limits); a protocol draft (`uses: "llm"`, `npcs`, `to_npc`, `npc_results`, `npc_reply`, `npc_status`);
   safety (function calls are requests the mod checks; the budget is Koetama's; PRIVACY.md changes); steps and sizes.
-  Next: the user reviews it; then step 1 and a DST pig trader with a local model.
+  **Built the same day (steps 1-2, unreleased):** the feed's NPC fields (Python and Rust, fixtures), profiles'
+  `uses: "llm"`, the kd-llm crate (OpenAI-compatible and Anthropic; each NPC's queue - lines that come while it
+  answers go as one turn - and fixed window; function calls and their results; the host's budget and requests a
+  minute), the runtime (npc_reply, npc_status), the window's "Large Language Models" card (the key sealed by DPAPI),
+  cli --llm-*. Tested: kd-llm against a fake LLM, tools/npc_e2e.py (a real Koetama, a fake game; --real with the
+  user's OpenAI key - kept outside the repo, `~/.koetama-secrets/openai.key`, readable by their account only: never
+  in a command, a log or a commit) - gpt-6-luna called offer_trade and followed up after the result. Next: a mod
+  using it (DST), what the mod sends (state, memory), streaming, voices.
 
 - **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
   hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and

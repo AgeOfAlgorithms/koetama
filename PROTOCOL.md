@@ -47,6 +47,7 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `transmit` | false | this player's voice is going into a device now ("Devices"): `true` - also to everyone in the voice room; a list of player ids - also to them |
 | `region` | `""` | where the voice room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; `""` (or anything else): wherever the first player is. Every player of a session sends the same one |
 | `translate` | true | false: stop translating for a while (Koetama answers nothing new until it is true again). What is translated into what is the player's setting in Koetama's window, not the game's: "Translation" |
+| `npcs`, `to_npc`, `npc_results`, `npc_forget` | none | a mod's NPCs and what is said to them, for the host's large language model ("Large language models"; a profile that uses `llm`) |
 | `to_translate` | none | the chat lines to translate: `{"id", "text"}`, at most 16, each at most 400 bytes of UTF-8. Ids are the game's (1 to 15 digits, unique in the session). Keep a line in every feed until its `translation` arrives (drop it after ~10 s without one) |
 
 Bad values are skipped or replaced by the default (a bad room, key or `me`: no room). Numbers may be written as
@@ -70,6 +71,8 @@ Each object has a `"type"` first.
 | `{"type":"status","speech":"ready","microphone":"open"}` | after the hello, and when it changes: `speech` `off` (the game does not ask for it, or this Koetama listens to no microphone: started to take typed lines only), `loading` (the models load; the first time they are downloaded), `ready` or `error`; `microphone` `closed`, `open` or `none` (no microphone). Lines said before `ready` and `open` are not heard |
 | `{"type":"translation","id":7,"text":"Hello","from":"es","to":"en"}` | the translation of line `id`, exactly one per id; `from` / `to`: the pair that was used (left out with `""`). `""`: nothing to show (translation off, nothing in a language the player doesn't speak, no model for it, the same as the line, or a bad line). A line that comes while its language's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
 | `{"type":"translations_status","into":"en","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}` | the player's translation: `into`, the language their chat is translated into (`""`: off), and each pair in use this session with its state - after the hello and when one changes (at most every 0.5 s while downloading): `ready`, `downloading` (with `progress` 0..1), `loading`, `unavailable` (no model for it, or not on this PC with downloads off) or `error` (tried again after a minute) |
+| `{"type":"npc_reply","ids":[41],"npc":"pig_king","text":"Twelve meat.","calls":[...],"error":""}` | an NPC's reply to the game's lines `ids` ("Large language models") |
+| `{"type":"npc_status","state":"ready","why":"","model":"...","spent":0.42,"budget":5}` | the host's large language model: after the hello and when it changes ("Large language models") |
 | `{"type":"join_code","player":"7656...02","code":"K7QF-4MXA"}` | a hub only ("Hub"): the code that player types into their Koetama to join |
 | `{"type":"player","player":"7656...02","joined":true}` | a hub only: that player's Koetama joined (or left) |
 
@@ -302,6 +305,44 @@ MB a direction) and answers each with a `translation`. A game sends `"translate"
   (through the Traditional Chinese model); Maltese only into English.
 - A hub's players (below) each use their own Koetama's setting; nothing of it comes from the host.
 
+## Large language models (NPCs that talk)
+
+A mod whose profile `uses` `"llm"` can ask the **host's** large language model: the host turns it on for that game in
+Koetama's window ("Large Language Models": the API - OpenAI-compatible or Anthropic -, address, model, key, a
+monthly budget, the model's price, requests a minute), and the `hello` then names `llm`. Only the host's Koetama
+talks to the model: the game already carries every player's words to the host's script, which sends them on. The
+key never leaves the host's PC except to that API (kept sealed by Windows; never in a feed, a log or an object).
+Design and examples: docs/llm-npcs.md.
+
+**Game -> Koetama** (the top feed only; a hub's players' feeds carry none):
+
+| Field | What |
+|---|---|
+| `npcs` | the NPCs, `[{"id", "version", "persona", "functions", "max_words", "voice"}]`, at most 32 - send them once, and again when one changes (a feed may list only the changed ones). `id` 1-64 of `A-Z a-z 0-9 _ . : -`; `version` raised when the persona or functions change; `persona` (the system prompt: who it is, how it talks, what it refuses) at most 8 KB; `functions` at most 16, each `{"name", "description", "parameters": <JSON Schema object>}`, names 1-64 of `A-Z a-z 0-9 _ -`, each once; `max_words` the longest reply (1-1000, default 80); `voice` the voice it will speak with (kept for NPC voices to come). An NPC that breaks a rule is left out |
+| `to_npc` | the lines for NPCs: `[{"id": 41, "npc": "pig_king", "text": "10 meat for a helmet?", "from": {"id": "7656...02", "name": "Wendy"}, "state": "winter, day 31; Wendy holds 12 meat", "heard_by": ["7656...02"]}]`, at most 8 kept per feed. `id` as `to_translate`'s; `text` 1-400 bytes; no `from`: an event the game narrates ("the museum alarm went off"); `state` (what the game says is going on) at most 2 KB; `heard_by` optional. Keep a line in every feed until its `npc_reply` comes: each is answered once |
+| `npc_results` | the results of the functions an NPC called: `[{"call": "call_1", "result": "ok: offered 1 football helmet for 12 meat"}]` (or `"error: Wendy has only 8 meat"`), at most 1 KB each. Send each until the follow-up `npc_reply` comes |
+| `npc_forget` | NPC ids whose conversation starts over (a new day, the NPC died) |
+
+**Koetama -> game:**
+
+- `npc_reply`: `{"type":"npc_reply","ids":[41],"npc":"pig_king","text":"Twelve meat, not ten.","calls":[{"call":"call_1","name":"offer_trade","args":{"item":"footballhat","price":12}}],"error":""}`
+  - **Lines that come while an NPC is answering wait**, and then go to the model together: one reply answers them
+    all (`ids`).
+  - **`calls`** are requests, never commands: the game checks each against its own rules (inventories, cooldowns,
+    what players may not make an NPC do), runs it or refuses it, and answers in `npc_results`. With every call
+    answered (or after 20 s without), the results go back to the model and its follow-up comes as another
+    `npc_reply` to the same `ids`. Lines for that NPC wait meanwhile.
+  - **`error`** when there is no reply: `"budget"` (the host's month is spent), `no NPC "x"` (not in `npcs`), or what
+    failed; then `text` is `""` and `calls` empty. At most 2,000 characters of text.
+- `npc_status` (standing: after each hello and when it changes): `state` `ready`, `busy` (the host's requests a minute
+  reached: lines wait), `budget`, `error` (`why`); `model`, `spent` and `budget` (dollars this month).
+
+How Koetama asks: the persona after a short note of its own (each line comes as `Name: words`, an event in
+[brackets], the newest `state` as `[the game: ...]`; reply only with what is said aloud, in at most `max_words`
+words); each NPC's conversation is its last 24 turns (a fixed window - nothing is summarised); a new game session
+(`session`) starts every NPC over. Anything players say near an NPC ends up in its prompt: a persona can ask the model
+to refuse, only the game's checks of `calls` can enforce it.
+
 ## Transport: socket
 
 `{"type": "socket", "port": 47120}` in the profile. Koetama listens on `127.0.0.1:<port>` only (nothing from another
@@ -459,7 +500,7 @@ A profile using the socket connector only changes `connector`: `{"type": "socket
 | `url` | required | The mod's page, `https://...` or `http://...` (the window opens it in the browser). |
 | `author` | required | Who made the mod and the profile. |
 | `locate` | optional | `{"steam_app": N}`: the game's Steam app id. Koetama shows where it's installed, or that it's missing. |
-| `uses` | optional | Any of `"voices"`, `"speech"`, `"translate"` (at least one), and `"hosted"`; the default is `["voices", "speech"]`. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `listen` is ignored, so the microphone never opens. `translate`: Koetama translates the chat lines the game sends, into the language the player chose in Koetama ("Translation"); without it the feed's `translate` and `to_translate` are ignored. `hosted`: the mod runs only on the host's PC and the other players join with a code ("Hub"): Koetama's window offers "Join a hosted game" only when a profile says so. The `hello`'s `features` tell the mod which. |
+| `uses` | optional | Any of `"voices"`, `"speech"`, `"translate"`, `"llm"` (at least one), and `"hosted"`; the default is `["voices", "speech"]`. `voices`: Koetama plays the speakers in the feed (other players' voices). `speech`: Koetama listens to the microphone and sends what the player said (speech to text). A speech-only mod doesn't need to send speakers (Koetama drops them). A voices-only mod's `listen` is ignored, so the microphone never opens. `translate`: Koetama translates the chat lines the game sends, into the language the player chose in Koetama ("Translation"); without it the feed's `translate` and `to_translate` are ignored. `llm`: the host's large language model for the mod's NPCs, once the host turns it on for this game ("Large language models"). `hosted`: the mod runs only on the host's PC and the other players join with a code ("Hub"): Koetama's window offers "Join a hosted game" only when a profile says so. The `hello`'s `features` tell the mod which. |
 | `test_voices` | optional | Up to 16 recorded voices for the mod's test speakers: `{"id": 1..999, "voice": "<Windows voice>", "rate": -10..10, "text": "..."}`. They're made once with the Windows speech voices (none on other systems), and a speaker with `"test_voice": <id>` plays one. |
 | `speaker_names` | optional | Names for the test voices in Koetama's window, by their `id`, e.g. `{"1": "the whisperer"}`. Real players need nothing: they show as "player <id>". |
 | `connector` | required | `{"type": "files", ...}`, `{"type": "socket", ...}` or `{"type": "http", ...}`, described below. |

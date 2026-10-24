@@ -266,3 +266,20 @@ fn anthropic_style() {
     drop(seen);
     r.npcs.stop();
 }
+
+#[test]
+fn a_reasoning_model_is_asked_again_without_reasoning() {
+    // (OpenAI's reasoning models refuse functions on chat completions unless reasoning_effort is "none")
+    let f = fake(Box::new(|_, body| {
+        if body.get("reasoning_effort").and_then(Value::as_str) == Some("none") {
+            (200, openai_text("Oink."), Duration::ZERO)
+        } else {
+            (400, json!({"error": {"message": "Function tools with reasoning_effort are not supported for this model in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'."}}), Duration::ZERO)
+        }
+    }));
+    let r = rig(config(Api::OpenAi, &f.url));
+    r.npcs.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello")], &[], &[]);
+    assert_eq!(r.wait_replies(1)[0], (vec![1], "Oink.".into(), 0, String::new()));
+    assert_eq!(f.seen.lock().unwrap().len(), 2, "asked once more, with reasoning off");
+    r.npcs.stop();
+}

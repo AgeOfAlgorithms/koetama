@@ -337,6 +337,41 @@ four Voices through a stand-in relay (and, `--include-ignored`, the live one). C
 CMake, nothing linked; unsafe-libopus was tried and dropped - broken SILK concealment), chacha20poly1305, getrandom,
 tungstenite + rustls (ring) + webpki-roots.
 
+## kd-llm (large language models for game mods' NPCs; PROTOCOL.md "Large language models"; docs/llm-npcs.md)
+
+No Python reference (nothing of it is in engine/); the feed's NPC fields are parsed in both (kd-games api,
+engine/games/teardown.py: feed.json fixtures).
+
+```rust
+pub mod api {
+    Api { OpenAi, Anthropic } .name() .from_name() .default_url()
+    Config { api, url, model, key, budget, spent, price_in, price_out, per_minute } .url() .cost(&Reply)
+    Call { id, name, args: Value }   Turn { User(text), Assistant { text, calls }, Results(Vec<(call, result)>) }
+    Reply { text, calls, tokens_in, tokens_out }
+    endpoint(api, url)              // <url>/chat/completions | <url>/v1/messages
+    body(api, url, model, system, functions, turns, max_tokens) -> Value
+                                    // a call left without results gets "(not run)", same-side turns made one;
+                                    // OpenAI's own: max_completion_tokens; Anthropic: the system prompt cached
+    parse_reply(api, &Value) -> Result<Reply, String>
+    complete(&Config, system, functions, turns, max_tokens, timeout)  // a 400 naming reasoning_effort: asked again
+                                    // with "none" (OpenAI's reasoning models refuse functions otherwise)
+}
+pub mod npcs {
+    Npcs::start(Config, on_event, log) .set_config(c) .feed(sid, npcs, lines, results, forget) .stop()
+    Event { Reply { ids, npc, text, calls, error }, Status { state, why, spent }, Spent(f64) }
+    MAX_TURNS 24, RESULTS_WAIT 20 s, TIMEOUT 60 s
+}
+```
+
+The service's thread keeps each NPC's definition, conversation (MAX_TURNS, starting with a player's turn), queue
+(lines that come while it is busy or its calls wait: one turn, one reply for all) and the calls waiting for the
+game's results; requests run on threads of their own (a reply from an older one - a new session - is dropped). The
+host's limits are the service's: requests a minute (more wait: "busy"), the month's budget (spent: an error reply,
+"budget"). koetama: Options.llm (llm_setting.rs: settings.json "llm", the key sealed by secret.rs - DPAPI on Windows),
+GameKind::with_llm (off: the hello does not name "llm", the feed's NPC fields are dropped), the window's "Large
+Language Models" card, cli --llm-*. Tests: kd-llm's unit tests and tests/npcs.rs (a fake LLM, both styles),
+tools/npc_e2e.py (a real Koetama between a fake game and a fake LLM; --real for a real one).
+
 ## Building and testing a crate (parallel work)
 
 Each crate builds and tests on its own: `cargo test -p <crate>` from `app/`. While several people (agents) work at

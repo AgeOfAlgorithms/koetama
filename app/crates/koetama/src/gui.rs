@@ -212,6 +212,9 @@ struct App {
     /// languages the player speaks but has translated anyway ("translate_also")
     translate_also: Vec<String>,
     targets: Vec<&'static str>,
+    /// the host's LLM for game mods' NPCs (llm_setting.rs), and the key being typed (empty: the saved one stays)
+    llm: crate::llm_setting::LlmSetting,
+    llm_key: String,
     /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
     downloaded: Vec<kd_translate::catalog::OnDisk>,
     downloaded_at: Option<Instant>,
@@ -241,6 +244,7 @@ impl App {
         crate::fonts::install(&cc.egui_ctx);
         theme::apply(&cc.egui_ctx);
         let settings = Settings::load();
+        let llm = crate::llm_setting::LlmSetting::load(&settings);
         let (log_tx, log_rx) = channel();
         let (upd_tx, upd_rx) = channel();
         let ins = kd_audio::input_devices();
@@ -283,6 +287,8 @@ impl App {
             translate_downloads: true,
             translate_also: Vec::new(),
             targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
+            llm,
+            llm_key: String::new(),
             downloaded: Vec::new(),
             downloaded_at: None,
             speech_disk: Vec::new(),
@@ -350,6 +356,8 @@ impl App {
             translate_into: Some(self.translate_into.clone()).filter(|l| !l.is_empty()),
             translate_also: self.translate_also.clone(),
             translate_downloads: self.translate_downloads,
+            // (the NPCs' LLM: the host's, for a game whose profile uses it and that they turned it on for)
+            llm: if kind.llm && self.joined.is_none() { self.llm.config_for(&kind.id) } else { None },
             ..Default::default()
         };
         let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
@@ -737,6 +745,109 @@ impl App {
         }
     }
 
+    /// "Large Language Models": the host's LLM for this game's mod - its NPCs and whatever else it asks (docs/llm-npcs.md)
+    /// - on for this game or not, the API,
+    /// address, model, key, the month's budget, the model's price, requests a minute; its state and what was spent.
+    /// Turning it on or off (or it becoming usable) starts the game link again (the hello names "llm" or not).
+    fn npcs_ui(&mut self, ui: &mut egui::Ui) {
+        let game = self.kind.id.clone();
+        let before = self.llm.config_for(&game).is_some();
+        let mut changed = false;
+        let mut on = self.llm.on_for(&game);
+        if ui.checkbox(&mut on, format!("Let the {} mod use my language model", self.kind.mod_name)).changed() {
+            self.llm.set_on(&game, on);
+            changed = true;
+        }
+        ui.label(
+            RichText::new(
+                "For the host: what the mod sends (what players say to its characters) goes with your key to the \
+                 model chosen here, and it costs you. The other players need nothing. Tell them the game uses one.",
+            )
+            .size(12.0)
+            .color(theme::MUTED),
+        );
+        egui::Grid::new("npc-llm").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+            ui.label(RichText::new("API").color(theme::MUTED));
+            let api = self.llm.api;
+            egui::ComboBox::from_id_salt("npc-llm-api")
+                .width(220.0)
+                .selected_text(match api {
+                    kd_llm::Api::OpenAi => "OpenAI-compatible",
+                    kd_llm::Api::Anthropic => "Anthropic",
+                })
+                .show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(&mut self.llm.api, kd_llm::Api::OpenAi, "OpenAI-compatible").changed();
+                    changed |= ui.selectable_value(&mut self.llm.api, kd_llm::Api::Anthropic, "Anthropic").changed();
+                });
+            ui.end_row();
+            ui.label(RichText::new("Address").color(theme::MUTED));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.llm.url).hint_text(self.llm.api.default_url()).desired_width(330.0));
+            changed |= r.lost_focus();
+            ui.end_row();
+            ui.label(RichText::new("Model").color(theme::MUTED));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.llm.model).hint_text("the model's id, as the API names it").desired_width(330.0));
+            changed |= r.lost_focus();
+            ui.end_row();
+            ui.label(RichText::new("Key").color(theme::MUTED));
+            let hint = if self.llm.key.is_empty() { "your API key" } else { "saved (type to replace it)" };
+            let r = ui.add(egui::TextEdit::singleline(&mut self.llm_key).password(true).hint_text(hint).desired_width(330.0));
+            if r.lost_focus() && !self.llm_key.trim().is_empty() {
+                self.llm.key = std::mem::take(&mut self.llm_key).trim().to_string();
+                changed = true;
+            }
+            ui.end_row();
+            ui.label(RichText::new("Budget").color(theme::MUTED));
+            ui.horizontal(|ui| {
+                let r = ui.add(egui::DragValue::new(&mut self.llm.budget).range(0.0..=1000.0).speed(0.25).prefix("$").suffix(" a month"));
+                changed |= r.drag_stopped() || r.lost_focus();
+                ui.label(RichText::new(format!("spent this month: ${:.2}", self.llm.spent_this_month())).color(theme::MUTED));
+            });
+            ui.end_row();
+            ui.label(RichText::new("Price").color(theme::MUTED));
+            ui.horizontal(|ui| {
+                let a = ui.add(egui::DragValue::new(&mut self.llm.price_in).range(0.0..=1000.0).speed(0.05).prefix("$").suffix(" in"));
+                let b = ui.add(egui::DragValue::new(&mut self.llm.price_out).range(0.0..=1000.0).speed(0.05).prefix("$").suffix(" out"));
+                changed |= a.drag_stopped() || a.lost_focus() || b.drag_stopped() || b.lost_focus();
+                ui.label(RichText::new("a million tokens (the model's price: the budget counts with it)").size(12.0).color(theme::MUTED));
+            });
+            ui.end_row();
+            ui.label(RichText::new("Requests").color(theme::MUTED));
+            ui.horizontal(|ui| {
+                let r = ui.add(egui::DragValue::new(&mut self.llm.per_minute).range(1..=600).suffix(" a minute"));
+                changed |= r.drag_stopped() || r.lost_focus();
+                ui.label(RichText::new("at most (more lines wait)").size(12.0).color(theme::MUTED));
+            });
+            ui.end_row();
+        });
+        if on && !self.llm.complete() {
+            ui.label(RichText::new("Add a model and a key to turn it on.").size(12.5).color(theme::WARN));
+        }
+        if let Some(n) = self.status.as_ref().and_then(|s| s.npc.as_ref()) {
+            let (text, colour) = match n.state {
+                "ready" => ("ready".to_string(), theme::GOOD),
+                "busy" => ("busy: lines wait (requests a minute)".to_string(), theme::WARN),
+                "budget" => ("this month's budget is spent".to_string(), theme::BAD),
+                "error" => (format!("failed: {}", n.why), theme::BAD),
+                _ => ("starting".to_string(), theme::MUTED),
+            };
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Status").color(theme::MUTED));
+                theme::pill(ui, &text, colour);
+            });
+        }
+        if changed {
+            self.llm.save(&mut self.settings);
+            self.settings.save();
+            let after = self.llm.config_for(&game);
+            if before != after.is_some() {
+                // (on or off for this game: the game link starts again, its hello naming "llm" or not)
+                self.switch_game(&game);
+            } else if let (Some(cfg), Some(rt)) = (after, self.rt.as_mut()) {
+                rt.set_llm(cfg);
+            }
+        }
+    }
+
     /// "Languages I speak": what is in use (chips), and (Choose) every language by how well it is written.
     fn languages_ui(&mut self, ui: &mut egui::Ui) {
         let (langs, from_game) = match &self.status {
@@ -1105,6 +1216,14 @@ impl App {
         if let Some(rt) = self.rt.as_mut() {
             rt.tick();
             self.status = Some(rt.status());
+        }
+        // (what the NPCs' LLM spent this month: kept in the settings as it grows)
+        if let Some(spent) = self.status.as_ref().and_then(|s| s.npc.as_ref()).map(|n| n.spent) {
+            if spent > self.llm.spent_this_month() + 1e-9 {
+                self.llm.set_spent(spent);
+                self.llm.save(&mut self.settings);
+                self.settings.save();
+            }
         }
         while let Ok(line) = self.log_rx.try_recv() {
             self.log_lines.push(format!("{} {line}", clock()));
@@ -1480,6 +1599,12 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                         // ---- translation (a game that uses it: the player's own setting, here)
                         if self.kind.translate {
                             theme::card(ui, "Translation", |ui| self.translation_ui(ui));
+                            ui.add_space(2.0);
+                        }
+
+                        // ---- large language models (a game whose profile uses "llm": its NPCs and more; the host's setting)
+                        if self.kind.llm && self.joined.is_none() {
+                            theme::card(ui, "Large Language Models", |ui| self.npcs_ui(ui));
                             ui.add_space(2.0);
                         }
 
