@@ -128,6 +128,13 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
 
 ## Open
 
+- **NPCs that talk: an LLM through Koetama (2026-10-24, the user's idea; design only).** docs/llm-npcs.md: the host's
+  Koetama alone talks to the LLM (the game already carries every player's words to the host); the mod owns the content
+  (personas, functions, game state, the lines), Koetama the plumbing (history, providers, caching, the key, the host's
+  budget and limits); a protocol draft (`uses: "llm"`, `npcs`, `to_npc`, `npc_results`, `npc_reply`, `npc_status`);
+  safety (function calls are requests the mod checks; the budget is Koetama's; PRIVACY.md changes); steps and sizes.
+  Next: the user reviews it; then step 1 and a DST pig trader with a local model.
+
 - **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
   hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and
   `cargo run -p kd-voice --example mic_check` - Koetama's own capture and gain on a real microphone): the user's Mbox
