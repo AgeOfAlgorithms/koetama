@@ -755,6 +755,12 @@ pub(crate) fn as_used(mut feed: Feed, p: &Profile) -> Feed {
         feed.translate = false;
         feed.to_translate.clear();
     }
+    if !p.llm {
+        feed.npcs.clear();
+        feed.to_npc.clear();
+        feed.npc_results.clear();
+        feed.npc_forget.clear();
+    }
     feed
 }
 

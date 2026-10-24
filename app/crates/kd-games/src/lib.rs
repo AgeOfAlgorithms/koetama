@@ -165,6 +165,9 @@ pub struct GameKind {
     pub speech: bool,
     /// Koetama translates the chat lines the game sends (PROTOCOL.md "Translation": the translation models are needed)
     pub translate: bool,
+    /// the mod's NPCs talk through the host's LLM (docs/llm-npcs.md): the profile asks for it AND the host turned it
+    /// on for this game (with_llm)
+    pub llm: bool,
     /// the profile itself
     pub profile: Arc<Profile>,
     /// a game hosted on another PC, joined with this code (PROTOCOL.md "Hub": GameKind::joined)
@@ -198,6 +201,7 @@ impl GameKind {
             voices: profile.voices,
             speech: profile.speech,
             translate: profile.translate,
+            llm: profile.llm,
             profile: Arc::new(profile),
             join_code: None,
         }
@@ -213,6 +217,19 @@ impl GameKind {
 
     /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
     /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
+    /// This game with its NPCs' LLM on only if `on` (the host's setting) and its profile asks for it: off, the hello
+    /// does not name "llm" and the feed's NPC fields are dropped.
+    pub fn with_llm(&self, on: bool) -> GameKind {
+        let mut k = self.clone();
+        if k.profile.llm && !on {
+            let mut p = (*k.profile).clone();
+            p.llm = false;
+            k.profile = Arc::new(p);
+        }
+        k.llm = k.profile.llm;
+        k
+    }
+
     pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game> {
         if let Some(code) = &self.join_code {
             return Box::new(joined::JoinedGame::new(self.profile.clone(), code.clone(), sink, log));

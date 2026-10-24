@@ -333,3 +333,21 @@ fn hosted_games() {
     assert!(!parse(&socket_profile()).unwrap().hosted, "not unless the profile says so");
     assert!(err(&with(socket_profile(), "/uses", Some(json!(["hosted"])))).contains("at least one"));
 }
+
+/// "llm": the mod's NPCs talk through the host's LLM (docs/llm-npcs.md) - alone too; on only once the host turns it on
+/// (GameKind::with_llm), and only then does the hello name it.
+#[test]
+fn llm_games() {
+    let p = parse(&with(socket_profile(), "/uses", Some(json!(["speech", "llm"])))).unwrap();
+    assert!(p.llm && p.speech && !p.voices);
+    assert!(parse(&with(socket_profile(), "/uses", Some(json!(["llm"])))).unwrap().llm, "llm alone");
+    assert!(!parse(&socket_profile()).unwrap().llm, "not unless the profile says so");
+    assert!(err(&with(socket_profile(), "/uses", Some(json!(["llm", "x"])))).contains("\"llm\""));
+    let kind = kd_games::GameKind::from_profile(p, false, None);
+    assert!(kind.llm && kd_games::api::features(&kind.profile).contains(&"llm"));
+    let off = kind.with_llm(false);
+    assert!(!off.llm && !kd_games::api::features(&off.profile).contains(&"llm"), "the host has it off");
+    assert!(kind.with_llm(true).llm);
+    let never = kd_games::GameKind::from_profile(parse(&socket_profile()).unwrap(), false, None);
+    assert!(!never.with_llm(true).llm, "the host's setting cannot add it to a profile without it");
+}

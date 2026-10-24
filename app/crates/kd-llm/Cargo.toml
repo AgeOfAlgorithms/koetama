@@ -1,0 +1,11 @@
+[package]
+name = "kd-llm"
+description = "Koetama: NPCs that talk - the host's LLM (OpenAI-compatible or Anthropic) for a game mod's NPCs (docs/llm-npcs.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kd-common.workspace = true
+serde_json.workspace = true
+ureq.workspace = true

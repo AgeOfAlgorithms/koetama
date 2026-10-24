@@ -41,6 +41,9 @@ pub fn features(profile: &Profile) -> Vec<&'static str> {
     if profile.translate {
         f.push("translate");
     }
+    if profile.llm {
+        f.push("llm");
+    }
     f
 }
 
