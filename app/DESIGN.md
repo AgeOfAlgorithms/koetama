@@ -337,9 +337,9 @@ four Voices through a stand-in relay (and, `--include-ignored`, the live one). C
 CMake, nothing linked; unsafe-libopus was tried and dropped - broken SILK concealment), chacha20poly1305, getrandom,
 tungstenite + rustls (ring) + webpki-roots.
 
-## kd-llm (large language models for game mods' NPCs; PROTOCOL.md "Large language models"; docs/llm-npcs.md)
+## kd-llm (large language models for game mods' agents; PROTOCOL.md "Large language models"; docs/llm-agents.md)
 
-No Python reference (nothing of it is in engine/); the feed's NPC fields are parsed in both (kd-games api,
+No Python reference (nothing of it is in engine/); the feed's agent fields are parsed in both (kd-games api,
 engine/games/teardown.py: feed.json fixtures).
 
 ```rust
@@ -356,21 +356,21 @@ pub mod api {
     complete(&Config, system, functions, turns, max_tokens, timeout)  // a 400 naming reasoning_effort: asked again
                                     // with "none" (OpenAI's reasoning models refuse functions otherwise)
 }
-pub mod npcs {
-    Npcs::start(Config, on_event, log) .set_config(c) .feed(sid, npcs, lines, results, forget) .stop()
-    Event { Reply { ids, npc, text, calls, error }, Status { state, why, spent }, Spent(f64) }
+pub mod agents {
+    Agents::start(Config, on_event, log) .set_config(c) .feed(sid, agents, lines, results, forget) .stop()
+    Event { Reply { ids, agent, text, calls, error }, Status { state, why, spent }, Spent(f64) }
     MAX_TURNS 24, RESULTS_WAIT 20 s, TIMEOUT 60 s
 }
 ```
 
-The service's thread keeps each NPC's definition, conversation (MAX_TURNS, starting with a player's turn), queue
+The service's thread keeps each agent's definition, conversation (MAX_TURNS, starting with a player's turn), queue
 (lines that come while it is busy or its calls wait: one turn, one reply for all) and the calls waiting for the
 game's results; requests run on threads of their own (a reply from an older one - a new session - is dropped). The
 host's limits are the service's: requests a minute (more wait: "busy"), the month's budget (spent: an error reply,
 "budget"). koetama: Options.llm (llm_setting.rs: settings.json "llm", the key sealed by secret.rs - DPAPI on Windows),
-GameKind::with_llm (off: the hello does not name "llm", the feed's NPC fields are dropped), the window's "Large
-Language Models" card, cli --llm-*. Tests: kd-llm's unit tests and tests/npcs.rs (a fake LLM, both styles),
-tools/npc_e2e.py (a real Koetama between a fake game and a fake LLM; --real for a real one).
+GameKind::with_llm (off: the hello does not name "llm", the feed's agent fields are dropped), the window's "Large
+Language Models" card, cli --llm-*. Tests: kd-llm's unit tests and tests/agents.rs (a fake LLM, both styles),
+tools/agents_e2e.py (a real Koetama between a fake game and a fake LLM; --real for a real one).
 
 ## Building and testing a crate (parallel work)
 

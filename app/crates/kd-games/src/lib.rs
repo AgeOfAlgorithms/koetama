@@ -165,7 +165,7 @@ pub struct GameKind {
     pub speech: bool,
     /// Koetama translates the chat lines the game sends (PROTOCOL.md "Translation": the translation models are needed)
     pub translate: bool,
-    /// the mod's NPCs talk through the host's LLM (docs/llm-npcs.md): the profile asks for it AND the host turned it
+    /// the mod's agents talk through the host's LLM (docs/llm-agents.md): the profile asks for it AND the host turned it
     /// on for this game (with_llm)
     pub llm: bool,
     /// the profile itself
@@ -217,8 +217,8 @@ impl GameKind {
 
     /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
     /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
-    /// This game with its NPCs' LLM on only if `on` (the host's setting) and its profile asks for it: off, the hello
-    /// does not name "llm" and the feed's NPC fields are dropped.
+    /// This game with its agents' LLM on only if `on` (the host's setting) and its profile asks for it: off, the hello
+    /// does not name "llm" and the feed's agent fields are dropped.
     pub fn with_llm(&self, on: bool) -> GameKind {
         let mut k = self.clone();
         if k.profile.llm && !on {

@@ -212,7 +212,7 @@ struct App {
     /// languages the player speaks but has translated anyway ("translate_also")
     translate_also: Vec<String>,
     targets: Vec<&'static str>,
-    /// the host's LLM for game mods' NPCs (llm_setting.rs), and the key being typed (empty: the saved one stays)
+    /// the host's LLM for game mods' agents (llm_setting.rs), and the key being typed (empty: the saved one stays)
     llm: crate::llm_setting::LlmSetting,
     llm_key: String,
     /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
@@ -356,7 +356,7 @@ impl App {
             translate_into: Some(self.translate_into.clone()).filter(|l| !l.is_empty()),
             translate_also: self.translate_also.clone(),
             translate_downloads: self.translate_downloads,
-            // (the NPCs' LLM: the host's, for a game whose profile uses it and that they turned it on for)
+            // (the agents' LLM: the host's, for a game whose profile uses it and that they turned it on for)
             llm: if kind.llm && self.joined.is_none() { self.llm.config_for(&kind.id) } else { None },
             ..Default::default()
         };
@@ -745,11 +745,11 @@ impl App {
         }
     }
 
-    /// "Large Language Models": the host's LLM for this game's mod - its NPCs and whatever else it asks (docs/llm-npcs.md)
+    /// "Large Language Models": the host's LLM for this game's mod - its agents and whatever else it asks (docs/llm-agents.md)
     /// - on for this game or not, the API,
     /// address, model, key, the month's budget, the model's price, requests a minute; its state and what was spent.
     /// Turning it on or off (or it becoming usable) starts the game link again (the hello names "llm" or not).
-    fn npcs_ui(&mut self, ui: &mut egui::Ui) {
+    fn llm_ui(&mut self, ui: &mut egui::Ui) {
         let game = self.kind.id.clone();
         let before = self.llm.config_for(&game).is_some();
         let mut changed = false;
@@ -766,10 +766,10 @@ impl App {
             .size(12.0)
             .color(theme::MUTED),
         );
-        egui::Grid::new("npc-llm").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+        egui::Grid::new("llm").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
             ui.label(RichText::new("API").color(theme::MUTED));
             let api = self.llm.api;
-            egui::ComboBox::from_id_salt("npc-llm-api")
+            egui::ComboBox::from_id_salt("llm-api")
                 .width(220.0)
                 .selected_text(match api {
                     kd_llm::Api::OpenAi => "OpenAI-compatible",
@@ -822,7 +822,7 @@ impl App {
         if on && !self.llm.complete() {
             ui.label(RichText::new("Add a model and a key to turn it on.").size(12.5).color(theme::WARN));
         }
-        if let Some(n) = self.status.as_ref().and_then(|s| s.npc.as_ref()) {
+        if let Some(n) = self.status.as_ref().and_then(|s| s.agent.as_ref()) {
             let (text, colour) = match n.state {
                 "ready" => ("ready".to_string(), theme::GOOD),
                 "busy" => ("busy: lines wait (requests a minute)".to_string(), theme::WARN),
@@ -1217,8 +1217,8 @@ impl App {
             rt.tick();
             self.status = Some(rt.status());
         }
-        // (what the NPCs' LLM spent this month: kept in the settings as it grows)
-        if let Some(spent) = self.status.as_ref().and_then(|s| s.npc.as_ref()).map(|n| n.spent) {
+        // (what the agents' LLM spent this month: kept in the settings as it grows)
+        if let Some(spent) = self.status.as_ref().and_then(|s| s.agent.as_ref()).map(|n| n.spent) {
             if spent > self.llm.spent_this_month() + 1e-9 {
                 self.llm.set_spent(spent);
                 self.llm.save(&mut self.settings);
@@ -1602,9 +1602,9 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                             ui.add_space(2.0);
                         }
 
-                        // ---- large language models (a game whose profile uses "llm": its NPCs and more; the host's setting)
+                        // ---- large language models (a game whose profile uses "llm": its agents and more; the host's setting)
                         if self.kind.llm && self.joined.is_none() {
-                            theme::card(ui, "Large Language Models", |ui| self.npcs_ui(ui));
+                            theme::card(ui, "Large Language Models", |ui| self.llm_ui(ui));
                             ui.add_space(2.0);
                         }
 

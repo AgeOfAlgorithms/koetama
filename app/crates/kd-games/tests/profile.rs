@@ -334,7 +334,7 @@ fn hosted_games() {
     assert!(err(&with(socket_profile(), "/uses", Some(json!(["hosted"])))).contains("at least one"));
 }
 
-/// "llm": the mod's NPCs talk through the host's LLM (docs/llm-npcs.md) - alone too; on only once the host turns it on
+/// "llm": the mod's agents talk through the host's LLM (docs/llm-agents.md) - alone too; on only once the host turns it on
 /// (GameKind::with_llm), and only then does the hello name it.
 #[test]
 fn llm_games() {

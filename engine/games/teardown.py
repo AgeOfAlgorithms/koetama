@@ -117,18 +117,18 @@ def parse_requests(items):
     return out
 
 
-# NPCs that talk through an LLM (docs/llm-npcs.md): the feed's npcs, to_npc, npc_results and npc_forget, the top
+# Agents through an LLM (docs/llm-agents.md): the feed's agents, to_agent, agent_results and agent_forget, the top
 # feed only (Rust: kd_games::api - keep the same)
-NPC_ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
+agent_ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
 FUNCTION_NAME = re.compile(r'[A-Za-z0-9_-]{1,64}')
-MAX_NPCS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 16, 1024
-MAX_NPC_LINES, MAX_STATE_BYTES, MAX_RESULTS, MAX_RESULT_BYTES = 8, 2048, 16, 1024
+MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 16, 1024
+MAX_AGENT_LINES, MAX_STATE_BYTES, MAX_RESULTS, MAX_RESULT_BYTES = 8, 2048, 16, 1024
 DEFAULT_WORDS, MAX_WORDS = 80, 1000
 NO_PARAMETERS = {'type': 'object', 'properties': {}}
 
 
-def _npc_id(v):
-    return v if isinstance(v, str) and NPC_ID.fullmatch(v) else None
+def _agent_id(v):
+    return v if isinstance(v, str) and agent_ID.fullmatch(v) else None
 
 
 def _fits(v, most):
@@ -136,11 +136,14 @@ def _fits(v, most):
     return isinstance(v, str) and len(v.encode('utf-8')) <= most
 
 
-def parse_npc(o):
-    """an npcs item -> dict, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most
+def parse_agent(o):
+    """an agents item -> dict, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most
     MAX_FUNCTIONS functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an
     object (JSON Schema; absent: none)"""
-    if not isinstance(o, dict) or _npc_id(o.get('id')) is None:
+    if not isinstance(o, dict) or _agent_id(o.get('id')) is None:
+        return None
+    character = True if o.get('character') is None else o['character']
+    if not isinstance(character, bool):
         return None
     persona = '' if o.get('persona') is None else o['persona']
     if not _fits(persona, MAX_PERSONA_BYTES):
@@ -159,19 +162,19 @@ def parse_npc(o):
             return None
         functions.append(dict(name=f['name'], description=desc, parameters=params))
     version, words = _whole(o.get('version')), _whole(o.get('max_words'))
-    return dict(id=o['id'], version=max(0, version) if version is not None else 0, persona=persona,
+    return dict(id=o['id'], version=max(0, version) if version is not None else 0, character=character, persona=persona,
                 functions=functions, voice=_short(o.get('voice')),
                 max_words=min(MAX_WORDS, max(1, words)) if words is not None else DEFAULT_WORDS)
 
 
-def parse_npc_line(o):
-    """a to_npc item -> dict, or None (left out): an id as to_translate's, a good npc id, a text of 1 to
+def parse_agent_line(o):
+    """a to_agent item -> dict, or None (left out): an id as to_translate's, a good agent id, a text of 1 to
     MAX_REQUEST_BYTES; `from` (who said it: an id and a name), `state` (at most MAX_STATE_BYTES, else ''), `heard_by`
     (player ids, the first 64, bad ones left out) are optional"""
     if not isinstance(o, dict):
         return None
     rid = _whole(o.get('id'))
-    if rid is None or not 1 <= rid <= 999999999999999 or _npc_id(o.get('npc')) is None:
+    if rid is None or not 1 <= rid <= 999999999999999 or _agent_id(o.get('agent')) is None:
         return None
     text = o.get('text')
     if not isinstance(text, str) or text == '' or not _fits(text, MAX_REQUEST_BYTES):
@@ -183,33 +186,33 @@ def parse_npc_line(o):
         pid = player_id(h)
         if pid is not None and pid not in heard:
             heard.append(pid)
-    return dict(id=rid, npc=o['npc'], text=text, from_id=who, from_name=_short(f.get('name')),
+    return dict(id=rid, agent=o['agent'], text=text, from_id=who, from_name=_short(f.get('name')),
                 state=o['state'] if _fits(o.get('state'), MAX_STATE_BYTES) else '', heard_by=heard)
 
 
-def parse_npc_fields(v):
-    """the top feed's npcs, to_npc, npc_results, npc_forget -> a dict of them; raises ValueError for a field that is
-    not a list or is too long. Each npc and line id once (the first), results by call once"""
-    npcs = []
-    for o in _list(v, 'npcs', MAX_NPCS):
-        n = parse_npc(o)
-        if n and n['id'] not in [x['id'] for x in npcs]:
-            npcs.append(n)
+def parse_agent_fields(v):
+    """the top feed's agents, to_agent, agent_results, agent_forget -> a dict of them; raises ValueError for a field that is
+    not a list or is too long. Each agent and line id once (the first), results by call once"""
+    agents = []
+    for o in _list(v, 'agents', MAX_AGENTS):
+        n = parse_agent(o)
+        if n and n['id'] not in [x['id'] for x in agents]:
+            agents.append(n)
     lines = []
-    for o in _list(v, 'to_npc', 64):
-        line = parse_npc_line(o)
-        if line and line['id'] not in [x['id'] for x in lines] and len(lines) < MAX_NPC_LINES:
+    for o in _list(v, 'to_agent', 64):
+        line = parse_agent_line(o)
+        if line and line['id'] not in [x['id'] for x in lines] and len(lines) < MAX_AGENT_LINES:
             lines.append(line)
     results = []
-    for o in _list(v, 'npc_results', 64):
-        if isinstance(o, dict) and _npc_id(o.get('call')) and _fits(o.get('result'), MAX_RESULT_BYTES) \
+    for o in _list(v, 'agent_results', 64):
+        if isinstance(o, dict) and _agent_id(o.get('call')) and _fits(o.get('result'), MAX_RESULT_BYTES) \
                 and o['call'] not in [c for c, _ in results] and len(results) < MAX_RESULTS:
             results.append((o['call'], o['result']))
     forget = []
-    for o in _list(v, 'npc_forget', 64):
-        if _npc_id(o) and o not in forget and len(forget) < MAX_NPCS:
+    for o in _list(v, 'agent_forget', 64):
+        if _agent_id(o) and o not in forget and len(forget) < MAX_AGENTS:
             forget.append(o)
-    return dict(npcs=npcs, to_npc=lines, npc_results=results, npc_forget=forget)
+    return dict(agents=agents, to_agent=lines, agent_results=results, agent_forget=forget)
 
 
 def _whole(v):
@@ -601,7 +604,7 @@ def _parse_one(v, inherit=None):
                 translate=_flag(v, 'translate', True), to_translate=parse_requests(lines), me_id=me_id,
                 name=_short(v.get('name')), range=my_range, max_range=_positive(v.get('max_range')), clashes=clashes,
                 transmit_all=transmit_all, players=[],
-                **(parse_npc_fields(v) if inherit is None else dict(npcs=[], to_npc=[], npc_results=[], npc_forget=[])))
+                **(parse_agent_fields(v) if inherit is None else dict(agents=[], to_agent=[], agent_results=[], agent_forget=[])))
 
 
 def parse_feed(text):

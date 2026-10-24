@@ -1,8 +1,8 @@
-//! The two API styles an NPC's LLM may speak: OpenAI-compatible chat completions (OpenAI, OpenRouter, Groq, ... any
+//! The two API styles an agent's LLM may speak: OpenAI-compatible chat completions (OpenAI, OpenRouter, Groq, ... any
 //! server with POST <url>/chat/completions) and Anthropic's messages (POST <url>/v1/messages). The conversation is
 //! kept provider-neutral (Turn); body() makes each one's request, parse_reply() reads its answer, complete() does the
 //! call.
-use kd_common::feed::NpcFunction;
+use kd_common::feed::AgentFunction;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -79,12 +79,12 @@ pub struct Call {
     pub args: Value,
 }
 
-/// One turn of an NPC's conversation.
+/// One turn of an agent's conversation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Turn {
-    /// what was said near the NPC (its lines, as Koetama wrote them)
+    /// what was said near the agent (its lines, as Koetama wrote them)
     User(String),
-    /// what the NPC said, and the functions it called
+    /// what the agent said, and the functions it called
     Assistant { text: String, calls: Vec<Call> },
     /// the game's results for those calls: (call id, result)
     Results(Vec<(String, String)>),
@@ -135,7 +135,7 @@ fn mended(turns: &[Turn]) -> Vec<Turn> {
 }
 
 /// The request body for `api`: the system prompt, the functions, the conversation, the longest reply.
-pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[NpcFunction], turns: &[Turn], max_tokens: u32) -> Value {
+pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFunction], turns: &[Turn], max_tokens: u32) -> Value {
     let turns = mended(turns);
     match api {
         Api::OpenAi => {
@@ -262,7 +262,7 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
 }
 
 /// One request to the host's LLM (blocking: the service runs it on a thread of its own).
-pub fn complete(cfg: &Config, system: &str, functions: &[NpcFunction], turns: &[Turn], max_tokens: u32, timeout: Duration) -> Result<Reply, String> {
+pub fn complete(cfg: &Config, system: &str, functions: &[AgentFunction], turns: &[Turn], max_tokens: u32, timeout: Duration) -> Result<Reply, String> {
     let url = endpoint(cfg.api, cfg.url());
     let local = ["http://127.0.0.1:", "http://localhost:"].iter().any(|p| url.starts_with(p));
     let agent = ureq::Agent::config_builder()
@@ -307,8 +307,8 @@ fn wants_no_reasoning(v: &Value) -> bool {
 mod tests {
     use super::*;
 
-    fn trade() -> Vec<NpcFunction> {
-        vec![NpcFunction {
+    fn trade() -> Vec<AgentFunction> {
+        vec![AgentFunction {
             name: "offer_trade".into(),
             description: "Offer an item".into(),
             parameters: json!({"type": "object", "properties": {"item": {"type": "string"}}}),

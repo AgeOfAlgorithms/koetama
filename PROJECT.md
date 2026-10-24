@@ -128,19 +128,22 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
 
 ## Open
 
-- **NPCs that talk: an LLM through Koetama (2026-10-24, the user's idea; design only).** docs/llm-npcs.md: the host's
+- **NPCs that talk: an LLM through Koetama (2026-10-24, the user's idea; design only).** docs/llm-agents.md: the host's
   Koetama alone talks to the LLM (the game already carries every player's words to the host); the mod owns the content
   (personas, functions, game state, the lines), Koetama the plumbing (history, providers, caching, the key, the host's
-  budget and limits); a protocol draft (`uses: "llm"`, `npcs`, `to_npc`, `npc_results`, `npc_reply`, `npc_status`);
+  budget and limits); a protocol draft (`uses: "llm"`, `agents`, `to_agent`, `agent_results`, `agent_reply`, `agent_status`);
   safety (function calls are requests the mod checks; the budget is Koetama's; PRIVACY.md changes); steps and sizes.
   **Built the same day (steps 1-2, unreleased):** the feed's NPC fields (Python and Rust, fixtures), profiles'
   `uses: "llm"`, the kd-llm crate (OpenAI-compatible and Anthropic; each NPC's queue - lines that come while it
   answers go as one turn - and fixed window; function calls and their results; the host's budget and requests a
-  minute), the runtime (npc_reply, npc_status), the window's "Large Language Models" card (the key sealed by DPAPI),
-  cli --llm-*. Tested: kd-llm against a fake LLM, tools/npc_e2e.py (a real Koetama, a fake game; --real with the
+  minute), the runtime (agent_reply, agent_status), the window's "Large Language Models" card (the key sealed by DPAPI),
+  cli --llm-*. Tested: kd-llm against a fake LLM, tools/agents_e2e.py (a real Koetama, a fake game; --real with the
   user's OpenAI key - kept outside the repo, `~/.koetama-secrets/openai.key`, readable by their account only: never
   in a command, a log or a commit) - gpt-6-luna called offer_trade and followed up after the result. Next: a mod
-  using it (DST), what the mod sends (state, memory), streaming, voices.
+  using it (DST), what the mod sends (state, memory), streaming, voices. **Renamed to agents** (the user: "agents is a
+  better terminology"; the feature has more uses than NPCs): agents / to_agent / agent_results / agent_forget /
+  agent_reply / agent_status, kd-llm's Agents, docs/llm-agents.md, tools/agents_e2e.py; `character` (default true;
+  false: the persona alone).
 
 - **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
   hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and

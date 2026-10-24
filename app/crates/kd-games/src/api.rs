@@ -117,25 +117,25 @@ pub fn translation(id: i64, text: &str, rule: Option<(&str, &str)>) -> String {
     }
 }
 
-/// the longest NPC reply sent to the game (characters)
-pub const MAX_NPC_REPLY_CHARS: usize = 2000;
+/// the longest agent reply sent to the game (characters)
+pub const MAX_AGENT_REPLY_CHARS: usize = 2000;
 
-/// {"type":"npc_reply","ids":[..],"npc":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..}: an NPC's
-/// reply to the game's lines `ids` (docs/llm-npcs.md) - its words, the functions it calls (the game checks and runs
-/// them, and answers with npc_results), or why there is none ("budget", what failed).
-pub fn npc_reply(ids: &[i64], npc: &str, text: &str, calls: &[(String, String, serde_json::Value)], error: &str) -> String {
-    let text: String = text.chars().take(MAX_NPC_REPLY_CHARS).collect();
+/// {"type":"agent_reply","ids":[..],"agent":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..}: an agent's
+/// reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it calls (the game checks and runs
+/// them, and answers with agent_results), or why there is none ("budget", what failed).
+pub fn agent_reply(ids: &[i64], agent: &str, text: &str, calls: &[(String, String, serde_json::Value)], error: &str) -> String {
+    let text: String = text.chars().take(MAX_AGENT_REPLY_CHARS).collect();
     let calls: Vec<serde_json::Value> =
         calls.iter().map(|(id, name, args)| serde_json::json!({"call": id, "name": name, "args": args})).collect();
-    serde_json::json!({"type": "npc_reply", "ids": ids, "npc": npc, "text": text, "calls": calls, "error": error}).to_string()
+    serde_json::json!({"type": "agent_reply", "ids": ids, "agent": agent, "text": text, "calls": calls, "error": error}).to_string()
 }
 
-/// {"type":"npc_status","state":..,"why":..,"model":..,"spent":..,"budget":..}: the host's LLM for the NPCs - "ready",
+/// {"type":"agent_status","state":..,"why":..,"model":..,"spent":..,"budget":..}: the host's LLM for the agents - "ready",
 /// "busy" (requests a minute reached: lines wait), "budget" (the month's is spent), "error" (`why`); dollars spent this
 /// month and the budget.
-pub fn npc_status(state: &str, why: &str, model: &str, spent: f64, budget: f64) -> String {
+pub fn agent_status(state: &str, why: &str, model: &str, spent: f64, budget: f64) -> String {
     let cents = |x: f64| if x.is_finite() { (x * 10000.0).round() / 10000.0 } else { 0.0 };
-    serde_json::json!({"type": "npc_status", "state": state, "why": why, "model": model, "spent": cents(spent), "budget": cents(budget)})
+    serde_json::json!({"type": "agent_status", "state": state, "why": why, "model": model, "spent": cents(spent), "budget": cents(budget)})
         .to_string()
 }
 
@@ -443,18 +443,23 @@ fn range(v: Option<&Value>) -> Option<(f64, f64)> {
     }
 }
 
-// ---------------------------------------------------------------- NPCs that talk (docs/llm-npcs.md)
-// (engine/games/teardown.py parse_npc, parse_npc_line, parse_npc_fields - keep the same)
+// ---------------------------------------------------------------- Agents (docs/llm-agents.md)
+// (engine/games/teardown.py parse_agent, parse_agent_line, parse_agent_fields - keep the same)
 
 /// A string of at most `most` bytes.
 fn fits(v: Option<&Value>, most: usize) -> Option<&str> {
     v.and_then(Value::as_str).filter(|s| s.len() <= most)
 }
 
-/// An `npcs` item, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most MAX_FUNCTIONS
+/// An `agents` item, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most MAX_FUNCTIONS
 /// functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an object.
-fn parse_npc(o: &Value) -> Option<feed::NpcDef> {
-    let id = o.as_object()?.get("id")?.as_str().filter(|s| feed::npc_id_ok(s))?;
+fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
+    let id = o.as_object()?.get("id")?.as_str().filter(|s| feed::agent_id_ok(s))?;
+    let character = match o.get("character") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return None,
+    };
     let persona = match o.get("persona") {
         None | Some(Value::Null) => "",
         x => fits(x, feed::MAX_PERSONA_BYTES)?,
@@ -463,7 +468,7 @@ fn parse_npc(o: &Value) -> Option<feed::NpcDef> {
         None | Some(Value::Null) => &[],
         Some(x) => list(x).filter(|a| a.len() <= feed::MAX_FUNCTIONS)?,
     };
-    let mut functions: Vec<feed::NpcFunction> = Vec::new();
+    let mut functions: Vec<feed::AgentFunction> = Vec::new();
     for f in fs {
         let name = f.as_object()?.get("name")?.as_str().filter(|n| feed::function_name_ok(n))?;
         if functions.iter().any(|g| g.name == name) {
@@ -478,11 +483,12 @@ fn parse_npc(o: &Value) -> Option<feed::NpcDef> {
             Some(p @ Value::Object(_)) => p.clone(),
             Some(_) => return None,
         };
-        functions.push(feed::NpcFunction { name: name.into(), description: description.into(), parameters });
+        functions.push(feed::AgentFunction { name: name.into(), description: description.into(), parameters });
     }
-    Some(feed::NpcDef {
+    Some(feed::AgentDef {
         id: id.into(),
         version: o.get("version").and_then(whole).map_or(0, |v| v.max(0)),
+        character,
         persona: persona.into(),
         functions,
         max_words: o.get("max_words").and_then(whole).map_or(feed::DEFAULT_WORDS, |w| w.clamp(1, feed::MAX_WORDS)),
@@ -490,12 +496,12 @@ fn parse_npc(o: &Value) -> Option<feed::NpcDef> {
     })
 }
 
-/// A `to_npc` item, or None (left out): an id as to_translate's, a good npc id, a text of 1 to MAX_REQUEST_BYTES;
+/// A `to_agent` item, or None (left out): an id as to_translate's, a good agent id, a text of 1 to MAX_REQUEST_BYTES;
 /// `from`, `state` (at most MAX_STATE_BYTES, else ""), `heard_by` (the first 64, bad ones left out) optional.
-fn parse_npc_line(o: &Value) -> Option<feed::NpcLine> {
+fn parse_agent_line(o: &Value) -> Option<feed::AgentLine> {
     o.as_object()?;
     let id = o.get("id").and_then(whole).filter(|n| (1..=feed::MAX_REQUEST_ID).contains(n))?;
-    let npc = o.get("npc")?.as_str().filter(|s| feed::npc_id_ok(s))?;
+    let agent = o.get("agent")?.as_str().filter(|s| feed::agent_id_ok(s))?;
     let text = fits(o.get("text"), feed::MAX_REQUEST_BYTES).filter(|t| !t.is_empty())?;
     let from = o.get("from").filter(|f| f.is_object());
     let from_id = from.and_then(|f| f.get("id")).filter(|v| !v.is_null()).and_then(player_id);
@@ -505,9 +511,9 @@ fn parse_npc_line(o: &Value) -> Option<feed::NpcLine> {
             heard_by.push(p);
         }
     }
-    Some(feed::NpcLine {
+    Some(feed::AgentLine {
         id,
-        npc: npc.into(),
+        agent: agent.into(),
         text: text.into(),
         from_id,
         from_name: short_text(from.and_then(|f| f.get("name"))),
@@ -517,35 +523,35 @@ fn parse_npc_line(o: &Value) -> Option<feed::NpcLine> {
 }
 
 /// A list field of the feed of at most `most` items (absent, null or {}: none).
-fn npc_list<'a>(v: &'a Value, k: &str, most: usize) -> Result<&'a [Value], String> {
+fn agent_list<'a>(v: &'a Value, k: &str, most: usize) -> Result<&'a [Value], String> {
     match v.get(k) {
         None | Some(Value::Null) => Ok(&[]),
         Some(x) => list(x).filter(|a| a.len() <= most).ok_or(format!("\"{k}\" must be a list of at most {most}")),
     }
 }
 
-/// What the top feed says for NPCs (parse_npc_fields).
-type NpcFields = (Vec<feed::NpcDef>, Vec<feed::NpcLine>, Vec<(String, String)>, Vec<String>);
+/// What the top feed says for agents (parse_agent_fields).
+type AgentFields = (Vec<feed::AgentDef>, Vec<feed::AgentLine>, Vec<(String, String)>, Vec<String>);
 
-/// The top feed's npcs, to_npc, npc_results and npc_forget: each NPC and line id once (the first), each call once.
-fn parse_npc_fields(v: &Value) -> Result<NpcFields, String> {
-    let mut npcs: Vec<feed::NpcDef> = Vec::new();
-    for o in npc_list(v, "npcs", feed::MAX_NPCS)? {
-        if let Some(n) = parse_npc(o).filter(|n| !npcs.iter().any(|x| x.id == n.id)) {
-            npcs.push(n);
+/// The top feed's agents, to_agent, agent_results and agent_forget: each agent and line id once (the first), each call once.
+fn parse_agent_fields(v: &Value) -> Result<AgentFields, String> {
+    let mut agents: Vec<feed::AgentDef> = Vec::new();
+    for o in agent_list(v, "agents", feed::MAX_AGENTS)? {
+        if let Some(n) = parse_agent(o).filter(|n| !agents.iter().any(|x| x.id == n.id)) {
+            agents.push(n);
         }
     }
-    let mut lines: Vec<feed::NpcLine> = Vec::new();
-    for o in npc_list(v, "to_npc", 64)? {
-        if let Some(l) = parse_npc_line(o).filter(|l| !lines.iter().any(|x| x.id == l.id)) {
-            if lines.len() < feed::MAX_NPC_LINES {
+    let mut lines: Vec<feed::AgentLine> = Vec::new();
+    for o in agent_list(v, "to_agent", 64)? {
+        if let Some(l) = parse_agent_line(o).filter(|l| !lines.iter().any(|x| x.id == l.id)) {
+            if lines.len() < feed::MAX_AGENT_LINES {
                 lines.push(l);
             }
         }
     }
     let mut results: Vec<(String, String)> = Vec::new();
-    for o in npc_list(v, "npc_results", 64)? {
-        let call = o.get("call").and_then(Value::as_str).filter(|c| feed::npc_id_ok(c));
+    for o in agent_list(v, "agent_results", 64)? {
+        let call = o.get("call").and_then(Value::as_str).filter(|c| feed::agent_id_ok(c));
         if let (Some(c), Some(r)) = (call, fits(o.get("result"), feed::MAX_RESULT_BYTES)) {
             if !results.iter().any(|(x, _)| x == c) && results.len() < feed::MAX_RESULTS {
                 results.push((c.into(), r.into()));
@@ -553,14 +559,14 @@ fn parse_npc_fields(v: &Value) -> Result<NpcFields, String> {
         }
     }
     let mut forget: Vec<String> = Vec::new();
-    for o in npc_list(v, "npc_forget", 64)? {
-        if let Some(n) = o.as_str().filter(|n| feed::npc_id_ok(n) && !forget.iter().any(|f| f == n)) {
-            if forget.len() < feed::MAX_NPCS {
+    for o in agent_list(v, "agent_forget", 64)? {
+        if let Some(n) = o.as_str().filter(|n| feed::agent_id_ok(n) && !forget.iter().any(|f| f == n)) {
+            if forget.len() < feed::MAX_AGENTS {
                 forget.push(n.into());
             }
         }
     }
-    Ok((npcs, lines, results, forget))
+    Ok((agents, lines, results, forget))
 }
 
 /// A short text field (a name): control characters out, at most 64 characters.
@@ -896,7 +902,7 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         }
         Some(_) => return Err("\"to_translate\" must be a list of at most 64 lines".into()),
     };
-    let (npcs, to_npc, npc_results, npc_forget) = if inherit.is_none() { parse_npc_fields(v)? } else { Default::default() };
+    let (agents, to_agent, agent_results, agent_forget) = if inherit.is_none() { parse_agent_fields(v)? } else { Default::default() };
     Ok(Feed {
         seq: int("seq")?,
         vol: num(v, "volume", 1.0)?.clamp(0.0, 1.0),
@@ -922,10 +928,10 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         clashes,
         transmit_all,
         players: Vec::new(),
-        npcs,
-        to_npc,
-        npc_results,
-        npc_forget,
+        agents,
+        to_agent,
+        agent_results,
+        agent_forget,
         raw: String::new(),
     })
 }

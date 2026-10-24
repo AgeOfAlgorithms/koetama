@@ -1,4 +1,4 @@
-//! The host's LLM for game mods' NPCs (docs/llm-npcs.md), as the window keeps it in settings.json ("llm"): the games
+//! The host's LLM for game mods' agents (docs/llm-agents.md), as the window keeps it in settings.json ("llm"): the games
 //! it is on for (off unless the host turns it on for a game), the API, address, model and key (sealed: secret.rs), the
 //! month's budget and the model's price, requests a minute, and what was spent each month.
 use crate::settings::Settings;
@@ -6,7 +6,7 @@ use serde_json::{json, Map, Value};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LlmSetting {
-    /// the games (profile ids) whose NPCs may use it
+    /// the games (profile ids) whose agents may use it
     pub games: Vec<String>,
     pub api: kd_llm::Api,
     pub url: String,

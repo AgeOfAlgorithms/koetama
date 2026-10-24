@@ -1,11 +1,11 @@
-"""NPCs that talk, end to end on one PC (docs/llm-npcs.md): a real Koetama (`koetama --cli`) between a fake game (the
+"""Agents, end to end on one PC (docs/llm-agents.md): a real Koetama (`koetama --cli`) between a fake game (the
 socket connector, a profile that uses "llm") and a fake LLM (an OpenAI-style server on 127.0.0.1). The game defines
-an NPC with a function, sends lines to it, runs the function the NPC calls and answers with its result; the test
-checks the hello names "llm", the npc_status, each npc_reply (lines that came while the NPC was busy answered
+an agent with a function, sends lines to it, runs the function the agent calls and answers with its result; the test
+checks the hello names "llm", the agent_status, each agent_reply (lines that came while the agent was busy answered
 together), the function call and the follow-up, and what the LLM was sent.
 
-    python tools/npc_e2e.py              (builds koetama first)
-    python tools/npc_e2e.py --real       (instead of the fake: the LLM in KOETAMA_LLM_KEY, KOETAMA_LLM_MODEL,
+    python tools/agents_e2e.py              (builds koetama first)
+    python tools/agents_e2e.py --real       (instead of the fake: the LLM in KOETAMA_LLM_KEY, KOETAMA_LLM_MODEL,
                                           KOETAMA_LLM_API (openai|anthropic), KOETAMA_LLM_URL - prints the replies)
 
 Needs: Python 3, cargo. Exit 1 when something the game should get does not come.
@@ -59,9 +59,9 @@ def main():
         subprocess.run(['cargo', 'build', '-q', '-p', 'koetama'], cwd=APP, env=env, check=True)
     port = free_port()
     profiles = tempfile.mkdtemp()
-    json.dump({'format': 1, 'id': 'npc-e2e', 'game': 'NPC test', 'mod': 'Fake game', 'url': 'https://example.com',
-               'author': 'npc_e2e.py', 'uses': ['llm'], 'connector': {'type': 'socket', 'port': port}},
-              open(os.path.join(profiles, 'npc-e2e.json'), 'w'))
+    json.dump({'format': 1, 'id': 'agents-e2e', 'game': 'agent test', 'mod': 'Fake game', 'url': 'https://example.com',
+               'author': 'agents_e2e.py', 'uses': ['llm'], 'connector': {'type': 'socket', 'port': port}},
+              open(os.path.join(profiles, 'agents-e2e.json'), 'w'))
     env = dict(os.environ, KOETAMA_PROFILES_DIR=profiles)
     if REAL:
         args = ['--llm-model', os.environ['KOETAMA_LLM_MODEL'], '--llm-api', os.environ.get('KOETAMA_LLM_API', 'openai')]
@@ -72,7 +72,7 @@ def main():
         threading.Thread(target=llm.serve_forever, daemon=True).start()
         env['KOETAMA_LLM_KEY'] = 'sk-fake'
         args = ['--llm-model', 'fake-model', '--llm-url', f'http://127.0.0.1:{llm.server_address[1]}']
-    proc = subprocess.Popen([KOETAMA, '--cli', '--game', 'npc-e2e', '--no-mic'] + args, env=env,
+    proc = subprocess.Popen([KOETAMA, '--cli', '--game', 'agents-e2e', '--no-mic'] + args, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
     lines = []
     threading.Thread(target=lambda: [lines.append(l.rstrip()) for l in proc.stdout], daemon=True).start()
@@ -95,20 +95,20 @@ def main():
                               'parameters': {'type': 'object', 'properties': {'item': {'type': 'string'},
                                                                               'price': {'type': 'integer'}}}}]}
         who = lambda name: {'id': name.lower(), 'name': name}
-        pending = [{'id': 41, 'npc': 'pig_king', 'text': '10 meat for a football helmet?', 'from': who('Wendy'),
+        pending = [{'id': 41, 'agent': 'pig_king', 'text': '10 meat for a football helmet?', 'from': who('Wendy'),
                     'state': 'winter, day 31; Wendy holds 12 meat'}]
         results, answered, t_extra = [], set(), None
         deadline = time.time() + (90 if REAL else 30)
         while time.time() < deadline:
-            feed = {'type': 'feed', 'lang': 'en', 'npcs': [pig], 'to_npc': [p for p in pending if p['id'] not in answered],
-                    'npc_results': results}
+            feed = {'type': 'feed', 'lang': 'en', 'agents': [pig], 'to_agent': [p for p in pending if p['id'] not in answered],
+                    'agent_results': results}
             sock.sendall((json.dumps(feed) + '\n').encode())
             if t_extra is None and objects and any(o.get('type') == 'hello' for o in objects):
                 t_extra = time.time()
             if t_extra and time.time() - t_extra > 0.3 and len(pending) == 1:
                 # (two more lines while the first is being answered: they wait, then go as one turn)
-                pending += [{'id': 42, 'npc': 'pig_king', 'text': 'I want a helmet too', 'from': who('Wes')},
-                            {'id': 43, 'npc': 'pig_king', 'text': 'and me', 'from': who('Wilson')}]
+                pending += [{'id': 42, 'agent': 'pig_king', 'text': 'I want a helmet too', 'from': who('Wes')},
+                            {'id': 43, 'agent': 'pig_king', 'text': 'and me', 'from': who('Wilson')}]
             try:
                 buf += sock.recv(65536)
             except (socket.timeout, BlockingIOError):
@@ -120,12 +120,12 @@ def main():
                 except ValueError:
                     continue
                 objects.append(o)
-                if o.get('type') == 'npc_reply':
-                    print('  npc_reply', json.dumps(o, ensure_ascii=False), flush=True)
+                if o.get('type') == 'agent_reply':
+                    print('  agent_reply', json.dumps(o, ensure_ascii=False), flush=True)
                     answered.update(o['ids'])
                     for c in o.get('calls', []):
                         results.append({'call': c['call'], 'result': 'ok: offered 1 %s for %s meat' % (c['args'].get('item'), c['args'].get('price'))})
-            replies = [o for o in objects if o.get('type') == 'npc_reply']
+            replies = [o for o in objects if o.get('type') == 'agent_reply']
             if len(replies) >= 3 and {41, 42, 43} <= answered:
                 break
             time.sleep(0.1)
@@ -133,13 +133,13 @@ def main():
         proc.terminate()
         proc.wait(10)
     hello = next((o for o in objects if o.get('type') == 'hello'), None)
-    status = [o for o in objects if o.get('type') == 'npc_status']
-    replies = [o for o in objects if o.get('type') == 'npc_reply']
+    status = [o for o in objects if o.get('type') == 'agent_status']
+    replies = [o for o in objects if o.get('type') == 'agent_reply']
     problems = []
     if not hello or 'llm' not in hello.get('features', []):
         problems.append('the hello does not name "llm": %s' % hello)
     if not status:
-        problems.append('no npc_status')
+        problems.append('no agent_status')
     if not {41, 42, 43} <= answered:
         problems.append('not every line was answered: %s' % sorted(answered))
     if not REAL:
@@ -157,13 +157,13 @@ def main():
         if sent and {k.lower(): v for k, v in FakeLlm.seen[0][0].items()}.get('authorization') != 'Bearer sk-fake':
             problems.append('the key did not go as a bearer token')
     print('hello:', hello)
-    print('npc_status:', status[-1] if status else None)
+    print('agent_status:', status[-1] if status else None)
     for l in lines[-8:]:
         print('  koetama |', l)
     if problems:
         print('\nPROBLEMS:\n' + '\n'.join(problems))
         sys.exit(1)
-    print('\nNPCs talk: every line answered')
+    print('\nagents talk: every line answered')
 
 
 if __name__ == '__main__':

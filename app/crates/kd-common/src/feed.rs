@@ -386,50 +386,53 @@ pub struct Feed {
     /// a hub's other players: a feed each, its me_id the player (PROTOCOL.md "Hub")
     #[serde(default)]
     pub players: Vec<Feed>,
-    /// NPCs that talk through an LLM (docs/llm-npcs.md; the top feed only): their definitions as sent (a feed may
+    /// Agents through an LLM (docs/llm-agents.md; the top feed only): their definitions as sent (a feed may
     /// send only the changed ones), the lines for them, the results of their function calls, those to forget
     #[serde(default)]
-    pub npcs: Vec<NpcDef>,
+    pub agents: Vec<AgentDef>,
     #[serde(default)]
-    pub to_npc: Vec<NpcLine>,
+    pub to_agent: Vec<AgentLine>,
     /// (call id, result)
     #[serde(default)]
-    pub npc_results: Vec<(String, String)>,
+    pub agent_results: Vec<(String, String)>,
     #[serde(default)]
-    pub npc_forget: Vec<String>,
+    pub agent_forget: Vec<String>,
     /// a hub's player's feed as JSON, as the hub sends it to that player's Koetama (the host's room, region and
     /// session put in where it has none of its own, "me" its id); "" for any other feed
     #[serde(skip)]
     pub raw: String,
 }
 
-/// An NPC as the game defines it (`npcs`): who it is (the persona: the system prompt), what it may do (functions:
+/// An agent as the game defines it (`agents`): who it is (the persona: the system prompt), what it may do (functions:
 /// JSON Schema parameters), how long its replies may be, and its voice (for the voices to come).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct NpcDef {
+pub struct AgentDef {
     pub id: String,
     /// raised by the game when the persona or the functions change
     pub version: i64,
+    /// a character in the game's world (the default): Koetama's note before the persona says how lines come and that
+    /// a reply is what it says aloud; false (a director, a writer, a command parser): the persona alone
+    pub character: bool,
     pub persona: String,
-    pub functions: Vec<NpcFunction>,
+    pub functions: Vec<AgentFunction>,
     pub max_words: i64,
     pub voice: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct NpcFunction {
+pub struct AgentFunction {
     pub name: String,
     pub description: String,
     /// a JSON Schema object
     pub parameters: serde_json::Value,
 }
 
-/// A line for an NPC (`to_npc`): what a player said to it (or an event, without `from`), what the game says is going
+/// A line for an agent (`to_agent`): what a player said to it (or an event, without `from`), what the game says is going
 /// on, and who heard it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct NpcLine {
+pub struct AgentLine {
     pub id: i64,
-    pub npc: String,
+    pub agent: String,
     pub text: String,
     pub from_id: Option<PlayerId>,
     pub from_name: String,
@@ -437,22 +440,22 @@ pub struct NpcLine {
     pub heard_by: Vec<PlayerId>,
 }
 
-/// the most NPCs a feed defines, and their limits (docs/llm-npcs.md; engine/games/teardown.py - keep the same)
-pub const MAX_NPCS: usize = 32;
+/// the most agents a feed defines, and their limits (docs/llm-agents.md; engine/games/teardown.py - keep the same)
+pub const MAX_AGENTS: usize = 32;
 pub const MAX_PERSONA_BYTES: usize = 8192;
 pub const MAX_FUNCTIONS: usize = 16;
 pub const MAX_FUNCTION_BYTES: usize = 1024;
-/// the most lines for NPCs one feed keeps, the game state's most bytes, the most function results and their size
-pub const MAX_NPC_LINES: usize = 8;
+/// the most lines for agents one feed keeps, the game state's most bytes, the most function results and their size
+pub const MAX_AGENT_LINES: usize = 8;
 pub const MAX_STATE_BYTES: usize = 2048;
 pub const MAX_RESULTS: usize = 16;
 pub const MAX_RESULT_BYTES: usize = 1024;
-/// an NPC's longest reply in words: when not given, and at most
+/// an agent's longest reply in words: when not given, and at most
 pub const DEFAULT_WORDS: i64 = 80;
 pub const MAX_WORDS: i64 = 1000;
 
-/// An NPC's id (and a function call's): 1 to 64 of A-Z a-z 0-9 _ . : -
-pub fn npc_id_ok(s: &str) -> bool {
+/// An agent's id (and a function call's): 1 to 64 of A-Z a-z 0-9 _ . : -
+pub fn agent_id_ok(s: &str) -> bool {
     (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
 }
 

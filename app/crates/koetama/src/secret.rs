@@ -1,4 +1,4 @@
-//! A secret kept in the settings (the NPCs' LLM key): on Windows sealed with the user's own Windows protection
+//! A secret kept in the settings (the agents' LLM key): on Windows sealed with the user's own Windows protection
 //! (DPAPI: only this Windows account on this PC can open it - "dpapi:<hex>"); elsewhere only hex ("plain:<hex>": the
 //! settings file is the user's own).
 

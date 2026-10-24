@@ -1,8 +1,8 @@
-//! The NPC service against a fake LLM (both API styles, on this PC): lines that come while an NPC's request runs wait
+//! The agent service against a fake LLM (both API styles, on this PC): lines that come while an agent's request runs wait
 //! and go as one turn, function calls go to the game and their results back to the LLM, the host's budget and
-//! requests a minute, a failed request, a new session, an NPC nobody defined.
-use kd_common::feed::{NpcDef, NpcFunction, NpcLine, PlayerId};
-use kd_llm::{Api, Config, Event, Npcs};
+//! requests a minute, a failed request, a new session, an agent nobody defined.
+use kd_common::feed::{AgentDef, AgentFunction, AgentLine, PlayerId};
+use kd_llm::{Api, Config, Event, Agents};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -69,14 +69,14 @@ fn openai_text(text: &str) -> Value {
 }
 
 struct Rig {
-    npcs: Npcs,
+    agents: Agents,
     events: Arc<(Mutex<Vec<Event>>, Condvar)>,
 }
 
 fn rig(cfg: Config) -> Rig {
     let events: Arc<(Mutex<Vec<Event>>, Condvar)> = Arc::default();
     let ev = events.clone();
-    let npcs = Npcs::start(
+    let agents = Agents::start(
         cfg,
         Arc::new(move |e| {
             ev.0.lock().unwrap().push(e);
@@ -84,19 +84,19 @@ fn rig(cfg: Config) -> Rig {
         }),
         kd_common::null_log(),
     );
-    Rig { npcs, events }
+    Rig { agents, events }
 }
 
 fn config(api: Api, url: &str) -> Config {
     Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), budget: 5.0, price_in: 1.0, price_out: 5.0, per_minute: 60, ..Default::default() }
 }
 
-fn pig(functions: Vec<NpcFunction>) -> NpcDef {
-    NpcDef { id: "pig".into(), version: 1, persona: "You are the Pig King.".into(), functions, max_words: 40, voice: String::new() }
+fn pig(functions: Vec<AgentFunction>) -> AgentDef {
+    AgentDef { id: "pig".into(), version: 1, character: true, persona: "You are the Pig King.".into(), functions, max_words: 40, voice: String::new() }
 }
 
-fn line(id: i64, npc: &str, who: &str, text: &str) -> NpcLine {
-    NpcLine { id, npc: npc.into(), text: text.into(), from_id: Some(PlayerId::string(who)), from_name: who.into(), ..Default::default() }
+fn line(id: i64, agent: &str, who: &str, text: &str) -> AgentLine {
+    AgentLine { id, agent: agent.into(), text: text.into(), from_id: Some(PlayerId::string(who)), from_name: who.into(), ..Default::default() }
 }
 
 impl Rig {
@@ -144,10 +144,10 @@ fn user_text(body: &Value) -> String {
 fn lines_that_come_while_it_answers_go_as_one_turn() {
     let f = fake(Box::new(|n, _| (200, openai_text(if n == 0 { "Hello, Wendy." } else { "Hello, you two." }), Duration::from_millis(if n == 0 { 500 } else { 0 }))));
     let r = rig(config(Api::OpenAi, &f.url));
-    r.npcs.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello pig")], &[], &[]);
+    r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello pig")], &[], &[]);
     std::thread::sleep(Duration::from_millis(150));
     // (the game sends its lines again in every feed until they are answered: each is asked once)
-    r.npcs.feed(1, &[], &[line(1, "pig", "Wendy", "hello pig"), line(2, "pig", "Wes", "hi"), line(3, "pig", "Wilson", "hey")], &[], &[]);
+    r.agents.feed(1, &[], &[line(1, "pig", "Wendy", "hello pig"), line(2, "pig", "Wes", "hi"), line(3, "pig", "Wilson", "hey")], &[], &[]);
     let got = r.wait_replies(2);
     assert_eq!(got[0], (vec![1], "Hello, Wendy.".into(), 0, String::new()));
     assert_eq!(got[1], (vec![2, 3], "Hello, you two.".into(), 0, String::new()), "the waiting lines answered together");
@@ -160,7 +160,7 @@ fn lines_that_come_while_it_answers_go_as_one_turn() {
     drop(seen);
     let spent = r.events.0.lock().unwrap().iter().rev().find_map(|e| if let Event::Spent(s) = e { Some(*s) } else { None }).unwrap();
     assert!((spent - 2.0 * (100.0 * 1.0 + 20.0 * 5.0) / 1e6).abs() < 1e-12, "spent {spent}");
-    r.npcs.stop();
+    r.agents.stop();
 }
 
 #[test]
@@ -175,8 +175,8 @@ fn function_calls_go_to_the_game_and_their_results_back() {
         (200, v, Duration::ZERO)
     }));
     let r = rig(config(Api::OpenAi, &f.url));
-    let trade = NpcFunction { name: "offer_trade".into(), description: "Offer a trade".into(), parameters: json!({"type": "object"}) };
-    r.npcs.feed(1, &[pig(vec![trade])], &[line(41, "pig", "Wendy", "10 meat for a helmet?")], &[], &[]);
+    let trade = AgentFunction { name: "offer_trade".into(), description: "Offer a trade".into(), parameters: json!({"type": "object"}) };
+    r.agents.feed(1, &[pig(vec![trade])], &[line(41, "pig", "Wendy", "10 meat for a helmet?")], &[], &[]);
     let got = r.wait_replies(1);
     assert_eq!(got[0], (vec![41], "Twelve meat.".into(), 1, String::new()));
     match &r.events.0.lock().unwrap().iter().find(|e| matches!(e, Event::Reply { .. })).unwrap() {
@@ -184,10 +184,10 @@ fn function_calls_go_to_the_game_and_their_results_back() {
         _ => unreachable!(),
     }
     // (a line while the call waits for the game: it waits too)
-    r.npcs.feed(1, &[], &[line(42, "pig", "Wes", "me too")], &[], &[]);
+    r.agents.feed(1, &[], &[line(42, "pig", "Wes", "me too")], &[], &[]);
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(f.seen.lock().unwrap().len(), 1, "nothing asked while a call waits for its result");
-    r.npcs.feed(1, &[], &[], &[("call_1".into(), "ok: offered 1 football helmet for 12 meat".into())], &[]);
+    r.agents.feed(1, &[], &[], &[("call_1".into(), "ok: offered 1 football helmet for 12 meat".into())], &[]);
     let got = r.wait_replies(3);
     assert_eq!(got[1], (vec![41], "Pleasure doing business.".into(), 0, String::new()), "the follow-up answers the same line");
     assert_eq!(got[2].0, vec![42], "then the line that waited");
@@ -196,7 +196,7 @@ fn function_calls_go_to_the_game_and_their_results_back() {
     assert_eq!(m[3], json!({"role": "tool", "tool_call_id": "call_1", "content": "ok: offered 1 football helmet for 12 meat"}));
     assert_eq!(seen[1].1["tools"][0]["function"]["name"], "offer_trade");
     drop(seen);
-    r.npcs.stop();
+    r.agents.stop();
 }
 
 #[test]
@@ -204,28 +204,28 @@ fn the_budget_and_requests_a_minute() {
     let f = fake(Box::new(|_, _| (200, openai_text("ok"), Duration::ZERO)));
     // (one reply costs 100 * 1 + 20 * 5 = 200 millionths of a dollar: a budget of 150 millionths is spent by one)
     let r = rig(Config { budget: 0.000150, ..config(Api::OpenAi, &f.url) });
-    r.npcs.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a")], &[], &[]);
+    r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a")], &[], &[]);
     r.wait_replies(1);
-    r.npcs.feed(1, &[], &[line(2, "pig", "Wendy", "b")], &[], &[]);
+    r.agents.feed(1, &[], &[line(2, "pig", "Wendy", "b")], &[], &[]);
     let got = r.wait_replies(2);
     assert_eq!(got[1], (vec![2], String::new(), 0, "budget".into()));
     r.wait("the budget status", |ev| ev.iter().any(|e| matches!(e, Event::Status { state: "budget", .. })));
     assert_eq!(f.seen.lock().unwrap().len(), 1);
-    r.npcs.stop();
-    // (one request a minute: a second NPC's line waits - "busy")
+    r.agents.stop();
+    // (one request a minute: a second agent's line waits - "busy")
     let r = rig(Config { per_minute: 1, ..config(Api::OpenAi, &f.url) });
     let mut cow = pig(vec![]);
     cow.id = "cow".into();
-    r.npcs.feed(2, &[pig(vec![]), cow], &[line(1, "pig", "Wendy", "a"), line(2, "cow", "Wendy", "b")], &[], &[]);
+    r.agents.feed(2, &[pig(vec![]), cow], &[line(1, "pig", "Wendy", "a"), line(2, "cow", "Wendy", "b")], &[], &[]);
     r.wait_replies(1);
     std::thread::sleep(Duration::from_millis(400));
     assert_eq!(r.replies().len(), 1, "the second waits for the minute");
     assert_eq!(r.last_status(), Some("busy"));
-    r.npcs.stop();
+    r.agents.stop();
 }
 
 #[test]
-fn a_failed_request_a_new_session_and_an_unknown_npc() {
+fn a_failed_request_a_new_session_and_an_unknown_agent() {
     let f = fake(Box::new(|n, _| {
         if n == 0 {
             (401, json!({"error": {"message": "Incorrect API key provided", "type": "invalid_request_error"}}), Duration::ZERO)
@@ -234,20 +234,20 @@ fn a_failed_request_a_new_session_and_an_unknown_npc() {
         }
     }));
     let r = rig(config(Api::OpenAi, &f.url));
-    r.npcs.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a"), line(2, "nobody", "Wendy", "b")], &[], &[]);
+    r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a"), line(2, "nobody", "Wendy", "b")], &[], &[]);
     let got = r.wait_replies(2);
-    assert!(got.iter().any(|g| g.0 == vec![2] && g.3.contains("no NPC \"nobody\"")));
+    assert!(got.iter().any(|g| g.0 == vec![2] && g.3.contains("no agent \"nobody\"")));
     assert!(got.iter().any(|g| g.0 == vec![1] && g.3.contains("401") && g.3.contains("Incorrect API key")), "{got:?}");
     r.wait("the error status", |ev| ev.iter().any(|e| matches!(e, Event::Status { state: "error", .. })));
-    r.npcs.feed(1, &[], &[line(3, "pig", "Wendy", "c")], &[], &[]);
+    r.agents.feed(1, &[], &[line(3, "pig", "Wendy", "c")], &[], &[]);
     r.wait_replies(3);
     assert_eq!(f.seen.lock().unwrap()[1].1["messages"].as_array().unwrap().len(), 2, "the failed turn was left out");
-    // (a new session: the NPC starts over - and must be sent again)
-    r.npcs.feed(2, &[pig(vec![])], &[line(1, "pig", "Wendy", "again")], &[], &[]);
+    // (a new session: the agent starts over - and must be sent again)
+    r.agents.feed(2, &[pig(vec![])], &[line(1, "pig", "Wendy", "again")], &[], &[]);
     r.wait_replies(4);
-    assert_eq!(f.seen.lock().unwrap()[2].1["messages"].as_array().unwrap().len(), 2, "a new session's NPC remembers nothing");
+    assert_eq!(f.seen.lock().unwrap()[2].1["messages"].as_array().unwrap().len(), 2, "a new session's agent remembers nothing");
     assert_eq!(r.last_status(), Some("ready"));
-    r.npcs.stop();
+    r.agents.stop();
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn anthropic_style() {
         (200, json!({"content": [{"type": "text", "text": "Oink."}], "usage": {"input_tokens": 50, "output_tokens": 5}}), Duration::ZERO)
     }));
     let r = rig(config(Api::Anthropic, &f.url));
-    r.npcs.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello")], &[], &[]);
+    r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello")], &[], &[]);
     let got = r.wait_replies(1);
     assert_eq!(got[0].1, "Oink.");
     let seen = f.seen.lock().unwrap();
@@ -264,7 +264,7 @@ fn anthropic_style() {
     assert!(head.starts_with("post /v1/messages") && head.contains("x-api-key: sk-test") && head.contains("anthropic-version"));
     assert_eq!(seen[0].1["messages"][0], json!({"role": "user", "content": "Wendy: hello"}));
     drop(seen);
-    r.npcs.stop();
+    r.agents.stop();
 }
 
 #[test]
@@ -278,8 +278,8 @@ fn a_reasoning_model_is_asked_again_without_reasoning() {
         }
     }));
     let r = rig(config(Api::OpenAi, &f.url));
-    r.npcs.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello")], &[], &[]);
+    r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello")], &[], &[]);
     assert_eq!(r.wait_replies(1)[0], (vec![1], "Oink.".into(), 0, String::new()));
     assert_eq!(f.seen.lock().unwrap().len(), 2, "asked once more, with reasoning off");
-    r.npcs.stop();
+    r.agents.stop();
 }

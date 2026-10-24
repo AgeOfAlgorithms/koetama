@@ -46,7 +46,7 @@ struct Args {
     /// play into this wav file (48 kHz stereo) instead of a sound device: what this player hears, kept (tests)
     #[arg(long = "out-wav", value_name = "WAV")]
     out_wav: Option<String>,
-    /// the NPCs' LLM (docs/llm-npcs.md), for a game whose profile uses "llm": its model turns it on. The key comes from
+    /// the agents' LLM (docs/llm-agents.md), for a game whose profile uses "llm": its model turns it on. The key comes from
     /// the environment (KOETAMA_LLM_KEY), never the command line
     #[arg(long = "llm-model", value_name = "MODEL")]
     llm_model: Option<String>,
@@ -56,7 +56,7 @@ struct Args {
     /// the LLM's address (default: the API's own)
     #[arg(long = "llm-url", value_name = "URL")]
     llm_url: Option<String>,
-    /// the NPCs' budget for this run, in dollars (spent from 0)
+    /// the agents' budget for this run, in dollars (spent from 0)
     #[arg(long = "llm-budget", default_value_t = 1.0)]
     llm_budget: f64,
     /// the model's price, dollars a million tokens in and out (the budget counts with it)
@@ -600,7 +600,7 @@ pub fn main(argv: Vec<String>) -> i32 {
     0
 }
 
-/// The NPCs' LLM from --llm-* and KOETAMA_LLM_KEY (None: no --llm-model, off).
+/// The agents' LLM from --llm-* and KOETAMA_LLM_KEY (None: no --llm-model, off).
 fn llm_config(args: &Args) -> Result<Option<kd_llm::Config>, String> {
     let Some(model) = args.llm_model.clone().filter(|m| !m.trim().is_empty()) else { return Ok(None) };
     let api = kd_llm::Api::from_name(&args.llm_api).ok_or("--llm-api: openai or anthropic")?;

@@ -312,7 +312,7 @@ pub struct Profile {
     /// the mod runs only on the host's PC: the other players join with a code ("uses": "hosted"; PROTOCOL.md "Hub") -
     /// the window offers "Join a hosted game" only when a profile says so
     pub hosted: bool,
-    /// the mod's NPCs talk through the host's LLM ("uses": "llm"; docs/llm-npcs.md) - only once the host turns it on
+    /// the mod's agents talk through the host's LLM ("uses": "llm"; docs/llm-agents.md) - only once the host turns it on
     /// for this game in Koetama (GameKind::with_llm)
     pub llm: bool,
     pub test_voices: Vec<TestVoice>,

@@ -1,6 +1,6 @@
 [package]
 name = "kd-llm"
-description = "Koetama: NPCs that talk - the host's LLM (OpenAI-compatible or Anthropic) for a game mod's NPCs (docs/llm-npcs.md)"
+description = "Koetama: Agents - the host's LLM (OpenAI-compatible or Anthropic) for a game mod's agents (docs/llm-agents.md)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
