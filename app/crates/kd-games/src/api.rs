@@ -418,6 +418,126 @@ fn range(v: Option<&Value>) -> Option<(f64, f64)> {
     }
 }
 
+// ---------------------------------------------------------------- NPCs that talk (docs/llm-npcs.md)
+// (engine/games/teardown.py parse_npc, parse_npc_line, parse_npc_fields - keep the same)
+
+/// A string of at most `most` bytes.
+fn fits(v: Option<&Value>, most: usize) -> Option<&str> {
+    v.and_then(Value::as_str).filter(|s| s.len() <= most)
+}
+
+/// An `npcs` item, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most MAX_FUNCTIONS
+/// functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an object.
+fn parse_npc(o: &Value) -> Option<feed::NpcDef> {
+    let id = o.as_object()?.get("id")?.as_str().filter(|s| feed::npc_id_ok(s))?;
+    let persona = match o.get("persona") {
+        None | Some(Value::Null) => "",
+        x => fits(x, feed::MAX_PERSONA_BYTES)?,
+    };
+    let fs: &[Value] = match o.get("functions") {
+        None | Some(Value::Null) => &[],
+        Some(x) => list(x).filter(|a| a.len() <= feed::MAX_FUNCTIONS)?,
+    };
+    let mut functions: Vec<feed::NpcFunction> = Vec::new();
+    for f in fs {
+        let name = f.as_object()?.get("name")?.as_str().filter(|n| feed::function_name_ok(n))?;
+        if functions.iter().any(|g| g.name == name) {
+            return None;
+        }
+        let description = match f.get("description") {
+            None | Some(Value::Null) => "",
+            x => fits(x, feed::MAX_FUNCTION_BYTES)?,
+        };
+        let parameters = match f.get("parameters") {
+            None | Some(Value::Null) => serde_json::json!({"type": "object", "properties": {}}),
+            Some(p @ Value::Object(_)) => p.clone(),
+            Some(_) => return None,
+        };
+        functions.push(feed::NpcFunction { name: name.into(), description: description.into(), parameters });
+    }
+    Some(feed::NpcDef {
+        id: id.into(),
+        version: o.get("version").and_then(whole).map_or(0, |v| v.max(0)),
+        persona: persona.into(),
+        functions,
+        max_words: o.get("max_words").and_then(whole).map_or(feed::DEFAULT_WORDS, |w| w.clamp(1, feed::MAX_WORDS)),
+        voice: short_text(o.get("voice")),
+    })
+}
+
+/// A `to_npc` item, or None (left out): an id as to_translate's, a good npc id, a text of 1 to MAX_REQUEST_BYTES;
+/// `from`, `state` (at most MAX_STATE_BYTES, else ""), `heard_by` (the first 64, bad ones left out) optional.
+fn parse_npc_line(o: &Value) -> Option<feed::NpcLine> {
+    o.as_object()?;
+    let id = o.get("id").and_then(whole).filter(|n| (1..=feed::MAX_REQUEST_ID).contains(n))?;
+    let npc = o.get("npc")?.as_str().filter(|s| feed::npc_id_ok(s))?;
+    let text = fits(o.get("text"), feed::MAX_REQUEST_BYTES).filter(|t| !t.is_empty())?;
+    let from = o.get("from").filter(|f| f.is_object());
+    let from_id = from.and_then(|f| f.get("id")).filter(|v| !v.is_null()).and_then(player_id);
+    let mut heard_by: Vec<PlayerId> = Vec::new();
+    for h in o.get("heard_by").and_then(Value::as_array).map_or(&[][..], |a| &a[..a.len().min(64)]) {
+        if let Some(p) = player_id(h).filter(|p| !heard_by.contains(p)) {
+            heard_by.push(p);
+        }
+    }
+    Some(feed::NpcLine {
+        id,
+        npc: npc.into(),
+        text: text.into(),
+        from_id,
+        from_name: short_text(from.and_then(|f| f.get("name"))),
+        state: fits(o.get("state"), feed::MAX_STATE_BYTES).unwrap_or("").into(),
+        heard_by,
+    })
+}
+
+/// A list field of the feed of at most `most` items (absent, null or {}: none).
+fn npc_list<'a>(v: &'a Value, k: &str, most: usize) -> Result<&'a [Value], String> {
+    match v.get(k) {
+        None | Some(Value::Null) => Ok(&[]),
+        Some(x) => list(x).filter(|a| a.len() <= most).ok_or(format!("\"{k}\" must be a list of at most {most}")),
+    }
+}
+
+/// What the top feed says for NPCs (parse_npc_fields).
+type NpcFields = (Vec<feed::NpcDef>, Vec<feed::NpcLine>, Vec<(String, String)>, Vec<String>);
+
+/// The top feed's npcs, to_npc, npc_results and npc_forget: each NPC and line id once (the first), each call once.
+fn parse_npc_fields(v: &Value) -> Result<NpcFields, String> {
+    let mut npcs: Vec<feed::NpcDef> = Vec::new();
+    for o in npc_list(v, "npcs", feed::MAX_NPCS)? {
+        if let Some(n) = parse_npc(o).filter(|n| !npcs.iter().any(|x| x.id == n.id)) {
+            npcs.push(n);
+        }
+    }
+    let mut lines: Vec<feed::NpcLine> = Vec::new();
+    for o in npc_list(v, "to_npc", 64)? {
+        if let Some(l) = parse_npc_line(o).filter(|l| !lines.iter().any(|x| x.id == l.id)) {
+            if lines.len() < feed::MAX_NPC_LINES {
+                lines.push(l);
+            }
+        }
+    }
+    let mut results: Vec<(String, String)> = Vec::new();
+    for o in npc_list(v, "npc_results", 64)? {
+        let call = o.get("call").and_then(Value::as_str).filter(|c| feed::npc_id_ok(c));
+        if let (Some(c), Some(r)) = (call, fits(o.get("result"), feed::MAX_RESULT_BYTES)) {
+            if !results.iter().any(|(x, _)| x == c) && results.len() < feed::MAX_RESULTS {
+                results.push((c.into(), r.into()));
+            }
+        }
+    }
+    let mut forget: Vec<String> = Vec::new();
+    for o in npc_list(v, "npc_forget", 64)? {
+        if let Some(n) = o.as_str().filter(|n| feed::npc_id_ok(n) && !forget.iter().any(|f| f == n)) {
+            if forget.len() < feed::MAX_NPCS {
+                forget.push(n.into());
+            }
+        }
+    }
+    Ok((npcs, lines, results, forget))
+}
+
 /// A short text field (a name): control characters out, at most 64 characters.
 fn short_text(v: Option<&Value>) -> String {
     v.and_then(Value::as_str).unwrap_or("").chars().filter(|c| !c.is_control()).take(64).collect()
@@ -751,6 +871,7 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         }
         Some(_) => return Err("\"to_translate\" must be a list of at most 64 lines".into()),
     };
+    let (npcs, to_npc, npc_results, npc_forget) = if inherit.is_none() { parse_npc_fields(v)? } else { Default::default() };
     Ok(Feed {
         seq: int("seq")?,
         vol: num(v, "volume", 1.0)?.clamp(0.0, 1.0),
@@ -776,6 +897,10 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         clashes,
         transmit_all,
         players: Vec::new(),
+        npcs,
+        to_npc,
+        npc_results,
+        npc_forget,
         raw: String::new(),
     })
 }

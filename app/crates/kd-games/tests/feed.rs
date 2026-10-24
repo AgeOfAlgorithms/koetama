@@ -92,6 +92,21 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
         .map(|r| (r[0].as_i64().unwrap(), r[1].as_str().unwrap().to_string()))
         .collect();
     assert_eq!(f.to_translate, requests, "{text}");
+    // (NPCs that talk: the definitions, lines, results and forgets as Python made them)
+    assert_eq!(serde_json::to_value(&f.npcs).unwrap(), want["npcs"], "{text}: npcs");
+    let p = |p: &PlayerId| serde_json::json!([p.text, p.number]);
+    let lines: Vec<Value> = f
+        .to_npc
+        .iter()
+        .map(|l| {
+            serde_json::json!({"id": l.id, "npc": l.npc, "text": l.text, "from_id": l.from_id.as_ref().map(p),
+                "from_name": l.from_name, "state": l.state, "heard_by": l.heard_by.iter().map(p).collect::<Vec<_>>()})
+        })
+        .collect();
+    assert_eq!(Value::Array(lines), want["to_npc"], "{text}: to_npc");
+    let results: Vec<Value> = f.npc_results.iter().map(|(c, r)| serde_json::json!([c, r])).collect();
+    assert_eq!(Value::Array(results), want["npc_results"], "{text}: npc_results");
+    assert_eq!(serde_json::to_value(&f.npc_forget).unwrap(), want["npc_forget"], "{text}: npc_forget");
     let sp = want["speakers"].as_object().unwrap();
     assert_eq!(f.speakers.len(), sp.len(), "{text}");
     for (k, v) in sp {
@@ -139,7 +154,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 81);
+    assert_eq!(cases.len(), 86);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
