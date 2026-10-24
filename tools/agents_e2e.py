@@ -89,7 +89,7 @@ def main():
                 time.sleep(0.2)
         sock.settimeout(0.05)
         buf = b''
-        pig = {'id': 'pig_king', 'version': 1, 'max_words': 30,
+        pig = {'id': 'pig_king', 'version': 1, 'max_words': 30, 'stream': REAL,
                'persona': 'You are the Pig King of a Don\'t Starve world. You trade gold for meat, greedily.',
                'functions': [{'name': 'offer_trade', 'description': 'Offer the player an item for meat',
                               'parameters': {'type': 'object', 'properties': {'item': {'type': 'string'},
@@ -97,7 +97,7 @@ def main():
         who = lambda name: {'id': name.lower(), 'name': name}
         pending = [{'id': 41, 'agent': 'pig_king', 'text': '10 meat for a football helmet?', 'from': who('Wendy'),
                     'state': 'winter, day 31; Wendy holds 12 meat'}]
-        results, answered, t_extra = [], set(), None
+        results, answered, t_extra, partials = [], set(), None, []
         deadline = time.time() + (90 if REAL else 30)
         while time.time() < deadline:
             feed = {'type': 'feed', 'lang': 'en', 'agents': [pig], 'to_agent': [p for p in pending if p['id'] not in answered],
@@ -120,12 +120,15 @@ def main():
                 except ValueError:
                     continue
                 objects.append(o)
-                if o.get('type') == 'agent_reply':
+                if o.get('type') == 'agent_reply' and o.get('final') is False:
+                    partials.append(o)                                   # (a streaming agent's words so far)
+                    print('    ...', o['text'], flush=True)
+                elif o.get('type') == 'agent_reply':
                     print('  agent_reply', json.dumps(o, ensure_ascii=False), flush=True)
                     answered.update(o['ids'])
                     for c in o.get('calls', []):
                         results.append({'call': c['call'], 'result': 'ok: offered 1 %s for %s meat' % (c['args'].get('item'), c['args'].get('price'))})
-            replies = [o for o in objects if o.get('type') == 'agent_reply']
+            replies = [o for o in objects if o.get('type') == 'agent_reply' and o.get('final') is not False]
             if len(replies) >= 3 and {41, 42, 43} <= answered:
                 break
             time.sleep(0.1)
@@ -134,8 +137,10 @@ def main():
         proc.wait(10)
     hello = next((o for o in objects if o.get('type') == 'hello'), None)
     status = [o for o in objects if o.get('type') == 'agent_status']
-    replies = [o for o in objects if o.get('type') == 'agent_reply']
+    replies = [o for o in objects if o.get('type') == 'agent_reply' and o.get('final') is not False]
     problems = []
+    if REAL:
+        print('streamed: %d partial replies before the finished ones' % len([o for o in objects if o.get('final') is False]))
     if not hello or 'llm' not in hello.get('features', []):
         problems.append('the hello does not name "llm": %s' % hello)
     if not status:

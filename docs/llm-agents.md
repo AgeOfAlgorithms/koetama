@@ -138,7 +138,7 @@ functions of `npc` if given.
 |---|---|---|
 | 1. Text NPCs (built 2026-10-24) | the setting and key store, the two API styles (no streaming), `agents` / `to_agent` / `agent_reply` / `agent_status`, history, limits and spend, the fake LLM server and tests, PROTOCOL.md, PRIVACY.md | 5-10 |
 | 2. Function calls (built 2026-10-24) | `functions`, `calls`, `agent_results`, the follow-up reply; tests with a fake that calls | 2-4 |
-| 3. Streaming | `final: false` replies; both APIs' streams | 1-3 |
+| 3. Streaming (built 2026-10-24: an agent's `"stream": true`; agent_reply `final`) | `final: false` replies; both APIs' streams | 1-3 |
 | 4. NPC voices | the reply spoken: first with the Windows voices Koetama already uses for test voices, later a local neural voice (Piper); the host's Koetama sends it through the relay as a speaker placed at the NPC, so every player hears it in place (the relay and the mixer already do this for players) | 5-10 |
 | Each game | the mod side: collecting lines near an NPC on the host, the personas, the functions and their checks, the disclosure | per game |
 

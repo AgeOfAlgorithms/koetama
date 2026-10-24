@@ -51,8 +51,18 @@ fn fake(answer: Answer) -> Fake {
                 };
                 let (status, out, wait) = answer(n, &body);
                 std::thread::sleep(wait);
-                let out = out.to_string();
                 let mut c = conn;
+                if let Value::String(events) = &out {
+                    // (a stream: its events one by one, 200 ms apart, as a model writes)
+                    let _ = write!(c, "HTTP/1.1 {status} X\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n");
+                    for e in events.split("\n\n").filter(|e| !e.is_empty()) {
+                        let _ = write!(c, "{e}\n\n");
+                        let _ = c.flush();
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                    return;
+                }
+                let out = out.to_string();
                 let _ = write!(
                     c,
                     "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}",
@@ -92,7 +102,7 @@ fn config(api: Api, url: &str) -> Config {
 }
 
 fn pig(functions: Vec<AgentFunction>) -> AgentDef {
-    AgentDef { id: "pig".into(), version: 1, character: true, persona: "You are the Pig King.".into(), functions, max_words: 40, voice: String::new() }
+    AgentDef { id: "pig".into(), version: 1, character: true, stream: false, persona: "You are the Pig King.".into(), functions, max_words: 40, voice: String::new() }
 }
 
 fn line(id: i64, agent: &str, who: &str, text: &str) -> AgentLine {
@@ -281,5 +291,41 @@ fn a_reasoning_model_is_asked_again_without_reasoning() {
     r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "hello")], &[], &[]);
     assert_eq!(r.wait_replies(1)[0], (vec![1], "Oink.".into(), 0, String::new()));
     assert_eq!(f.seen.lock().unwrap().len(), 2, "asked once more, with reasoning off");
+    r.agents.stop();
+}
+
+#[test]
+fn a_streaming_agent_says_its_words_as_they_come() {
+    // (OpenAI-style events: three pieces of text, a function call in two pieces, the tokens counted)
+    let f = fake(Box::new(|_, body| {
+        assert_eq!(body["stream"], true, "asked to stream");
+        let ev = |d: Value| format!("data: {d}\n\n");
+        let mut s = String::new();
+        for t in ["Twelve ", "meat, ", "not ten."] {
+            s += &ev(json!({"choices": [{"delta": {"content": t}}]}));
+        }
+        s += &ev(json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "offer_trade", "arguments": "{\"price\":"}}]}}]}));
+        s += &ev(json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "12}"}}]}}]}));
+        s += &ev(json!({"choices": [], "usage": {"prompt_tokens": 80, "completion_tokens": 12}}));
+        s += "data: [DONE]\n\n";
+        (200, Value::String(s), Duration::ZERO)
+    }));
+    let r = rig(config(Api::OpenAi, &f.url));
+    let mut talker = pig(vec![]);
+    talker.stream = true;
+    r.agents.feed(1, &[talker], &[line(1, "pig", "Wendy", "10 meat?")], &[], &[]);
+    let got = r.wait_replies(1);
+    assert_eq!(got[0], (vec![1], "Twelve meat, not ten.".into(), 1, String::new()));
+    let partial: Vec<String> = r
+        .events
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| if let Event::Partial { ids, text, .. } = e { assert_eq!(ids, &vec![1]); Some(text.clone()) } else { None })
+        .collect();
+    assert!(partial.len() >= 2, "the words came as they were written: {partial:?}");
+    assert!(partial.windows(2).all(|w| w[1].starts_with(&w[0]) && w[1].len() > w[0].len()), "each the words so far: {partial:?}");
+    assert!(partial[0].starts_with("Twelve"));
     r.agents.stop();
 }

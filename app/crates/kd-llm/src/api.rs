@@ -263,6 +263,32 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
 
 /// One request to the host's LLM (blocking: the service runs it on a thread of its own).
 pub fn complete(cfg: &Config, system: &str, functions: &[AgentFunction], turns: &[Turn], max_tokens: u32, timeout: Duration) -> Result<Reply, String> {
+    request(cfg, system, functions, turns, max_tokens, timeout, None)
+}
+
+/// As complete, the reply streamed: `on_text` gets all the words so far each time more come (several times a second
+/// or more often; the caller thins them out). Function calls come whole in the Reply, as complete's.
+pub fn complete_streaming(
+    cfg: &Config,
+    system: &str,
+    functions: &[AgentFunction],
+    turns: &[Turn],
+    max_tokens: u32,
+    timeout: Duration,
+    on_text: &mut dyn FnMut(&str),
+) -> Result<Reply, String> {
+    request(cfg, system, functions, turns, max_tokens, timeout, Some(on_text))
+}
+
+fn request(
+    cfg: &Config,
+    system: &str,
+    functions: &[AgentFunction],
+    turns: &[Turn],
+    max_tokens: u32,
+    timeout: Duration,
+    mut on_text: Option<&mut dyn FnMut(&str)>,
+) -> Result<Reply, String> {
     let url = endpoint(cfg.api, cfg.url());
     let local = ["http://127.0.0.1:", "http://localhost:"].iter().any(|p| url.starts_with(p));
     let agent = ureq::Agent::config_builder()
@@ -272,30 +298,177 @@ pub fn complete(cfg: &Config, system: &str, functions: &[AgentFunction], turns: 
         .build()
         .new_agent();
     let mut b = body(cfg.api, cfg.url(), &cfg.model, system, functions, turns, max_tokens);
-    let send = |b: &Value| -> Result<(u16, Value), String> {
+    if on_text.is_some() {
+        b["stream"] = json!(true);
+        if cfg.api == Api::OpenAi && cfg.url().contains("api.openai.com") {
+            // (OpenAI's own sends the tokens counted only when asked; other OpenAI-style servers may refuse the field)
+            b["stream_options"] = json!({"include_usage": true});
+        }
+    }
+    let send = |b: &Value| -> Result<ureq::http::Response<ureq::Body>, String> {
         let mut req = agent.post(&url).header("Content-Type", "application/json").header("User-Agent", "Koetama");
         req = match cfg.api {
             Api::OpenAi => req.header("Authorization", &format!("Bearer {}", cfg.key)),
             Api::Anthropic => req.header("x-api-key", &cfg.key).header("anthropic-version", "2023-06-01"),
         };
-        let resp = req.send(b.to_string()).map_err(|e| format!("the LLM could not be reached: {e}"))?;
+        req.send(b.to_string()).map_err(|e| format!("the LLM could not be reached: {e}"))
+    };
+    let whole = |resp: ureq::http::Response<ureq::Body>| -> Result<(u16, Value), String> {
         let status = resp.status().as_u16();
         let text = resp.into_body().read_to_string().map_err(|e| format!("the LLM's answer could not be read: {e}"))?;
         let v: Value = serde_json::from_str(&text).map_err(|_| format!("the LLM answered {status}, not JSON"))?;
         Ok((status, v))
     };
-    let (mut status, mut v) = send(&b)?;
-    if cfg.api == Api::OpenAi && status == 400 && b.get("reasoning_effort").is_none() && wants_no_reasoning(&v) {
-        // (a reasoning model refuses functions on chat completions unless its reasoning is off - and a character's
-        //  reply wants no long thinking anyway; a model that knows no reasoning_effort is never sent it)
-        b["reasoning_effort"] = json!("none");
-        (status, v) = send(&b)?;
+    let mut resp = send(&b)?;
+    if resp.status().as_u16() >= 400 {
+        // (an error comes whole, streamed or not)
+        let (status, v) = whole(resp)?;
+        if cfg.api == Api::OpenAi && status == 400 && b.get("reasoning_effort").is_none() && wants_no_reasoning(&v) {
+            // (a reasoning model refuses functions on chat completions unless its reasoning is off - and a character's
+            //  reply wants no long thinking anyway; a model that knows no reasoning_effort is never sent it)
+            b["reasoning_effort"] = json!("none");
+            resp = send(&b)?;
+        } else {
+            return Err(match parse_reply(cfg.api, &v) {
+                Err(e) => format!("the LLM answered {status}: {e}"),
+                Ok(_) => format!("the LLM answered {status}"),
+            });
+        }
     }
-    match parse_reply(cfg.api, &v) {
-        Err(e) => Err(format!("the LLM answered {status}: {e}")),
-        Ok(_) if status >= 400 => Err(format!("the LLM answered {status}")),
-        r => r,
+    let status = resp.status().as_u16();
+    if status >= 400 {
+        let (status, v) = whole(resp)?;
+        return Err(match parse_reply(cfg.api, &v) {
+            Err(e) => format!("the LLM answered {status}: {e}"),
+            Ok(_) => format!("the LLM answered {status}"),
+        });
     }
+    match on_text.as_mut() {
+        None => {
+            let (_, v) = whole(resp)?;
+            parse_reply(cfg.api, &v).map_err(|e| format!("the LLM answered {status}: {e}"))
+        }
+        Some(f) => {
+            let mut r = read_stream(cfg.api, std::io::BufReader::new(resp.into_body().into_reader()), *f)?;
+            if r.tokens_in == 0 && r.tokens_out == 0 {
+                // (a server that streams no counts: about 4 characters a token, for the budget)
+                let sent: usize = system.len() + turns.iter().map(turn_len).sum::<usize>();
+                r.tokens_in = (sent / 4) as u64;
+                r.tokens_out = (r.text.len() / 4 + r.calls.iter().map(|c| c.args.to_string().len() / 4).sum::<usize>()) as u64;
+            }
+            Ok(r)
+        }
+    }
+}
+
+fn turn_len(t: &Turn) -> usize {
+    match t {
+        Turn::User(s) => s.len(),
+        Turn::Assistant { text, calls } => text.len() + calls.iter().map(|c| c.args.to_string().len()).sum::<usize>(),
+        Turn::Results(rs) => rs.iter().map(|(_, r)| r.len()).sum(),
+    }
+}
+
+/// A streamed answer (server-sent events: `data: {...}` lines), read as it comes: the words to `on_text` (all of them
+/// so far, each time more come), the calls put together from their pieces, the tokens counted.
+pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&str)) -> Result<Reply, String> {
+    let mut reply = Reply::default();
+    // (calls by their index in the answer: id, name, the arguments' JSON as it comes)
+    let mut parts: Vec<(usize, String, String, String)> = Vec::new();
+    for line in r.lines() {
+        let line = line.map_err(|e| format!("the LLM's answer broke off: {e}"))?;
+        let Some(data) = line.strip_prefix("data:") else { continue };
+        let data = data.trim();
+        if data == "[DONE]" {
+            break;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(data) else { continue };
+        if let Some(e) = v.get("error") {
+            return Err(e.get("message").and_then(Value::as_str).map_or_else(|| e.to_string(), str::to_string));
+        }
+        let before = reply.text.len();
+        let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+        match api {
+            Api::OpenAi => {
+                if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
+                    reply.tokens_in = n(u, "prompt_tokens");
+                    reply.tokens_out = n(u, "completion_tokens");
+                }
+                let Some(d) = v.pointer("/choices/0/delta") else { continue };
+                if let Some(t) = d.get("content").and_then(Value::as_str) {
+                    reply.text.push_str(t);
+                }
+                for c in d.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
+                    let i = c.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let at = match parts.iter().position(|p| p.0 == i) {
+                        Some(at) => at,
+                        None => {
+                            parts.push((i, String::new(), String::new(), String::new()));
+                            parts.len() - 1
+                        }
+                    };
+                    let p = &mut parts[at];
+                    if let Some(id) = c.get("id").and_then(Value::as_str) {
+                        p.1.push_str(id);
+                    }
+                    if let Some(name) = c.pointer("/function/name").and_then(Value::as_str) {
+                        p.2.push_str(name);
+                    }
+                    if let Some(a) = c.pointer("/function/arguments").and_then(Value::as_str) {
+                        p.3.push_str(a);
+                    }
+                }
+            }
+            Api::Anthropic => match v.get("type").and_then(Value::as_str) {
+                Some("message_start") => {
+                    if let Some(u) = v.pointer("/message/usage") {
+                        reply.tokens_in = n(u, "input_tokens") + n(u, "cache_read_input_tokens") + n(u, "cache_creation_input_tokens");
+                        reply.tokens_out = n(u, "output_tokens");
+                    }
+                }
+                Some("content_block_start") => {
+                    let i = v.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    if let Some(b) = v.get("content_block").filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")) {
+                        let s = |k: &str| b.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                        parts.push((i, s("id"), s("name"), String::new()));
+                    }
+                }
+                Some("content_block_delta") => {
+                    let i = v.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    match v.pointer("/delta/type").and_then(Value::as_str) {
+                        Some("text_delta") => reply.text.push_str(v.pointer("/delta/text").and_then(Value::as_str).unwrap_or("")),
+                        Some("input_json_delta") => {
+                            if let Some(p) = parts.iter_mut().find(|p| p.0 == i) {
+                                p.3.push_str(v.pointer("/delta/partial_json").and_then(Value::as_str).unwrap_or(""));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some("message_delta") => {
+                    if let Some(u) = v.get("usage") {
+                        reply.tokens_out = n(u, "output_tokens").max(reply.tokens_out);
+                    }
+                }
+                Some("message_stop") => break,
+                _ => {}
+            },
+        }
+        if reply.text.len() > before {
+            on_text(reply.text.trim_start());
+        }
+    }
+    reply.text = reply.text.trim().to_string();
+    parts.sort_by_key(|p| p.0);
+    reply.calls = parts
+        .into_iter()
+        .map(|(_, id, name, args)| Call {
+            id,
+            name,
+            args: if args.trim().is_empty() { json!({}) } else { serde_json::from_str(&args).unwrap_or(json!(args)) },
+        })
+        .collect();
+    Ok(reply)
 }
 
 /// The API refused the request over its reasoning (OpenAI: "... set reasoning_effort to 'none'").
@@ -384,5 +557,34 @@ mod tests {
         assert_eq!(parse_reply(Api::Anthropic, &json!({"type": "error", "error": {"message": "overloaded"}})), Err("overloaded".into()));
         let cfg = Config { price_in: 1.0, price_out: 5.0, ..Default::default() };
         assert!((cfg.cost(&Reply { tokens_in: 1_000_000, tokens_out: 200_000, ..Default::default() }) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn streams_read() {
+        let o = "data: {\"choices\":[{\"delta\":{\"content\":\"Twel\"}}]}\n\n\
+                 data: {\"choices\":[{\"delta\":{\"content\":\"ve.\",\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"offer_trade\",\"arguments\":\"{\\\"item\\\":\"}}]}}]}\n\n\
+                 data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"hat\\\"}\"}}]}}]}\n\n\
+                 data: {\"choices\":[],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":9}}\n\n\
+                 data: [DONE]\n";
+        let mut seen = Vec::new();
+        let r = read_stream(Api::OpenAi, o.as_bytes(), &mut |t| seen.push(t.to_string())).unwrap();
+        assert_eq!(seen, ["Twel", "Twelve."]);
+        assert_eq!((r.text.as_str(), r.tokens_in, r.tokens_out), ("Twelve.", 50, 9));
+        assert_eq!(r.calls, vec![Call { id: "c1".into(), name: "offer_trade".into(), args: json!({"item": "hat"}) }]);
+        let a = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":30,\"output_tokens\":1}}}\n\n\
+                 data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+                 data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Oink\"}}\n\n\
+                 data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"!\"}}\n\n\
+                 data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"f\",\"input\":{}}}\n\n\
+                 data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"a\\\": 1}\"}}\n\n\
+                 data: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":12}}\n\n\
+                 data: {\"type\":\"message_stop\"}\n";
+        let mut seen = Vec::new();
+        let r = read_stream(Api::Anthropic, a.as_bytes(), &mut |t| seen.push(t.to_string())).unwrap();
+        assert_eq!(seen, ["Oink", "Oink!"]);
+        assert_eq!((r.text.as_str(), r.tokens_in, r.tokens_out), ("Oink!", 30, 12));
+        assert_eq!(r.calls[0].args, json!({"a": 1}));
+        let e = "data: {\"error\":{\"message\":\"overloaded\"}}\n";
+        assert_eq!(read_stream(Api::OpenAi, e.as_bytes(), &mut |_| {}), Err("overloaded".into()));
     }
 }

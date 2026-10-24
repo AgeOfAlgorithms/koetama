@@ -25,6 +25,8 @@ pub const MAX_TURNS: usize = 24;
 pub const RESULTS_WAIT: Duration = Duration::from_secs(20);
 /// one request to the LLM takes at most this long
 pub const TIMEOUT: Duration = Duration::from_secs(60);
+/// a streaming agent's words go to the game at most this often
+pub const PARTIAL_EVERY: Duration = Duration::from_millis(150);
 /// the line ids remembered in a session (each answered once), the newest
 const SEEN_MAX: usize = 4096;
 
@@ -34,6 +36,8 @@ pub enum Event {
     /// the reply to lines `ids` of agent `agent`: its words and function calls (the game runs them and answers with
     /// agent_results); `error` when it could not be asked ("budget", or what failed) - then text and calls are empty
     Reply { ids: Vec<i64>, agent: String, text: String, calls: Vec<Call>, error: String },
+    /// a streaming agent's words so far, while its reply comes (a few times a second at most; the Reply follows)
+    Partial { ids: Vec<i64>, agent: String, text: String },
     /// "ready", "busy" (requests a minute reached: lines wait), "budget" (the month's budget is spent), "error" (the
     /// last request failed: `why`); spent: this month so far
     Status { state: &'static str, why: String, spent: f64 },
@@ -47,6 +51,7 @@ enum Msg {
     Config(Config),
     Feed { sid: i64, agents: Vec<AgentDef>, lines: Vec<AgentLine>, results: Vec<(String, String)>, forget: Vec<String> },
     Done { agent: String, gen: u64, result: Result<Reply, String> },
+    Partial { agent: String, gen: u64, text: String },
     Stop,
 }
 
@@ -196,6 +201,13 @@ impl Worker {
                 }
                 Ok(Msg::Feed { sid, agents, lines, results, forget }) => self.feed(sid, agents, lines, results, forget),
                 Ok(Msg::Done { agent, gen, result }) => self.done(&agent, gen, result),
+                Ok(Msg::Partial { agent, gen, text }) => {
+                    if let Some((g, ids, _)) = self.agents.get(&agent).and_then(|a| a.busy.as_ref()) {
+                        if *g == gen {
+                            (self.on_event)(Event::Partial { ids: ids.clone(), agent, text });
+                        }
+                    }
+                }
                 Err(RecvTimeoutError::Timeout) => {}
             }
             self.overdue_results();
@@ -341,9 +353,21 @@ impl Worker {
         n.busy = Some((self.gen, ids, before));
         let (cfg, sys, functions, turns) = (self.cfg.clone(), system(&n.def), n.def.functions.clone(), n.history.clone());
         let max_tokens = (n.def.max_words.max(1) as u32).saturating_mul(2).saturating_add(256).min(4096);
-        let (tx, agent, gen) = (self.tx.clone(), k.to_string(), self.gen);
+        let (tx, agent, gen, stream) = (self.tx.clone(), k.to_string(), self.gen, n.def.stream);
         std::thread::spawn(move || {
-            let result = api::complete(&cfg, &sys, &functions, &turns, max_tokens, TIMEOUT);
+            let result = if stream {
+                // (the words so far to the game at most every PARTIAL_EVERY, and only when there are more)
+                let (mut last, mut told) = (Instant::now() - PARTIAL_EVERY, 0usize);
+                let (ptx, pagent) = (tx.clone(), agent.clone());
+                api::complete_streaming(&cfg, &sys, &functions, &turns, max_tokens, TIMEOUT, &mut |t: &str| {
+                    if t.len() > told && last.elapsed() >= PARTIAL_EVERY {
+                        (last, told) = (Instant::now(), t.len());
+                        let _ = ptx.send(Msg::Partial { agent: pagent.clone(), gen, text: t.to_string() });
+                    }
+                })
+            } else {
+                api::complete(&cfg, &sys, &functions, &turns, max_tokens, TIMEOUT)
+            };
             let _ = tx.send(Msg::Done { agent, gen, result });
         });
     }

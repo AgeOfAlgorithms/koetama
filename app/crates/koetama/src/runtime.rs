@@ -354,7 +354,12 @@ impl Runtime {
                                 let calls: Vec<(String, String, serde_json::Value)> =
                                     calls.into_iter().map(|c| (c.id, c.name, c.args)).collect();
                                 if let Some(g) = game {
-                                    g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &calls, &error));
+                                    g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &calls, &error, true));
+                                }
+                            }
+                            kd_llm::Event::Partial { ids, agent, text } => {
+                                if let Some(g) = game {
+                                    g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &[], "", false));
                                 }
                             }
                             kd_llm::Event::Status { state, why, spent } => {

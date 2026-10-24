@@ -143,7 +143,8 @@ def parse_agent(o):
     if not isinstance(o, dict) or _agent_id(o.get('id')) is None:
         return None
     character = True if o.get('character') is None else o['character']
-    if not isinstance(character, bool):
+    stream = False if o.get('stream') is None else o['stream']
+    if not isinstance(character, bool) or not isinstance(stream, bool):
         return None
     persona = '' if o.get('persona') is None else o['persona']
     if not _fits(persona, MAX_PERSONA_BYTES):
@@ -162,7 +163,7 @@ def parse_agent(o):
             return None
         functions.append(dict(name=f['name'], description=desc, parameters=params))
     version, words = _whole(o.get('version')), _whole(o.get('max_words'))
-    return dict(id=o['id'], version=max(0, version) if version is not None else 0, character=character, persona=persona,
+    return dict(id=o['id'], version=max(0, version) if version is not None else 0, character=character, stream=stream, persona=persona,
                 functions=functions, voice=_short(o.get('voice')),
                 max_words=min(MAX_WORDS, max(1, words)) if words is not None else DEFAULT_WORDS)
 

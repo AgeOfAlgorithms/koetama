@@ -353,12 +353,15 @@ pub mod api {
                                     // a call left without results gets "(not run)", same-side turns made one;
                                     // OpenAI's own: max_completion_tokens; Anthropic: the system prompt cached
     parse_reply(api, &Value) -> Result<Reply, String>
+    complete_streaming(.., on_text)  // "stream": true; on_text(all the words so far) as they come; read_stream (SSE:
+                                    // OpenAI's deltas and tool-call pieces, Anthropic's content blocks; no counts: ~4 chars a token)
     complete(&Config, system, functions, turns, max_tokens, timeout)  // a 400 naming reasoning_effort: asked again
                                     // with "none" (OpenAI's reasoning models refuse functions otherwise)
 }
 pub mod agents {
     Agents::start(Config, on_event, log) .set_config(c) .feed(sid, agents, lines, results, forget) .stop()
-    Event { Reply { ids, agent, text, calls, error }, Status { state, why, spent }, Spent(f64) }
+    Event { Reply { ids, agent, text, calls, error }, Partial { ids, agent, text } (a streaming agent's words so far, at
+            most every PARTIAL_EVERY 150 ms), Status { state, why, spent }, Spent(f64) }
     MAX_TURNS 24, RESULTS_WAIT 20 s, TIMEOUT 60 s
 }
 ```

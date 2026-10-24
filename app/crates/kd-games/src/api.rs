@@ -120,14 +120,16 @@ pub fn translation(id: i64, text: &str, rule: Option<(&str, &str)>) -> String {
 /// the longest agent reply sent to the game (characters)
 pub const MAX_AGENT_REPLY_CHARS: usize = 2000;
 
-/// {"type":"agent_reply","ids":[..],"agent":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..}: an agent's
-/// reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it calls (the game checks and runs
-/// them, and answers with agent_results), or why there is none ("budget", what failed).
-pub fn agent_reply(ids: &[i64], agent: &str, text: &str, calls: &[(String, String, serde_json::Value)], error: &str) -> String {
+/// {"type":"agent_reply","ids":[..],"agent":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..,"final":..}:
+/// an agent's reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it calls (the game checks
+/// and runs them, and answers with agent_results), or why there is none ("budget", what failed). final false: the
+/// words so far of a streaming agent (no calls yet; the whole reply follows with final true).
+pub fn agent_reply(ids: &[i64], agent: &str, text: &str, calls: &[(String, String, serde_json::Value)], error: &str, last: bool) -> String {
     let text: String = text.chars().take(MAX_AGENT_REPLY_CHARS).collect();
     let calls: Vec<serde_json::Value> =
         calls.iter().map(|(id, name, args)| serde_json::json!({"call": id, "name": name, "args": args})).collect();
-    serde_json::json!({"type": "agent_reply", "ids": ids, "agent": agent, "text": text, "calls": calls, "error": error}).to_string()
+    serde_json::json!({"type": "agent_reply", "ids": ids, "agent": agent, "text": text, "calls": calls, "error": error, "final": last})
+        .to_string()
 }
 
 /// {"type":"agent_status","state":..,"why":..,"model":..,"spent":..,"budget":..}: the host's LLM for the agents - "ready",
@@ -455,11 +457,12 @@ fn fits(v: Option<&Value>, most: usize) -> Option<&str> {
 /// functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an object.
 fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
     let id = o.as_object()?.get("id")?.as_str().filter(|s| feed::agent_id_ok(s))?;
-    let character = match o.get("character") {
-        None | Some(Value::Null) => true,
-        Some(Value::Bool(b)) => *b,
-        Some(_) => return None,
+    let flag = |k: &str, def: bool| match o.get(k) {
+        None | Some(Value::Null) => Some(def),
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => None,
     };
+    let (character, stream) = (flag("character", true)?, flag("stream", false)?);
     let persona = match o.get("persona") {
         None | Some(Value::Null) => "",
         x => fits(x, feed::MAX_PERSONA_BYTES)?,
@@ -489,6 +492,7 @@ fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
         id: id.into(),
         version: o.get("version").and_then(whole).map_or(0, |v| v.max(0)),
         character,
+        stream,
         persona: persona.into(),
         functions,
         max_words: o.get("max_words").and_then(whole).map_or(feed::DEFAULT_WORDS, |w| w.clamp(1, feed::MAX_WORDS)),

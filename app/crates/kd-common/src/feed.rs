@@ -413,6 +413,8 @@ pub struct AgentDef {
     /// a character in the game's world (the default): Koetama's note before the persona says how lines come and that
     /// a reply is what it says aloud; false (a director, a writer, a command parser): the persona alone
     pub character: bool,
+    /// its words to the game as they come (agent_reply with final: false, a few times a second), then the whole reply
+    pub stream: bool,
     pub persona: String,
     pub functions: Vec<AgentFunction>,
     pub max_words: i64,
