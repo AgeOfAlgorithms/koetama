@@ -807,15 +807,8 @@ impl App {
             ui.horizontal(|ui| {
                 let r = ui.add(egui::DragValue::new(&mut self.llm.budget).range(0.0..=1000.0).speed(0.25).prefix("$").suffix(" a month"));
                 changed |= r.drag_stopped() || r.lost_focus();
-                ui.label(RichText::new(format!("spent this month: ${:.2}", self.llm.spent_this_month())).color(theme::MUTED));
-            });
-            ui.end_row();
-            ui.label(RichText::new("Price").color(theme::MUTED));
-            ui.horizontal(|ui| {
-                let a = ui.add(egui::DragValue::new(&mut self.llm.price_in).range(0.0..=1000.0).speed(0.05).prefix("$").suffix(" in"));
-                let b = ui.add(egui::DragValue::new(&mut self.llm.price_out).range(0.0..=1000.0).speed(0.05).prefix("$").suffix(" out"));
-                changed |= a.drag_stopped() || a.lost_focus() || b.drag_stopped() || b.lost_focus();
-                ui.label(RichText::new("a million tokens (the model's price: the budget counts with it)").size(12.0).color(theme::MUTED));
+                ui.label(RichText::new(format!("spent this month: about ${:.2}", self.llm.spent_this_month())).color(theme::MUTED))
+                    .on_hover_text("Estimated from typical prices ($1 a million tokens in, $5 out): your provider's bill is what counts.");
             });
             ui.end_row();
             ui.label(RichText::new("Requests").color(theme::MUTED));
