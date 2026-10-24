@@ -17,6 +17,7 @@ kd-games.workspace = true
 kd-update.workspace = true
 kd-voice.workspace = true
 kd-translate.workspace = true
+kd-llm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eframe.workspace = true

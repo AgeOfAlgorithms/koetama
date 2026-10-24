@@ -46,6 +46,25 @@ struct Args {
     /// play into this wav file (48 kHz stereo) instead of a sound device: what this player hears, kept (tests)
     #[arg(long = "out-wav", value_name = "WAV")]
     out_wav: Option<String>,
+    /// the NPCs' LLM (docs/llm-npcs.md), for a game whose profile uses "llm": its model turns it on. The key comes from
+    /// the environment (KOETAMA_LLM_KEY), never the command line
+    #[arg(long = "llm-model", value_name = "MODEL")]
+    llm_model: Option<String>,
+    /// the LLM's API: openai (OpenAI-compatible) or anthropic
+    #[arg(long = "llm-api", default_value = "openai")]
+    llm_api: String,
+    /// the LLM's address (default: the API's own)
+    #[arg(long = "llm-url", value_name = "URL")]
+    llm_url: Option<String>,
+    /// the NPCs' budget for this run, in dollars (spent from 0)
+    #[arg(long = "llm-budget", default_value_t = 1.0)]
+    llm_budget: f64,
+    /// the model's price, dollars a million tokens in and out (the budget counts with it)
+    #[arg(long = "llm-price", value_name = "IN,OUT", default_value = "1,5")]
+    llm_price: String,
+    /// requests to the LLM a minute, at most
+    #[arg(long = "llm-per-minute", default_value_t = 20)]
+    llm_per_minute: u32,
     /// no microphone: recorded lines (English, one-word callouts, Russian, Chinese, Spanish, German, mixed) played
     /// through the REAL speech-to-text as if spoken, each in its own language (needs export/asrbench from the benchmark)
     #[arg(long = "auto-speech")]
@@ -469,6 +488,13 @@ pub fn main(argv: Vec<String>) -> i32 {
                 return 1;
             }
         },
+        llm: match llm_config(&args) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 1;
+            }
+        },
     };
     println!("preparing...");
     let kind = match &args.join {
@@ -572,4 +598,24 @@ pub fn main(argv: Vec<String>) -> i32 {
     println!();
     rt.stop();
     0
+}
+
+/// The NPCs' LLM from --llm-* and KOETAMA_LLM_KEY (None: no --llm-model, off).
+fn llm_config(args: &Args) -> Result<Option<kd_llm::Config>, String> {
+    let Some(model) = args.llm_model.clone().filter(|m| !m.trim().is_empty()) else { return Ok(None) };
+    let api = kd_llm::Api::from_name(&args.llm_api).ok_or("--llm-api: openai or anthropic")?;
+    let key = std::env::var("KOETAMA_LLM_KEY").map_err(|_| "--llm-model: put the LLM's key in KOETAMA_LLM_KEY")?;
+    let price: Vec<f64> = args.llm_price.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    let [price_in, price_out] = price[..] else { return Err("--llm-price: IN,OUT (dollars a million tokens)".into()) };
+    Ok(Some(kd_llm::Config {
+        api,
+        url: args.llm_url.clone().unwrap_or_default(),
+        model,
+        key,
+        budget: args.llm_budget,
+        spent: 0.0,
+        price_in,
+        price_out,
+        per_minute: args.llm_per_minute,
+    }))
 }

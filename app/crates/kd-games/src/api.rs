@@ -117,6 +117,28 @@ pub fn translation(id: i64, text: &str, rule: Option<(&str, &str)>) -> String {
     }
 }
 
+/// the longest NPC reply sent to the game (characters)
+pub const MAX_NPC_REPLY_CHARS: usize = 2000;
+
+/// {"type":"npc_reply","ids":[..],"npc":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..}: an NPC's
+/// reply to the game's lines `ids` (docs/llm-npcs.md) - its words, the functions it calls (the game checks and runs
+/// them, and answers with npc_results), or why there is none ("budget", what failed).
+pub fn npc_reply(ids: &[i64], npc: &str, text: &str, calls: &[(String, String, serde_json::Value)], error: &str) -> String {
+    let text: String = text.chars().take(MAX_NPC_REPLY_CHARS).collect();
+    let calls: Vec<serde_json::Value> =
+        calls.iter().map(|(id, name, args)| serde_json::json!({"call": id, "name": name, "args": args})).collect();
+    serde_json::json!({"type": "npc_reply", "ids": ids, "npc": npc, "text": text, "calls": calls, "error": error}).to_string()
+}
+
+/// {"type":"npc_status","state":..,"why":..,"model":..,"spent":..,"budget":..}: the host's LLM for the NPCs - "ready",
+/// "busy" (requests a minute reached: lines wait), "budget" (the month's is spent), "error" (`why`); dollars spent this
+/// month and the budget.
+pub fn npc_status(state: &str, why: &str, model: &str, spent: f64, budget: f64) -> String {
+    let cents = |x: f64| if x.is_finite() { (x * 10000.0).round() / 10000.0 } else { 0.0 };
+    serde_json::json!({"type": "npc_status", "state": state, "why": why, "model": model, "spent": cents(spent), "budget": cents(budget)})
+        .to_string()
+}
+
 /// {"type":"join_code","player":..,"code":..}: a hub's code for that player to type into their Koetama.
 pub fn join_code(player: &PlayerId, code: &str) -> String {
     format!("{{\"type\":\"join_code\",\"player\":{},\"code\":{}}}", player.json(), js(code))

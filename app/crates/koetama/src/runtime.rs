@@ -54,6 +54,18 @@ pub struct Options {
     pub out_wav: Option<PathBuf>,
     /// noise suppression for the voice sent (and "Hear yourself"): Off, Standard (RNNoise), Strong (DeepFilterNet 3)
     pub noise: kd_voice::denoise::Level,
+    /// the host's LLM for this game's NPCs (docs/llm-npcs.md; None: off - only a profile that uses "llm" gets it)
+    pub llm: Option<kd_llm::Config>,
+}
+
+/// The NPCs' LLM as the window shows it.
+#[derive(Clone, Debug, Default)]
+pub struct NpcStatus {
+    /// "ready", "busy", "budget", "error" ("" before the first word from the service)
+    pub state: &'static str,
+    pub why: String,
+    /// dollars spent this month (the window keeps it in the settings)
+    pub spent: f64,
 }
 
 /// Where the mixer plays: a sound device, or a wav file (Options::out_wav).
@@ -87,6 +99,7 @@ impl Default for Options {
             translate_also: Vec::new(),
             out_wav: None,
             noise: kd_voice::denoise::Level::Standard,
+            llm: None,
         }
     }
 }
@@ -146,6 +159,8 @@ pub struct Status {
     pub translate: Option<kd_translate::service::Status>,
     /// the microphone test: seconds left (None: not testing)
     pub mic_test: Option<f64>,
+    /// the NPCs' LLM (None: this game has none, or the host has it off)
+    pub npc: Option<NpcStatus>,
     /// how far the automatic gain raises this player's voice (dB) - in the test, else in the voice chat - once they
     /// have spoken (far up: a quiet microphone)
     pub mic_gain_db: Option<f32>,
@@ -188,6 +203,9 @@ pub struct Runtime {
     translator: Option<Translator>,
     /// the translation's state as last told to the game: (its session then, what was told)
     rules_told: Arc<Mutex<Option<(i64, String)>>>,
+    /// the NPCs' LLM (a game whose profile uses "llm", the host's setting on) and its state for the window
+    npcs: Option<kd_llm::Npcs>,
+    npc_status: Arc<Mutex<NpcStatus>>,
 }
 
 /// The game, once it is made (the translator's replies go to it; the translator starts before it).
@@ -221,6 +239,8 @@ struct Sink {
     /// the translator, and the session its ids belong to
     translator: Option<Translator>,
     sid: Mutex<Option<i64>>,
+    /// the NPCs' LLM (the host's, for a game whose profile uses "llm")
+    npcs: Option<kd_llm::Npcs>,
 }
 
 impl kd_common::feed::FeedSink for Sink {
@@ -248,6 +268,10 @@ impl kd_common::feed::FeedSink for Sink {
         }
         if let Some(v) = &self.voice {
             v.set_feed(&feed);
+        }
+        if let Some(n) = &self.npcs {
+            // (every feed: the service answers each line once, and a new session starts its NPCs over)
+            n.feed(feed.sid, &feed.npcs, &feed.to_npc, &feed.npc_results, &feed.npc_forget);
         }
         if let Some(t) = &self.translator {
             // (a new session: the game's ids start over)
@@ -281,6 +305,8 @@ impl Runtime {
         opts: Options,
         mic_source: Option<MicSource>,
     ) -> Runtime {
+        // (the NPCs' LLM only with the host's setting on: else the hello does not name it and the feed's NPCs are dropped)
+        let kind = kind.with_llm(opts.llm.is_some());
         let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
         // (real voices: for a game that plays voices; the relay is KOETAMA_RELAY or Koetama's own)
@@ -313,6 +339,38 @@ impl Runtime {
                 log.clone(),
             )
         });
+        // (the NPCs' LLM: replies and its state go straight to the game; the window reads the state and what was spent)
+        let npc_status: Arc<Mutex<NpcStatus>> = Arc::default();
+        let npcs = match (&opts.llm, kind.llm) {
+            (Some(cfg), true) => {
+                let (slot, st, model, budget) = (slot.clone(), npc_status.clone(), cfg.model.clone(), cfg.budget);
+                st.lock().unwrap().spent = cfg.spent;
+                Some(kd_llm::Npcs::start(
+                    cfg.clone(),
+                    Arc::new(move |e| {
+                        let game = slot.lock().unwrap().clone();
+                        match e {
+                            kd_llm::Event::Reply { ids, npc, text, calls, error } => {
+                                let calls: Vec<(String, String, serde_json::Value)> =
+                                    calls.into_iter().map(|c| (c.id, c.name, c.args)).collect();
+                                if let Some(g) = game {
+                                    g.lock().unwrap().send_object(kd_games::api::npc_reply(&ids, &npc, &text, &calls, &error));
+                                }
+                            }
+                            kd_llm::Event::Status { state, why, spent } => {
+                                *st.lock().unwrap() = NpcStatus { state, why: why.clone(), spent };
+                                if let Some(g) = game {
+                                    g.lock().unwrap().set_standing("npc_status", kd_games::api::npc_status(state, &why, &model, spent, budget));
+                                }
+                            }
+                            kd_llm::Event::Spent(s) => st.lock().unwrap().spent = s,
+                        }
+                    }),
+                    log.clone(),
+                ))
+            }
+            _ => None,
+        };
         let sink: Arc<dyn kd_common::feed::FeedSink> = Arc::new(Sink {
             mixer: MixerSink(mixer.clone()),
             listener: ptt_to.clone(),
@@ -320,6 +378,7 @@ impl Runtime {
             hub: hub.clone(),
             translator: translator.clone(),
             sid: Mutex::new(None),
+            npcs: npcs.clone(),
         });
         let game = kind.make(sink, log.clone(), opts.io_dir.clone());
         // (no test voices: the game's test speakers are silent)
@@ -363,6 +422,8 @@ impl Runtime {
             translator,
             hub,
             rules_told,
+            npcs,
+            npc_status,
         };
         rt.apply_translation();
         if rt.kind.voices {
@@ -464,10 +525,21 @@ impl Runtime {
         if let Some(t) = &self.translator {
             t.stop();
         }
+        if let Some(n) = &self.npcs {
+            n.stop();
+        }
         self.game.lock().unwrap().stop();
     }
 
     // ---- settings while running
+    /// The host changed the NPCs' LLM setting (model, key, limits) while it is on: what comes next uses it.
+    pub fn set_llm(&mut self, cfg: kd_llm::Config) {
+        if let Some(n) = &self.npcs {
+            n.set_config(cfg.clone());
+        }
+        self.opts.llm = Some(cfg);
+    }
+
     pub fn set_volume(&mut self, v: f64) {
         self.opts.volume = v.clamp(0.0, 1.0);
         self.mixer.lock().unwrap().volume = self.opts.volume;
@@ -851,6 +923,7 @@ impl Runtime {
             voice: self.voice.as_ref().map(|v| v.status()),
             translate: self.translator.as_ref().map(|t| t.status()),
             mic_test: self.test_until.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_secs_f64()),
+            npc: self.npcs.as_ref().map(|_| self.npc_status.lock().unwrap().clone()),
             mic_gain_db: self
                 .monitor
                 .is_on()
