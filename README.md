@@ -211,6 +211,17 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.12: language model limits in tokens
+
+- **Limit by tokens, not dollars.** The Large Language Models card now sets how many tokens in and out the mod may use
+  each month (5 million in and 500,000 out by default), and shows this month's use: "267,106 in, 9,800 out". These
+  are the same counts as on your provider's usage page. Koetama's dollar estimates could be far off (once about 90
+  times too high), so they're gone, and Koetama no longer downloads a price list.
+- **Reset** sets this month's count back to zero.
+- **Streamed replies are counted exactly** with DeepSeek and OpenRouter too, not estimated from their length.
+- **For mod makers:** `agent_status` now has `tokens_in`, `tokens_out`, `limit_in` and `limit_out` instead of `spent`
+  and `budget`. The `budget` state and error mean the month's tokens are used up.
+
 ### 0.5.11: language model fixes
 
 - **A model's short name finds its price:** "deepseek-flash" at DeepSeek's address is now priced as DeepSeek's newest
@@ -236,16 +247,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
   there's no need to click.
 - **For mod makers:** agents, their lines, function calls and replies (streamed word by word if you like) are in
   PROTOCOL.md, "Large language models: agents", with a how-to in docs/agents-guide.md.
-
-### 0.5.9: louder voices
-
-- **Voices are louder.** Players heard each other too quietly next to a game. Koetama now evens every microphone out
-  to a louder level (-14 dBFS, was -20), and a voice right in front of you is no longer played 3 dB under its level:
-  about 6 dB louder in all.
-- **Quiet microphones are raised all the way** (up to +40 dB, was +30). A very quiet microphone's speech used to be
-  taken for silence and not raised at all. If yours is that quiet, the window now says so and where to turn it up.
-- **Mic boost does what it says:** it now makes your voice louder than everyone else's (up to +10 dB). Before, it came
-  before the automatic gain, which mostly took it back.
-- **The microphone test sounds like the real thing:** it no longer raises the noise in your room between words.
-- **For developers:** `tools/mic_levels.py` and `cargo run -p kd-voice --example mic_check` measure a real
-  microphone's levels; a very quiet simulated microphone (`--sim-mic very-quiet`) is in the tests.

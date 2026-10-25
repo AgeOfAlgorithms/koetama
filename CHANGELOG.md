@@ -2,6 +2,19 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.9: louder voices
+
+- **Voices are louder.** Players heard each other too quietly next to a game. Koetama now evens every microphone out
+  to a louder level (-14 dBFS, was -20), and a voice right in front of you is no longer played 3 dB under its level:
+  about 6 dB louder in all.
+- **Quiet microphones are raised all the way** (up to +40 dB, was +30). A very quiet microphone's speech used to be
+  taken for silence and not raised at all. If yours is that quiet, the window now says so and where to turn it up.
+- **Mic boost does what it says:** it now makes your voice louder than everyone else's (up to +10 dB). Before, it came
+  before the automatic gain, which mostly took it back.
+- **The microphone test sounds like the real thing:** it no longer raises the noise in your room between words.
+- **For developers:** `tools/mic_levels.py` and `cargo run -p kd-voice --example mic_check` measure a real
+  microphone's levels; a very quiet simulated microphone (`--sim-mic very-quiet`) is in the tests.
+
 ### 0.5.8: your models, in plain sight
 
 - **See what's in memory and what's on disk.** The Speech to text and Translation cards now list every model the
