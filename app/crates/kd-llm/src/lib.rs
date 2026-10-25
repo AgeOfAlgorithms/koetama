@@ -6,15 +6,14 @@
 //!   its answer says, and the call itself.
 //! - agents: the service on a thread of its own - each agent's conversation (a fixed window of turns), its queue (lines
 //!   that come while its request runs wait, then go together as one turn), function calls waiting for the game's
-//!   results, and the host's limits (requests a minute, the month's budget).
+//!   results, and the host's limits (requests a minute, the month's tokens in and out).
+//! - ledger: the month's tokens used, shared by everything that asks the host's LLM.
 //!
 //! It knows no game: an agent is an id, a persona and functions the mod gives.
 pub mod agents;
 pub mod api;
 pub mod ledger;
-pub mod prices;
 
 pub use api::{Api, Call, Config, Reply, Turn};
 pub use agents::{error, Agents, Event, OnEvent};
-pub use ledger::Ledger;
-pub use prices::{Price, Prices};
+pub use ledger::{Ledger, Tokens};

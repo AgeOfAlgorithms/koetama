@@ -167,13 +167,13 @@ pub fn received(to_agent: &[i64], agent_results: &[String], to_translate: &[i64]
     o.to_string()
 }
 
-/// {"type":"agent_status","state":..,"why":..,"model":..,"spent":..,"budget":..}: the host's LLM for the agents - "ready",
-/// "busy" (requests a minute reached: lines wait), "budget" (the month's is spent), "error" (`why`); dollars spent this
-/// month and the budget.
-pub fn agent_status(state: &str, why: &str, model: &str, spent: f64, budget: f64) -> String {
-    let cents = |x: f64| if x.is_finite() { (x * 10000.0).round() / 10000.0 } else { 0.0 };
-    serde_json::json!({"type": "agent_status", "state": state, "why": why, "model": model, "spent": cents(spent), "budget": cents(budget)})
-        .to_string()
+/// {"type":"agent_status","state":..,"why":..,"model":..,"tokens_in":..,"tokens_out":..,"limit_in":..,"limit_out":..}:
+/// the host's LLM for the agents - "ready", "busy" (requests a minute reached: lines wait), "budget" (the month's
+/// tokens are used up), "error" (`why`); the tokens used this month, in and out, and the month's limits.
+pub fn agent_status(state: &str, why: &str, model: &str, used: (u64, u64), limit: (u64, u64)) -> String {
+    serde_json::json!({"type": "agent_status", "state": state, "why": why, "model": model,
+        "tokens_in": used.0, "tokens_out": used.1, "limit_in": limit.0, "limit_out": limit.1})
+    .to_string()
 }
 
 /// {"type":"join_code","player":..,"code":..}: a hub's code for that player to type into their Koetama.

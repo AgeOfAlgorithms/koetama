@@ -156,6 +156,12 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
   newer `final: false` replace an unread older one. Dead code removed (DST_ID, teardown_user, kd_voice::PACKET);
   gui.rs split (gui/llm.rs, models.rs, profiles.rs, updates.rs) and runtime.rs (runtime/agents.rs, received.rs).
   The mods (Proximity Comms' voice.lua, the DST mod) still need: agents_known, received, the error codes.
+  **Limits in tokens, not dollars (2026-10-25).** 0.5.10 counted deepseek-flash at a $3 / $15 fallback ($0.85 for
+  what DeepSeek billed $0.0095); 0.5.11's alias match took an older model; cached tokens were at the full price. Fixed
+  those, then the user: "can you limit the usage by number of in/out tokens then? not by price" - and drop the dollar
+  view. The host sets tokens in and out a month (default 5M / 500k), the card shows the month's tokens (Reset), and
+  agent_status sends tokens_in / tokens_out / limit_in / limit_out. OpenRouter's price list and kd-llm prices.rs are
+  gone (no fetch at all); --llm-budget / --llm-price became --llm-limit IN,OUT.
 
 - **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
   hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and

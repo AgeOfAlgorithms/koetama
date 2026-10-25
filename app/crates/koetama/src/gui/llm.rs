@@ -3,8 +3,8 @@ use super::*;
 
 impl App {
     /// "Large Language Models": the host's LLM for this game's mod, its agents (docs/llm-agents.md): on for this game or
-    /// not, the API, address, model, key, the month's budget, requests a minute; the price it counts with (OpenRouter's
-    /// list), its state and what was spent.
+    /// not, the API, address, model, key, the month's limit in tokens in and out, requests a minute; the tokens used
+    /// this month, and its state.
     /// Turning it on or off (or it becoming usable) starts the game link again (the hello names "llm" or not).
     pub(super) fn llm_ui(&mut self, ui: &mut egui::Ui) {
         let game = self.kind.id.clone();
@@ -53,40 +53,31 @@ impl App {
                 changed = true;
             }
             ui.end_row();
-            ui.label(RichText::new("Budget").color(theme::MUTED));
+            ui.label(RichText::new("Limit").color(theme::MUTED));
             ui.horizontal(|ui| {
-                let r = ui.add(egui::DragValue::new(&mut self.llm.budget).range(0.0..=1000.0).speed(0.25).prefix("$").suffix(" a month"));
+                // (tokens, not dollars - the user, 2026-10-25: a provider's bill can only be guessed, its counts are exact)
+                let r = ui.add(tokens(&mut self.llm.limit.input, "tokens in"));
                 changed |= r.drag_stopped() || r.lost_focus();
-                ui.label(RichText::new(format!("spent this month: ${:.2}", self.llm_ledger.spent())).color(theme::MUTED))
-                    .on_hover_text(
-                        "Counted from the tokens each reply used and the model's price - an estimate (a provider's \
-                         peak-hour or discount prices are not known): your provider's bill is what counts.",
-                    );
-                // (the count can be set back when the provider's bill says less - the user, 2026-10-25)
-                if ui.small_button("Reset")
-                    .on_hover_text("Set this month's count back to $0 (when your provider's usage page says it is less).")
-                    .clicked()
-                {
-                    self.llm_ledger.set(0.0);
+                let r = ui.add(tokens(&mut self.llm.limit.output, "out"));
+                changed |= r.drag_stopped() || r.lost_focus();
+                ui.label(RichText::new("a month").color(theme::MUTED));
+            })
+            .response
+            .on_hover_text(
+                "The most the mod's agents (and Try it) may use each month. Tokens in are everything sent to the model - \
+                 cached ones too, as your provider's usage page counts them; out is what it writes.",
+            );
+            ui.end_row();
+            ui.label(RichText::new("Used").color(theme::MUTED));
+            ui.horizontal(|ui| {
+                let u = self.llm_ledger.used();
+                ui.label(RichText::new(format!("{} in, {} out this month", thousands(u.input), thousands(u.output))).color(theme::MUTED))
+                    .on_hover_text("The tokens your provider counted for each reply, added up.");
+                // (the count can be set back, e.g. to start over - the user, 2026-10-25)
+                if ui.small_button("Reset").on_hover_text("Start this month's count over from 0.").clicked() {
+                    self.llm_ledger.set(kd_llm::Tokens::default());
                 }
             });
-            ui.end_row();
-            ui.label(RichText::new("Price").color(theme::MUTED));
-            let price = self.llm.price();
-            let unknown = kd_llm::Price::unknown();
-            let (i, o) = (unknown.input, unknown.output);
-            let (text, colour) = match (&price, self.llm_prices.is_some()) {
-                (Some(p), _) => {
-                    let cached = p.cache_read.map(|c| format!(" (${c} cached)")).unwrap_or_default();
-                    (format!("${} in{cached}, ${} out a million tokens ({} in OpenRouter's price list)", p.input, p.output, p.id), theme::MUTED)
-                }
-                (None, true) => ("loading the price list...".to_string(), theme::MUTED),
-                (None, false) if self.llm.model.trim().is_empty() => ("from OpenRouter's price list, once a model is set".to_string(), theme::MUTED),
-                (None, false) => (format!("not in OpenRouter's price list: counted at ${i} in, ${o} out a million tokens"), theme::WARN),
-            };
-            ui.label(RichText::new(text).size(12.0).color(colour)).on_hover_text(
-                "Koetama only reads the prices from OpenRouter's public list, to count what the model costs. Your requests                  go to the address above with your key - not through OpenRouter.",
-            );
             ui.end_row();
             ui.label(RichText::new("Requests").color(theme::MUTED));
             ui.horizontal(|ui| {
@@ -104,7 +95,7 @@ impl App {
             let (text, colour) = match n.state {
                 "ready" => ("ready".to_string(), theme::GOOD),
                 "busy" => ("busy: lines wait (requests a minute)".to_string(), theme::WARN),
-                "budget" => ("this month's budget is spent".to_string(), theme::BAD),
+                "budget" => ("this month's tokens are used up (raise the limit, or Reset)".to_string(), theme::BAD),
                 "error" => ("failed".to_string(), theme::BAD),
                 _ => ("starting".to_string(), theme::MUTED),
             };
@@ -131,16 +122,14 @@ impl App {
     }
 
     /// "Try it": a message to the model as the card is set now (the switch need not be on) and its answer, or exactly
-    /// why there is none. What it costs counts in this month's spend.
+    /// why there is none. Its tokens count in this month's.
     pub(super) fn llm_try_ui(&mut self, ui: &mut egui::Ui) {
         if let Some(rx) = &self.llm_trying {
             if let Ok(r) = rx.try_recv() {
                 self.llm_trying = None;
                 self.llm_tried = match r {
                     Ok(reply) => {
-                        if let Some(cfg) = self.llm.config() {
-                            self.llm_ledger.add(cfg.cost(&reply));
-                        }
+                        self.llm_ledger.add(reply.tokens());
                         let calls = if reply.calls.is_empty() { String::new() } else { format!(" ({} function calls)", reply.calls.len()) };
                         let cached = if reply.tokens_cached > 0 { format!(" ({} cached)", reply.tokens_cached) } else { String::new() };
                         Ok(format!("{}{calls}  ·  {} tokens in{cached}, {} out", reply.text, reply.tokens_in, reply.tokens_out))
@@ -183,4 +172,26 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// A token count to drag or type ("5,000,000 tokens in"; commas and the unit are fine to type).
+fn tokens<'a>(v: &'a mut u64, unit: &'static str) -> egui::DragValue<'a> {
+    egui::DragValue::new(v)
+        .range(0..=10_000_000_000u64)
+        .speed(10_000.0)
+        .custom_formatter(move |n, _| format!("{} {unit}", thousands(n as u64)))
+        .custom_parser(|s| s.chars().filter(char::is_ascii_digit).collect::<String>().parse::<f64>().ok())
+}
+
+/// 5000000 -> "5,000,000"
+fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }

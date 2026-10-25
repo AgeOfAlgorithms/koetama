@@ -7,15 +7,16 @@
 //! - Function calls: the reply's calls go to the game (Event::Reply with `calls`); the game runs them, checks them
 //!   against its rules and answers each (feed's agent_results); with all of them answered (or after RESULTS_WAIT
 //!   without), they go back to the LLM and its follow-up is another reply to the same lines.
-//! - The host's limits: requests a minute (more wait in the queue: "busy"), the month's budget (the Ledger, shared with
-//!   the window: each request holds what it could cost at worst before it goes - "budget" when that would pass it).
+//! - The host's limits: requests a minute (more wait in the queue: "busy"), the month's tokens in and out (the Ledger,
+//!   shared with the window: each request holds what it could use at worst before it goes - "budget" when that would
+//!   pass the limit).
 //! - What it knows: Event::Known (each agent's id and version) whenever that changes - the game sends a definition only
 //!   when it is missing or older.
 //! - A new game session (`sid`) starts every agent over; `agent_forget` starts one over and cancels what it had under
 //!   way (its lines answered "cancelled"). At most MAX_QUEUE lines wait per agent ("queue_full").
 //! - A reply that is not one says why with a code (Error) and words (`why`).
 use crate::api::{self, Call, Config, Reply, Turn};
-use crate::ledger::Ledger;
+use crate::ledger::{Ledger, Tokens};
 use kd_common::feed::{AgentDef, AgentLine};
 use kd_common::Log;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -39,7 +40,7 @@ pub const MAX_QUEUE: usize = 16;
 
 /// Why a reply is not one (agent_reply's `error`; `why` says more).
 pub mod error {
-    /// the host's budget for the month would be passed
+    /// the host's tokens for the month (in or out) would be passed
     pub const BUDGET: &str = "budget";
     /// a line for an agent Koetama does not have (send its definition)
     pub const UNKNOWN_AGENT: &str = "unknown_agent";
@@ -59,9 +60,9 @@ pub enum Event {
     Reply { ids: Vec<i64>, agent: String, text: String, calls: Vec<Call>, error: &'static str, why: String },
     /// a streaming agent's words so far, while its reply comes (a few times a second at most; the Reply follows)
     Partial { ids: Vec<i64>, agent: String, text: String },
-    /// "ready", "busy" (requests a minute reached: lines wait), "budget" (the month's budget is spent), "error" (the
-    /// last request failed: `why`); spent: this month so far
-    Status { state: &'static str, why: String, spent: f64 },
+    /// "ready", "busy" (requests a minute reached: lines wait), "budget" (the month's tokens are used up), "error" (the
+    /// last request failed: `why`); used: this month's tokens so far
+    Status { state: &'static str, why: String, used: Tokens },
     /// the agents Koetama has now, (id, version), sorted: after each change (and empty for a new session)
     Known(Vec<(String, i64)>),
 }
@@ -145,7 +146,7 @@ struct Agent {
     queue: Vec<AgentLine>,
     /// the request under way: its generation (a reply from an older one is dropped), the lines it answers, the
     /// history's length before it (put back if it fails), and what the ledger holds for it
-    busy: Option<(u64, Vec<i64>, usize, f64)>,
+    busy: Option<(u64, Vec<i64>, usize, Tokens)>,
     /// function calls waiting for the game's results
     waiting: Option<Waiting>,
 }
@@ -165,8 +166,8 @@ struct Worker {
     /// when the last requests were sent (requests a minute)
     sent: VecDeque<Instant>,
     gen: u64,
-    /// the state as last told (Event::Status): state, why, cents spent
-    told: Option<(&'static str, String, i64)>,
+    /// the state as last told (Event::Status): state, why, tens of thousands of tokens used
+    told: Option<(&'static str, String, u64)>,
     /// the last request failed (and why), until one succeeds
     failed: Option<String>,
 }
@@ -306,7 +307,7 @@ impl Worker {
         let mut ids: Vec<i64> = Vec::new();
         if let Some((_, busy_ids, _, held)) = n.busy.take() {
             ids.extend(busy_ids);
-            self.ledger.settle(held, 0.0);
+            self.ledger.settle(held, Tokens::default());
         }
         if let Some((waiting_ids, ..)) = n.waiting.take() {
             ids.extend(waiting_ids);
@@ -372,7 +373,7 @@ impl Worker {
     }
 
     fn over_budget(&self) -> bool {
-        self.ledger.spent() >= self.cfg.budget
+        self.ledger.used().reached(self.cfg.limit)
     }
 
     /// A request may go now (requests a minute): counted if so.
@@ -389,8 +390,8 @@ impl Worker {
     }
 
     /// Ask the LLM for agent k's next words (its history already has the new turn), on a thread of its own - if the
-    /// ledger can hold what it could cost at worst (its prompt, about 4 characters a token, and its longest reply):
-    /// else its lines are answered "budget" and the turn taken back.
+    /// ledger can hold what it could use at worst (its prompt, at 3 characters a token - most text is nearer 4 - and its
+    /// longest reply): else its lines are answered "budget" and the turn taken back.
     fn ask(&mut self, k: &str, ids: Vec<i64>, before: usize) {
         let Some(n) = self.agents.get_mut(k) else { return };
         let (cfg, sys, functions, turns) = (self.cfg.clone(), system(&n.def), n.def.functions.clone(), n.history.clone());
@@ -398,10 +399,13 @@ impl Worker {
         let prompt: usize = sys.len()
             + functions.iter().map(|f| f.description.len() + f.parameters.to_string().len()).sum::<usize>()
             + turns.iter().map(api::turn_len).sum::<usize>();
-        let most = (prompt as f64 / 4.0 * cfg.price_in + max_tokens as f64 * cfg.price_out) / 1e6;
-        if !self.ledger.reserve(most, cfg.budget) {
+        let most = Tokens::new(prompt as u64 / 3, max_tokens as u64);
+        if !self.ledger.reserve(most, cfg.limit) {
             n.history.truncate(before);
-            self.fail(ids, k, error::BUDGET, format!("this month's ${:.2} would be passed", cfg.budget));
+            let (u, l) = (self.ledger.used(), cfg.limit);
+            self.fail(ids, k, error::BUDGET, format!(
+                "this month's tokens would be passed ({} of {} in, {} of {} out used)", u.input, l.input, u.output, l.output
+            ));
             return;
         }
         self.gen += 1;
@@ -438,7 +442,7 @@ impl Worker {
                 if !r.calls.is_empty() {
                     n.waiting = Some((ids.clone(), r.calls.iter().map(|c| c.id.clone()).collect(), Vec::new(), Instant::now()));
                 }
-                self.ledger.settle(held, self.cfg.cost(&r));
+                self.ledger.settle(held, r.tokens());
                 self.failed = None;
                 (self.log)(&format!(
                     "agent {k}: replied ({} tokens in, {} out{})",
@@ -450,7 +454,7 @@ impl Worker {
             }
             Err(e) => {
                 n.history.truncate(before);
-                self.ledger.settle(held, 0.0);
+                self.ledger.settle(held, Tokens::default());
                 (self.log)(&format!("agent {k}: {e}"));
                 self.failed = Some(e.clone());
                 self.fail(ids, k, error::FAILED, e);
@@ -484,11 +488,11 @@ impl Worker {
         } else {
             ("ready", String::new())
         };
-        // (again when the state changes, or what was spent by a cent: the game shows it)
-        let spent = self.ledger.spent();
-        let now = (now.0, now.1, (spent * 100.0).round() as i64);
+        // (again when the state changes, or every 10,000 tokens used: the game shows it)
+        let used = self.ledger.used();
+        let now = (now.0, now.1, (used.input + used.output) / 10_000);
         if self.told.as_ref() != Some(&now) {
-            (self.on_event)(Event::Status { state: now.0, why: now.1.clone(), spent });
+            (self.on_event)(Event::Status { state: now.0, why: now.1.clone(), used });
             self.told = Some(now);
         }
     }

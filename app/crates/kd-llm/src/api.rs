@@ -46,15 +46,8 @@ pub struct Config {
     pub url: String,
     pub model: String,
     pub key: String,
-    /// this month's budget (US dollars; what was spent is the Ledger's)
-    pub budget: f64,
-    /// the model's price, dollars a million tokens in (the prompt) and out (the reply)
-    pub price_in: f64,
-    pub price_out: f64,
-    /// the prompt's tokens the provider read from its cache, and wrote to it (Anthropic), when they cost otherwise
-    /// (None: as price_in). An agent's persona and history are the same every turn: most of a prompt is cached.
-    pub price_cached: Option<f64>,
-    pub price_cache_write: Option<f64>,
+    /// this month's limit, tokens in and out (what was used is the Ledger's)
+    pub limit: crate::Tokens,
     /// requests a minute, at most
     pub per_minute: u32,
 }
@@ -68,15 +61,6 @@ impl Config {
         }
     }
 
-    /// What a reply's tokens cost (dollars): the prompt's cached tokens at the cached price.
-    pub fn cost(&self, r: &Reply) -> f64 {
-        let fresh = r.tokens_in.saturating_sub(r.tokens_cached).saturating_sub(r.tokens_cache_write);
-        (fresh as f64 * self.price_in
-            + r.tokens_cached as f64 * self.price_cached.unwrap_or(self.price_in)
-            + r.tokens_cache_write as f64 * self.price_cache_write.unwrap_or(self.price_in)
-            + r.tokens_out as f64 * self.price_out)
-            / 1e6
-    }
 }
 
 /// A function the LLM asks the game to run: its call id (the game answers with it), name, arguments.
@@ -108,6 +92,13 @@ pub struct Reply {
     pub tokens_cached: u64,
     pub tokens_cache_write: u64,
     pub tokens_out: u64,
+}
+
+impl Reply {
+    /// What it used: every token of the prompt in (cached ones too, as the providers count them), the reply's out.
+    pub fn tokens(&self) -> crate::Tokens {
+        crate::Tokens::new(self.tokens_in, self.tokens_out)
+    }
 }
 
 /// A response's `usage` into the reply: OpenAI's prompt_tokens (cached: prompt_tokens_details.cached_tokens, or
@@ -593,14 +584,11 @@ mod tests {
         let r = parse_reply(Api::Anthropic, &a).unwrap();
         assert_eq!((r.calls[0].id.as_str(), r.tokens_in), ("t1", 120));
         assert_eq!(parse_reply(Api::Anthropic, &json!({"type": "error", "error": {"message": "overloaded"}})), Err("overloaded".into()));
-        let cfg = Config { price_in: 1.0, price_out: 5.0, ..Default::default() };
-        assert!((cfg.cost(&Reply { tokens_in: 1_000_000, tokens_out: 200_000, ..Default::default() }) - 2.0).abs() < 1e-9);
     }
 
-    /// The prompt's cached tokens, as each API counts them, at the cached price (the user, 2026-10-25: Koetama's
-    /// count was "WAY off" DeepSeek's bill - an agent's prompt is mostly the same every turn, and cached).
+    /// The prompt's cached tokens, as each API counts them (they are tokens in all the same).
     #[test]
-    fn cached_tokens_cost_less() {
+    fn cached_tokens_are_counted() {
         let deepseek = json!({"choices": [{"message": {"content": "Hi"}}],
             "usage": {"prompt_tokens": 2000, "prompt_cache_hit_tokens": 1800, "prompt_cache_miss_tokens": 200, "completion_tokens": 50}});
         let r = parse_reply(Api::OpenAi, &deepseek).unwrap();
@@ -612,12 +600,7 @@ mod tests {
             "usage": {"input_tokens": 20, "cache_read_input_tokens": 1500, "cache_creation_input_tokens": 480, "output_tokens": 50}});
         let a = parse_reply(Api::Anthropic, &anthropic).unwrap();
         assert_eq!((a.tokens_in, a.tokens_cached, a.tokens_cache_write), (2000, 1500, 480));
-        // (deepseek-flash, off-peak: $0.15 a million in, $0.003 cached, $0.6 out)
-        let cfg = Config { price_in: 0.15, price_out: 0.6, price_cached: Some(0.003), ..Default::default() };
-        let want = (200.0 * 0.15 + 1800.0 * 0.003 + 50.0 * 0.6) / 1e6;
-        assert!((cfg.cost(&r) - want).abs() < 1e-12, "{} {want}", cfg.cost(&r));
-        let no_cache_price = Config { price_in: 0.15, price_out: 0.6, ..Default::default() };
-        assert!((no_cache_price.cost(&r) - (2000.0 * 0.15 + 50.0 * 0.6) / 1e6).abs() < 1e-12, "no cached price: as tokens in");
+        assert_eq!(r.tokens(), crate::Tokens::new(2000, 50), "cached tokens are tokens in");
         let stream = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\
                       data: {\"choices\":[],\"usage\":{\"prompt_tokens\":900,\"prompt_cache_hit_tokens\":640,\"completion_tokens\":3}}\n\n\
                       data: [DONE]\n";

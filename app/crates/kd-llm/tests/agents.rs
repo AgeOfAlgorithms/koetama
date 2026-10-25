@@ -1,8 +1,8 @@
 //! The agent service against a fake LLM (both API styles, on this PC): lines that come while an agent's request runs wait
-//! and go as one turn, function calls go to the game and their results back to the LLM, the host's budget and
+//! and go as one turn, function calls go to the game and their results back to the LLM, the host's tokens a month and
 //! requests a minute, a failed request, a new session, an agent nobody defined.
 use kd_common::feed::{AgentDef, AgentFunction, AgentLine, PlayerId};
-use kd_llm::{Agents, Api, Config, Event, Ledger};
+use kd_llm::{Agents, Api, Config, Event, Ledger, Tokens};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -87,7 +87,7 @@ struct Rig {
 fn rig(cfg: Config) -> Rig {
     let events: Arc<(Mutex<Vec<Event>>, Condvar)> = Arc::default();
     let ev = events.clone();
-    let ledger = Ledger::new(0.0);
+    let ledger = Ledger::new(Tokens::default());
     let agents = Agents::start(
         cfg,
         ledger.clone(),
@@ -101,7 +101,7 @@ fn rig(cfg: Config) -> Rig {
 }
 
 fn config(api: Api, url: &str) -> Config {
-    Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), budget: 5.0, price_in: 1.0, price_out: 5.0, per_minute: 60, ..Default::default() }
+    Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), limit: Tokens::new(5_000_000, 500_000), per_minute: 60 }
 }
 
 fn pig(functions: Vec<AgentFunction>) -> AgentDef {
@@ -173,8 +173,7 @@ fn lines_that_come_while_it_answers_go_as_one_turn() {
     assert!(seen[0].0.contains("authorization: Bearer sk-test") || seen[0].0.to_ascii_lowercase().contains("authorization: bearer sk-test"));
     assert_eq!(seen[1].1["messages"].as_array().unwrap().len(), 4, "system, the first turn, its reply, the new turn");
     drop(seen);
-    let spent = r.ledger.spent();
-    assert!((spent - 2.0 * (100.0 * 1.0 + 20.0 * 5.0) / 1e6).abs() < 1e-12, "spent {spent}");
+    assert_eq!(r.ledger.used(), Tokens::new(200, 40), "two replies' tokens");
     r.agents.stop();
 }
 
@@ -217,9 +216,9 @@ fn function_calls_go_to_the_game_and_their_results_back() {
 #[test]
 fn the_budget_and_requests_a_minute() {
     let f = fake(Box::new(|_, _| (200, openai_text("ok"), Duration::ZERO)));
-    // (a request holds what it could cost at worst - its prompt and 336 tokens out: ~1,800 millionths of a dollar -
-    //  and one reply costs 100 * 1 + 20 * 5 = 200: with 1,950 the first goes, the second would pass the budget)
-    let r = rig(Config { budget: 0.001950, ..config(Api::OpenAi, &f.url) });
+    // (a request holds what it could use at worst - its prompt and 336 tokens out - and one reply uses 20 out: with
+    //  350 out a month the first goes, the second would pass the limit)
+    let r = rig(Config { limit: Tokens::new(1_000_000, 350), ..config(Api::OpenAi, &f.url) });
     r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a")], &[], &[]);
     r.wait_replies(1);
     r.agents.feed(1, &[], &[line(2, "pig", "Wendy", "b")], &[], &[]);
@@ -358,7 +357,7 @@ fn forgetting_cancels_and_the_queue_has_a_cap() {
     assert!(cancelled.contains(&1) && cancelled.contains(&2) && cancelled.contains(&17), "{got:?}");
     std::thread::sleep(Duration::from_millis(800));
     assert!(!r.replies().iter().any(|g| g.1 == "Hm."), "the reply under way was dropped");
-    assert!(r.ledger.spent() == 0.0, "and its hold let go, nothing counted");
+    assert_eq!(r.ledger.used(), Tokens::default(), "and its hold let go, nothing counted");
     r.agents.stop();
 }
 

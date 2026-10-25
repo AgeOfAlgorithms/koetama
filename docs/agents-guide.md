@@ -2,7 +2,7 @@
 
 Your mod can let the **host's** large language model play characters (NPCs that talk and act) or do other jobs (a
 director that plans the next wave, a quest writer, a parser that turns what players say into game commands). Koetama
-holds the host's key, budget and limits, keeps each agent's conversation, and hands you its words and the functions it
+holds the host's key and limits (tokens a month, requests a minute), keeps each agent's conversation, and hands you its words and the functions it
 wants to call. Your mod decides who the agents are, what they hear, and what they are allowed to do.
 
 The exact fields and rules: PROTOCOL.md, "Large language models: agents". This page is the quick start.
@@ -10,7 +10,7 @@ The exact fields and rules: PROTOCOL.md, "Large language models: agents". This p
 ## 1. The host turns it on
 
 Any mod can use agents. The host opens the **Large Language Models** card in Koetama with your game picked: they pick
-the API (OpenAI-compatible or Anthropic), the model and their key, set a budget, try it, and tick "Let the <your mod>
+the API (OpenAI-compatible or Anthropic), the model and their key, set a monthly limit of tokens, try it, and tick "Let the <your mod>
 mod use my language model". That switch alone decides: `"llm"` in your profile's `uses` is not needed (it only says
 your mod has agents). Until the host turns it on, Koetama's `hello` does not list `llm` and drops your agent fields -
 so check, and send them only when it is on:
@@ -88,13 +88,14 @@ Only the host's game needs to do any of this: your mod already carries players' 
   (or `"error: Wendy has only 8 meat"`). The agent's follow-up comes as another `agent_reply` to the same `ids`.
 - **`error`** not empty: no reply. It is a code, and `why` says the same in words for your log (never show `why` as the
   agent's words). Say something in character ("The Pig King ignores you"), and:
-  - `budget`: the host's month is spent - nothing more until they raise it;
+  - `budget`: the host's tokens for the month are used up - nothing more until they raise the limit;
   - `unknown_agent`: Koetama has no definition for it - send it (see `agents_known`), then the line again, with a new id;
   - `queue_full`: more than 16 lines are waiting for that agent - slow down;
   - `cancelled`: your `agent_forget` dropped the lines - nothing to do;
   - `failed` (or a code you do not know): the request failed (a wrong key, no connection...).
-- `agent_status` tells you `ready`, `busy`, `budget` or `error`, the model, and what the host has spent this month of
-  their budget: show it to the host, or hide your agents' talk.
+- `agent_status` tells you `ready`, `busy`, `budget` or `error`, the model, and the tokens used this month
+  (`tokens_in`, `tokens_out`) of the host's limit (`limit_in`, `limit_out`): show it to the host, or hide your
+  agents' talk.
 - With the files connector, a streaming agent's newer words take the place of ones you have not read yet: you may not
   see every `"final": false`, only the newest.
 

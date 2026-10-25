@@ -149,13 +149,10 @@ struct App {
     llm_try: String,
     llm_trying: Option<Receiver<Result<kd_llm::Reply, String>>>,
     llm_tried: Result<String, String>,
-    /// what the LLM has cost this month: ONE count, shared with the running game's agents (Options.llm_ledger); the
-    /// month it is for (a new one starts it over); OpenRouter's price list on its way (loaded on a thread, once the
-    /// host has a model set: a player who never sets one up fetches nothing) and whether it was asked for
+    /// the tokens the LLM has used this month: ONE count, shared with the running game's agents (Options.llm_ledger);
+    /// the month it is for (a new one starts it over)
     llm_ledger: std::sync::Arc<kd_llm::Ledger>,
     llm_month: String,
-    llm_prices: Option<Receiver<Option<kd_llm::Prices>>>,
-    llm_prices_asked: bool,
     /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
     downloaded: Vec<kd_translate::catalog::OnDisk>,
     downloaded_at: Option<Instant>,
@@ -186,7 +183,7 @@ impl App {
         theme::apply(&cc.egui_ctx);
         let settings = Settings::load();
         let llm = crate::llm_setting::LlmSetting::load(&settings);
-        let llm_spent = llm.spent_this_month();
+        let llm_used = llm.used_this_month();
         let (log_tx, log_rx) = channel();
         let (upd_tx, upd_rx) = channel();
         let ins = kd_audio::input_devices();
@@ -234,10 +231,8 @@ impl App {
             llm_try: String::new(),
             llm_trying: None,
             llm_tried: Ok(String::new()),
-            llm_ledger: kd_llm::Ledger::new(llm_spent),
+            llm_ledger: kd_llm::Ledger::new(llm_used),
             llm_month: crate::llm_setting::this_month(),
-            llm_prices: None,
-            llm_prices_asked: false,
             downloaded: Vec::new(),
             downloaded_at: None,
             speech_disk: Vec::new(),
@@ -625,31 +620,15 @@ impl App {
             rt.tick();
             self.status = Some(rt.status());
         }
-        // (OpenRouter's prices: asked for once a model is set; once here, the running game's agents count with them)
-        if !self.llm_prices_asked && !self.llm.model.trim().is_empty() {
-            self.llm_prices_asked = true;
-            let (tx, rx) = channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(crate::llm_setting::load_prices());
-            });
-            self.llm_prices = Some(rx);
-        }
-        if let Some(Ok(prices)) = self.llm_prices.as_ref().map(|rx| rx.try_recv()) {
-            self.llm_prices = None;
-            self.llm.prices = prices;
-            if let (Some(cfg), Some(rt)) = (self.llm.config_for(&self.game_id), self.rt.as_mut()) {
-                rt.set_llm(cfg);
-            }
-        }
-        // (what the LLM spent this month: one ledger, kept in the settings as it grows; a new month starts it over)
+        // (the tokens the LLM used this month: one ledger, kept in the settings as it grows; a new month starts it over)
         let month = crate::llm_setting::this_month();
         if month != self.llm_month {
             self.llm_month = month;
-            self.llm_ledger.set(0.0);
+            self.llm_ledger.set(kd_llm::Tokens::default());
         }
-        let spent = self.llm_ledger.spent();
-        if (spent - self.llm.spent_this_month()).abs() > 1e-9 {
-            self.llm.set_spent(spent);
+        let used = self.llm_ledger.used();
+        if used != self.llm.used_this_month() {
+            self.llm.set_used(used);
             self.llm.save(&mut self.settings);
             self.settings.save();
         }

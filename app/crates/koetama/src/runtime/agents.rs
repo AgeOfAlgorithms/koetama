@@ -1,6 +1,6 @@
 //! The runtime's agents (docs/llm-agents.md): the host's LLM for the game mod's agents, once the host turned it on for
 //! the game - its replies, the words so far of a streaming one, the agents it knows and its state go straight to the
-//! game; the window reads the state. What was spent is the ledger's, shared with the window.
+//! game; the window reads the state. The tokens used are the ledger's, shared with the window.
 use super::GameSlot;
 use kd_common::Log;
 use std::sync::{Arc, Mutex};
@@ -11,13 +11,13 @@ pub struct AgentStatus {
     /// "ready", "busy", "budget", "error" ("" before the first word from the service)
     pub state: &'static str,
     pub why: String,
-    /// the model and the month's budget, as set now (Runtime::set_llm)
+    /// the model and the month's limit, as set now (Runtime::set_llm)
     pub model: String,
-    pub budget: f64,
+    pub limit: kd_llm::Tokens,
 }
 
 /// The agents' service for the game in `slot` (made later: nothing is sent before it is). No ledger: one of its own,
-/// from nothing spent (the command line).
+/// from nothing used (the command line).
 pub(super) fn start(
     cfg: &kd_llm::Config,
     ledger: Option<Arc<kd_llm::Ledger>>,
@@ -28,9 +28,9 @@ pub(super) fn start(
     let (slot, st) = (slot.clone(), status.clone());
     {
         let mut s = st.lock().unwrap();
-        (s.model, s.budget) = (cfg.model.clone(), cfg.budget);
+        (s.model, s.limit) = (cfg.model.clone(), cfg.limit);
     }
-    let ledger = ledger.unwrap_or_else(|| kd_llm::Ledger::new(0.0));
+    let ledger = ledger.unwrap_or_else(|| kd_llm::Ledger::new(kd_llm::Tokens::default()));
     kd_llm::Agents::start(
         cfg.clone(),
         ledger,
@@ -54,14 +54,15 @@ pub(super) fn start(
                         g.lock().unwrap().set_standing("agents_known", kd_games::api::agents_known(&list));
                     }
                 }
-                kd_llm::Event::Status { state, why, spent } => {
-                    let (model, budget) = {
+                kd_llm::Event::Status { state, why, used } => {
+                    let (model, limit) = {
                         let mut s = st.lock().unwrap();
                         (s.state, s.why) = (state, why.clone());
-                        (s.model.clone(), s.budget)
+                        (s.model.clone(), s.limit)
                     };
                     if let Some(g) = game {
-                        g.lock().unwrap().set_standing("agent_status", kd_games::api::agent_status(state, &why, &model, spent, budget));
+                        let o = kd_games::api::agent_status(state, &why, &model, (used.input, used.output), (limit.input, limit.output));
+                        g.lock().unwrap().set_standing("agent_status", o);
                     }
                 }
             }

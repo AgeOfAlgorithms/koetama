@@ -345,8 +345,7 @@ engine/games/teardown.py: feed.json fixtures).
 ```rust
 pub mod api {
     Api { OpenAi, Anthropic } .name() .from_name() .default_url()
-    Config { api, url, model, key, budget, price_in, price_out, price_cached, price_cache_write, per_minute } .url()
-           .cost(&Reply)        // the prompt's cached tokens at price_cached (None: price_in)
+    Config { api, url, model, key, limit: Tokens, per_minute } .url()
     turn_len(&Turn)                 // its characters (what a request could cost: ~4 a token)
     Call { id, name, args: Value }   Turn { User(text), Assistant { text, calls }, Results(Vec<(call, result)>) }
     Reply { text, calls, tokens_in, tokens_cached, tokens_cache_write, tokens_out }
@@ -366,40 +365,33 @@ pub mod api {
 pub mod agents {
     Agents::start(Config, Arc<Ledger>, on_event, log) .set_config(c) .feed(sid, agents, lines, results, forget) .stop()
     Event { Reply { ids, agent, text, calls, error: &'static str (error::*), why }, Partial { ids, agent, text } (a
-            streaming agent's words so far, at most every PARTIAL_EVERY 150 ms), Status { state, why, spent } (on a
-            change of state, or of a cent spent), Known(Vec<(id, version)>) (on a change) }
+            streaming agent's words so far, at most every PARTIAL_EVERY 150 ms), Status { state, why, used: Tokens }
+            (on a change of state, or every 10,000 tokens), Known(Vec<(id, version)>) (on a change) }
     error { BUDGET, UNKNOWN_AGENT, FAILED, CANCELLED, QUEUE_FULL }  // agent_reply's codes ("" none)
     MAX_TURNS 24, MAX_QUEUE 16, RESULTS_WAIT 20 s, TIMEOUT 60 s
 }
 pub mod ledger {
-    Ledger::new(spent) -> Arc .spent() .add(cost) .set(spent) .reserve(most, budget) -> bool .settle(most, cost)
-                                    // the month's spend, ONE for the window's "Try it" and the running game's agents;
-                                    // a request holds the most it could cost until it is settled
-}
-pub mod prices {
-    Price { id, input, output, cache_read, cache_write, created } ::unknown() .apply(&mut Config)
-    Prices(Vec<Price>) ::parse(json) .find(api, url, model) -> Option<Price>
-                                    // OpenRouter's list (LIST_URL): "openai/gpt-4o-mini"; the provider from the
-                                    // address (api.openai.com, api.deepseek.com, ...), "." and "-" alike, ":batch" not;
-                                    // a company's alias: its newest model with the same words and version numbers
-    Prices::load(path, get)         // the copy on this PC, fetched again after MAX_AGE (a day); offline: the old copy
-    UNKNOWN (3, 15)                 // a model the list does not have
+    Tokens { input, output } ::new .within(limit) .reached(limit)
+    Ledger::new(used) -> Arc .used() .add(t) .set(t) .reserve(most, limit) -> bool .settle(most, got)
+                                    // the month's tokens in and out, ONE for the window's "Try it" and the running
+                                    // game's agents; a request holds the most it could use until it is settled. Tokens,
+                                    // not dollars (the user, 2026-10-25): a price could only be guessed
 }
 ```
 
 The service's thread keeps each agent's definition, conversation (MAX_TURNS, starting with a player's turn), queue
 (lines that come while it is busy or its calls wait: one turn, one reply for all) and the calls waiting for the
 game's results; requests run on threads of their own (a reply from an older one - a new session - is dropped). The
-host's limits are the service's: requests a minute (more wait: "busy"), the month's budget (each request reserves
-its worst case - the prompt's characters / 4 at the price in, max_tokens at the price out - in the Ledger, and is not
-sent when that could go past the budget: "budget"), at most MAX_QUEUE lines waiting per agent ("queue_full");
+host's limits are the service's: requests a minute (more wait: "busy"), the month's tokens in and out (each request
+reserves its worst case - the prompt's characters / 3 in, max_tokens out - in the Ledger, and is not sent when that
+could pass either limit: "budget"), at most MAX_QUEUE lines waiting per agent ("queue_full");
 agent_forget cancels what an agent has under way ("cancelled"). koetama: Options.llm and Options.llm_ledger
-(llm_setting.rs: settings.json "llm", the key sealed by secret.rs - DPAPI on Windows; the price from
-llm_setting::load_prices, llm-prices.json in Koetama's folder), runtime/agents.rs (the service's events to the game:
+(llm_setting.rs: settings.json "llm", the key sealed by secret.rs - DPAPI on Windows; "limit" [in, out], "used" by
+month), runtime/agents.rs (the service's events to the game:
 agent_reply, agents_known and agent_status as standing objects), runtime/received.rs (the "received" objects for what
 the feed asked: lines, results, lines to translate), GameKind::with_llm (the host's switch alone; off: the hello does
 not name "llm", the feed's agent fields are dropped), the window's "Large Language Models" card (gui/llm.rs), cli
---llm-* (--llm-price, else OpenRouter's). The files connector lets a streaming agent's newer words take the place of
+--llm-* (--llm-limit IN,OUT). The files connector lets a streaming agent's newer words take the place of
 an unread older object for the same lines (files.rs replace_partial). Tests: kd-llm's unit tests and tests/agents.rs (a fake LLM, both styles),
 tools/agents_e2e.py (a real Koetama between a fake game and a fake LLM; --real for a real one).
 

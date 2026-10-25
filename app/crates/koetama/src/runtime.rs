@@ -520,7 +520,7 @@ impl Runtime {
         if let Some(n) = &self.agents {
             n.set_config(cfg.clone());
             let mut st = self.agent_status.lock().unwrap();
-            (st.model, st.budget) = (cfg.model.clone(), cfg.budget);
+            (st.model, st.limit) = (cfg.model.clone(), cfg.limit);
         }
         self.opts.llm = Some(cfg);
     }

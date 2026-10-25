@@ -74,7 +74,7 @@ Each object has a `"type"` first. Ignore an object whose type you do not know (n
 | `{"type":"received","to_agent":[41],"agent_results":["call_1"],"to_translate":[7]}` | Koetama has these of the feed's requests: the game may stop sending them (their answers come as before). Once for each; a list with nothing is left out. Koetama 0.5.10 and later - an older one sends none, so keep sending until the answer then |
 | `{"type":"agent_reply","ids":[41],"agent":"pig_king","text":"Twelve meat.","calls":[...],"error":"","why":"","final":true}` | an agent's reply to the game's lines `ids` ("Large language models: agents") |
 | `{"type":"agents_known","agents":[{"id":"pig_king","version":1}]}` | the agents Koetama has now (standing): send an agent's definition only when it is not here or is older ("Large language models: agents") |
-| `{"type":"agent_status","state":"ready","why":"","model":"...","spent":0.42,"budget":5}` | the host's large language model: after the hello and when it changes ("Large language models: agents") |
+| `{"type":"agent_status","state":"ready","why":"","model":"...","tokens_in":267106,"tokens_out":9800,"limit_in":5000000,"limit_out":500000}` | the host's large language model: after the hello and when it changes ("Large language models: agents") |
 | `{"type":"join_code","player":"7656...02","code":"K7QF-4MXA"}` | a hub only ("Hub"): the code that player types into their Koetama to join |
 | `{"type":"player","player":"7656...02","joined":true}` | a hub only: that player's Koetama joined (or left) |
 
@@ -312,7 +312,8 @@ MB a direction) and answers each with a `translation`. A game sends `"translate"
 Any mod can ask the **host's** large language model through **agents**: a character in the game's world (an NPC
 that talks and acts), or anything else the mod wants a model for (a director that plans the next wave, a quest writer,
 a parser that turns what players say into commands). The host turns it on for that game in Koetama's window ("Large
-Language Models": the API - OpenAI-compatible or Anthropic -, address, model, key, a monthly budget, requests a
+Language Models": the API - OpenAI-compatible or Anthropic -, address, model, key, a monthly limit of tokens in and
+out, requests a
 minute), and the `hello` then names `llm`; that switch alone decides (a profile may list `"llm"` in `uses`, which only
 says its mod has agents). Without `llm` in the hello, Koetama drops the feed's agent fields: send them only when it is
 there. Only the host's Koetama talks to the model: the game already carries every player's words to the host's script,
@@ -347,7 +348,7 @@ or an object). A how-to for mod makers, with examples: docs/agents-guide.md; the
 
     | `error` | what happened | what to do |
     |---|---|---|
-    | `budget` | the host's monthly budget is spent (or this request could cost more than is left) | a fallback line; nothing more this month unless the host raises it |
+    | `budget` | the host's monthly tokens are used up (or this request could use more than is left) | a fallback line; nothing more this month unless the host raises the limit |
     | `unknown_agent` | no definition for that agent (Koetama restarted, a new session, or it broke a rule) | send its definition (check `agents_known`), then the line again with a new id |
     | `queue_full` | more than 16 lines were waiting for that agent | it is talked to faster than it answers: slow down |
     | `cancelled` | `agent_forget` started its conversation over before it answered | nothing: the lines were dropped on purpose |
@@ -359,16 +360,13 @@ or an object). A how-to for mod makers, with examples: docs/agents-guide.md; the
   session. The game sends a definition when its agent is missing here or older.
 - `received`: `{"type":"received","to_agent":[41,42],"agent_results":["call_1"]}` - Koetama has these lines and
   results (and `to_translate` lines): stop sending them. The answer comes later as before.
-- `agent_status` (standing: after each hello and when it changes - its state, or what was spent by a cent): `state`
-  `ready`, `busy` (the host's requests a minute reached: lines wait), `budget`, `error` (`why`); `model`, `spent` and
-  `budget` (dollars this month). What a request costs is counted from the tokens the API says it used (the
-  prompt's cached tokens at the cached price: an agent's persona and history are the same every turn) and the
-  model's price in OpenRouter's public list (openrouter.ai/api/v1/models: the providers' own prices, fetched by the
-  host's Koetama at most once a day; a company's alias such as `deepseek-flash` is its newest model there); a model
-  not in the list counts at $3 a million tokens in and $15 out. Peak-hour and discount prices are not known: it is
-  an estimate, and the host can reset the month's count. Before
-  each request Koetama sets aside the most it could cost (its prompt and `max_words`): a request that might go past
-  the budget is not sent (`budget`). The provider's bill is what counts.
+- `agent_status` (standing: after each hello and when it changes - its state, or every 10,000 tokens used): `state`
+  `ready`, `busy` (the host's requests a minute reached: lines wait), `budget` (the month's tokens are used up),
+  `error` (`why`); `model`; `tokens_in` and `tokens_out` this month, and the host's monthly `limit_in` and
+  `limit_out`. The host's limit is in tokens, as the API counts them (tokens in: the whole prompt, cached ones too;
+  out: what the model writes), not dollars: a price could only be guessed. Before each request Koetama sets aside
+  the most it could use (its prompt at 3 characters a token, and `max_words`' tokens): a request that might pass
+  either limit is not sent (`budget`). (Koetama 0.5.10 and 0.5.11 sent `spent` and `budget` in dollars instead.)
 
 How Koetama asks: the lines of one turn as `Name: words`, an event in [brackets], the newest `state` as
 `[the game: ...]`; for a `character`, a short note before its persona (it is a character in a multiplayer game, lines

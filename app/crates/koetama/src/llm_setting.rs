@@ -1,8 +1,10 @@
 //! The host's LLM for game mods' agents (docs/llm-agents.md), as the window keeps it in settings.json ("llm"): the games
 //! it is on for (off unless the host turns it on for a game), the API, address, model and key (sealed: secret.rs), the
-//! month's budget, requests a minute, and what was spent each month. The model's price is not kept: it comes from
-//! OpenRouter's list (kd_llm::Prices, `prices`), or kd_llm::prices::UNKNOWN for a model the list does not have.
+//! month's limit in tokens in and out, requests a minute, and the tokens used each month. Tokens, not dollars (the
+//! user, 2026-10-25): a provider's bill can only be guessed at, its token counts are exact. (An older "budget" and
+//! "spent" in dollars are let go.)
 use crate::settings::Settings;
+use kd_llm::Tokens;
 use serde_json::{json, Map, Value};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -14,13 +16,16 @@ pub struct LlmSetting {
     pub model: String,
     /// the key, opened (kept sealed in the settings)
     pub key: String,
-    pub budget: f64,
+    /// tokens a month, in and out
+    pub limit: Tokens,
     pub per_minute: u32,
-    /// dollars spent, by month ("2026-10")
-    pub spent: Map<String, Value>,
-    /// OpenRouter's price list, once loaded (not kept in the settings: its own file, kd_llm::Prices::load)
-    pub prices: Option<kd_llm::Prices>,
+    /// tokens used, by month ("2026-10": [in, out])
+    pub used: Map<String, Value>,
 }
+
+/// The month's limit unless the host sets one: about 2,000 replies of an agent with a long history (~2,300 tokens in,
+/// ~100 out each).
+pub const LIMIT: Tokens = Tokens { input: 5_000_000, output: 500_000 };
 
 impl Default for LlmSetting {
     fn default() -> Self {
@@ -30,21 +35,11 @@ impl Default for LlmSetting {
             url: String::new(),
             model: String::new(),
             key: String::new(),
-            budget: 5.0,
+            limit: LIMIT,
             per_minute: 20,
-            spent: Map::new(),
-            prices: None,
+            used: Map::new(),
         }
     }
-}
-
-/// OpenRouter's price list as kept on this PC (llm-prices.json in Koetama's folder), fetched again at most once a day
-/// (blocking: a thread's work).
-pub fn load_prices() -> Option<kd_llm::Prices> {
-    let path = kd_common::paths::data_dir().join("llm-prices.json");
-    kd_llm::Prices::load(&path, &|url| {
-        kd_common::fetch::get_text(url, Some("application/json"), std::time::Duration::from_secs(20)).map_err(|e| e.to_string())
-    })
 }
 
 /// This month, "YYYY-MM" (UTC; from the clock's days since 1970).
@@ -67,16 +62,16 @@ impl LlmSetting {
         let d = LlmSetting::default();
         let Some(o) = s.0.get("llm").and_then(Value::as_object) else { return d };
         let num = |k: &str, def: f64| o.get(k).and_then(Value::as_f64).filter(|x| x.is_finite() && *x >= 0.0).unwrap_or(def);
+        let limit = o.get("limit").and_then(Value::as_array).and_then(|a| Some(Tokens::new(a.first()?.as_u64()?, a.get(1)?.as_u64()?)));
         LlmSetting {
             games: o.get("games").and_then(Value::as_array).map_or_else(Vec::new, |a| a.iter().filter_map(|g| g.as_str().map(String::from)).collect()),
             api: o.get("api").and_then(Value::as_str).and_then(kd_llm::Api::from_name).unwrap_or(d.api),
             url: o.get("url").and_then(Value::as_str).unwrap_or("").to_string(),
             model: o.get("model").and_then(Value::as_str).unwrap_or("").to_string(),
             key: o.get("key").and_then(Value::as_str).and_then(crate::secret::open).unwrap_or_default(),
-            budget: num("budget", d.budget),
+            limit: limit.unwrap_or(d.limit),
             per_minute: num("per_minute", d.per_minute as f64).clamp(1.0, 600.0) as u32,
-            spent: o.get("spent").and_then(Value::as_object).cloned().unwrap_or_default(),
-            prices: None,
+            used: o.get("used").and_then(Value::as_object).cloned().unwrap_or_default(),
         }
     }
 
@@ -85,8 +80,8 @@ impl LlmSetting {
             "llm",
             json!({
                 "games": self.games, "api": self.api.name(), "url": self.url, "model": self.model,
-                "key": crate::secret::seal(&self.key), "budget": self.budget, "per_minute": self.per_minute,
-                "spent": self.spent,
+                "key": crate::secret::seal(&self.key), "limit": [self.limit.input, self.limit.output],
+                "per_minute": self.per_minute, "used": self.used,
             }),
         );
     }
@@ -102,26 +97,14 @@ impl LlmSetting {
         }
     }
 
-    pub fn spent_this_month(&self) -> f64 {
-        self.spent.get(&this_month()).and_then(Value::as_f64).unwrap_or(0.0)
+    pub fn used_this_month(&self) -> Tokens {
+        let m = self.used.get(&this_month()).and_then(Value::as_array);
+        let n = |i: usize| m.and_then(|a| a.get(i)).and_then(Value::as_u64).unwrap_or(0);
+        Tokens::new(n(0), n(1))
     }
 
-    pub fn set_spent(&mut self, x: f64) {
-        self.spent.insert(this_month(), json!(x));
-    }
-
-    /// The model's price in OpenRouter's list (None: not in it, or the list is not loaded - counted at
-    /// kd_llm::Price::unknown).
-    pub fn price(&self) -> Option<kd_llm::Price> {
-        self.prices.as_ref().and_then(|p| p.find(self.api, self.url_or_default(), &self.model))
-    }
-
-    fn url_or_default(&self) -> &str {
-        if self.url.trim().is_empty() {
-            self.api.default_url()
-        } else {
-            self.url.trim()
-        }
+    pub fn set_used(&mut self, t: Tokens) {
+        self.used.insert(this_month(), json!([t.input, t.output]));
     }
 
     /// Ready to use: a model and a key.
@@ -136,18 +119,13 @@ impl LlmSetting {
 
     /// The config as the setting is now, whatever game (None: not complete) - the window's "Try it".
     pub fn config(&self) -> Option<kd_llm::Config> {
-        self.complete().then(|| {
-            let mut c = kd_llm::Config {
-                api: self.api,
-                url: self.url.trim().to_string(),
-                model: self.model.trim().to_string(),
-                key: self.key.trim().to_string(),
-                budget: self.budget,
-                per_minute: self.per_minute,
-                ..Default::default()
-            };
-            self.price().unwrap_or_else(kd_llm::Price::unknown).apply(&mut c);
-            c
+        self.complete().then(|| kd_llm::Config {
+            api: self.api,
+            url: self.url.trim().to_string(),
+            model: self.model.trim().to_string(),
+            key: self.key.trim().to_string(),
+            limit: self.limit,
+            per_minute: self.per_minute,
         })
     }
 }
@@ -158,21 +136,33 @@ mod tests {
 
     #[test]
     fn kept_and_read_back() {
-        let mut l = LlmSetting { model: "gpt-x".into(), key: "sk-secret".into(), ..Default::default() };
+        let mut l = LlmSetting { model: "gpt-x".into(), key: "sk-secret".into(), limit: Tokens::new(1_000, 100), ..Default::default() };
         l.set_on("dst", true);
-        l.set_spent(0.25);
+        l.set_used(Tokens::new(250, 25));
         let mut s = Settings::default();
         l.save(&mut s);
         let text = serde_json::to_string(&s.0).unwrap();
         assert!(!text.contains("sk-secret"), "the key is sealed: {text}");
         let back = LlmSetting::load(&s);
         assert_eq!(back, l);
-        assert!(back.config_for("dst").is_some_and(|c| c.key == "sk-secret" && c.price_in == kd_llm::prices::UNKNOWN.0));
-        assert_eq!(back.spent_this_month(), 0.25);
+        assert!(back.config_for("dst").is_some_and(|c| c.key == "sk-secret" && c.limit == Tokens::new(1_000, 100)));
+        assert_eq!(back.used_this_month(), Tokens::new(250, 25));
         assert!(back.config_for("teardown").is_none(), "off for a game the host did not turn it on for");
         let mut empty = back.clone();
         empty.key.clear();
         assert!(empty.config_for("dst").is_none(), "no key: off");
         assert_eq!(this_month().len(), 7);
+    }
+
+    /// An older setting in dollars: its limit is the default, its dollars are let go.
+    #[test]
+    fn dollars_are_let_go() {
+        let mut s = Settings::default();
+        s.set("llm", json!({"model": "m", "budget": 5.0, "spent": {"2026-10": 0.85}, "price_in": 1.0}));
+        let l = LlmSetting::load(&s);
+        assert_eq!((l.limit, l.used_this_month()), (LIMIT, Tokens::default()));
+        l.save(&mut s);
+        let text = serde_json::to_string(&s.0).unwrap();
+        assert!(!text.contains("budget") && !text.contains("spent") && !text.contains("price"), "{text}");
     }
 }
