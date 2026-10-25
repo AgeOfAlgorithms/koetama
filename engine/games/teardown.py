@@ -170,8 +170,8 @@ def parse_agent(o):
 
 def parse_agent_line(o):
     """a to_agent item -> dict, or None (left out): an id as to_translate's, a good agent id, a text of 1 to
-    MAX_REQUEST_BYTES; `from` (who said it: an id and a name), `state` (at most MAX_STATE_BYTES, else ''), `heard_by`
-    (player ids, the first 64, bad ones left out) are optional"""
+    MAX_REQUEST_BYTES; `from` (who said it: an id and a name) and `state` (at most MAX_STATE_BYTES, else '') are
+    optional"""
     if not isinstance(o, dict):
         return None
     rid = _whole(o.get('id'))
@@ -182,13 +182,8 @@ def parse_agent_line(o):
         return None
     f = o.get('from') if isinstance(o.get('from'), dict) else {}
     who = player_id(f['id']) if f.get('id') is not None else None
-    heard = []
-    for h in (o['heard_by'][:64] if isinstance(o.get('heard_by'), list) else []):
-        pid = player_id(h)
-        if pid is not None and pid not in heard:
-            heard.append(pid)
     return dict(id=rid, agent=o['agent'], text=text, from_id=who, from_name=_short(f.get('name')),
-                state=o['state'] if _fits(o.get('state'), MAX_STATE_BYTES) else '', heard_by=heard)
+                state=o['state'] if _fits(o.get('state'), MAX_STATE_BYTES) else '')
 
 
 def parse_agent_fields(v):

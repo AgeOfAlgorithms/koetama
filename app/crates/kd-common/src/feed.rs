@@ -439,7 +439,6 @@ pub struct AgentLine {
     pub from_id: Option<PlayerId>,
     pub from_name: String,
     pub state: String,
-    pub heard_by: Vec<PlayerId>,
 }
 
 /// the most agents a feed defines, and their limits (docs/llm-agents.md; engine/games/teardown.py - keep the same)

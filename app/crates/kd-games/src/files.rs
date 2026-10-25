@@ -309,6 +309,9 @@ struct LinkState {
     live: bool,
     /// the standing objects as last told (kind -> object: a new session hears them after its hello)
     standing: BTreeMap<&'static str, String>,
+    /// the last object, when it was a streaming agent's words so far: (its number, the agent and lines it is for) - a
+    /// newer one for the same lines replaces it while the game has not read it (no pile of stale words to read)
+    partial: Option<(i64, String)>,
 }
 
 /// Koetama's files for the game: <prefix>on, the answer to each ping, numbered message files. Shared by the feed's
@@ -369,6 +372,7 @@ impl Link {
                 sid: None,
                 ping: None,
                 n: 0,
+                partial: None,
                 pending: BTreeMap::new(),
                 mic: false,
                 lang: "en".into(),
@@ -496,9 +500,40 @@ impl Link {
         }
     }
 
-    /// Any other object for the game. False if no game is listening.
+    /// Any other object for the game. False if no game is listening. A streaming agent's words so far replace the
+    /// last ones for the same lines while the game has not read them.
     pub fn send_object(&self, object: String) -> bool {
-        self.write_obj(object)
+        let key = serde_json::from_str::<serde_json::Value>(&object)
+            .ok()
+            .filter(|v| v["type"] == "agent_reply" && v["final"] == false)
+            .map(|v| format!("{}:{}", v["agent"], v["ids"]));
+        if let Some(k) = &key {
+            if let Some(done) = self.replace_partial(k, &object) {
+                return done;
+            }
+        }
+        let ok = self.write_obj(object);
+        let mut s = self.lock();
+        s.partial = key.filter(|_| ok).map(|k| (s.n, k));
+        ok
+    }
+
+    /// The unread last object is the words so far for the same lines: written over with these (Some(written));
+    /// None: it is not (written as a new one).
+    fn replace_partial(&self, key: &str, object: &str) -> Option<bool> {
+        let s = self.lock();
+        let (n, k) = s.partial.as_ref()?;
+        if k != key || *n != s.n {
+            return None;
+        }
+        let path = s.pending.get(n)?.clone();
+        let dir = s.dir.clone()?;
+        let tmp = self.path(&dir, &format!("w{n}.tmp"));
+        let written = match self.rules.message {
+            MessageFormat::Json => fs::write(&tmp, format!("{object}\n")),
+            MessageFormat::TeardownPrefab => write_text(&tmp, &crate::api::object_prefab(object)),
+        };
+        Some(written.and_then(|_| fs::rename(&tmp, &path)).is_ok())
     }
 
     /// All my files gone.

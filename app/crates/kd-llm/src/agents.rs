@@ -7,10 +7,15 @@
 //! - Function calls: the reply's calls go to the game (Event::Reply with `calls`); the game runs them, checks them
 //!   against its rules and answers each (feed's agent_results); with all of them answered (or after RESULTS_WAIT
 //!   without), they go back to the LLM and its follow-up is another reply to the same lines.
-//! - The host's limits: requests a minute (more wait in the queue: "busy"), the month's budget (spent: the lines get
-//!   an error reply: "budget"). Each reply's cost is told (Event::Spent) for the host's setting to keep.
-//! - A new game session (`sid`) starts every agent over; `agent_forget` starts one over.
+//! - The host's limits: requests a minute (more wait in the queue: "busy"), the month's budget (the Ledger, shared with
+//!   the window: each request holds what it could cost at worst before it goes - "budget" when that would pass it).
+//! - What it knows: Event::Known (each agent's id and version) whenever that changes - the game sends a definition only
+//!   when it is missing or older.
+//! - A new game session (`sid`) starts every agent over; `agent_forget` starts one over and cancels what it had under
+//!   way (its lines answered "cancelled"). At most MAX_QUEUE lines wait per agent ("queue_full").
+//! - A reply that is not one says why with a code (Error) and words (`why`).
 use crate::api::{self, Call, Config, Reply, Turn};
+use crate::ledger::Ledger;
 use kd_common::feed::{AgentDef, AgentLine};
 use kd_common::Log;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -29,20 +34,36 @@ pub const TIMEOUT: Duration = Duration::from_secs(60);
 pub const PARTIAL_EVERY: Duration = Duration::from_millis(150);
 /// the line ids remembered in a session (each answered once), the newest
 const SEEN_MAX: usize = 4096;
+/// the most lines waiting for one agent; more are answered "queue_full"
+pub const MAX_QUEUE: usize = 16;
+
+/// Why a reply is not one (agent_reply's `error`; `why` says more).
+pub mod error {
+    /// the host's budget for the month would be passed
+    pub const BUDGET: &str = "budget";
+    /// a line for an agent Koetama does not have (send its definition)
+    pub const UNKNOWN_AGENT: &str = "unknown_agent";
+    /// the request failed (the model, the network, the key)
+    pub const FAILED: &str = "failed";
+    /// agent_forget (or a new definition's reset) dropped it
+    pub const CANCELLED: &str = "cancelled";
+    /// too many lines were waiting for the agent
+    pub const QUEUE_FULL: &str = "queue_full";
+}
 
 /// What the service tells the program (for the game, and the host's setting).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// the reply to lines `ids` of agent `agent`: its words and function calls (the game runs them and answers with
-    /// agent_results); `error` when it could not be asked ("budget", or what failed) - then text and calls are empty
-    Reply { ids: Vec<i64>, agent: String, text: String, calls: Vec<Call>, error: String },
+    /// agent_results); `error` (an error:: code) and `why` when it is not one - then text and calls are empty
+    Reply { ids: Vec<i64>, agent: String, text: String, calls: Vec<Call>, error: &'static str, why: String },
     /// a streaming agent's words so far, while its reply comes (a few times a second at most; the Reply follows)
     Partial { ids: Vec<i64>, agent: String, text: String },
     /// "ready", "busy" (requests a minute reached: lines wait), "budget" (the month's budget is spent), "error" (the
     /// last request failed: `why`); spent: this month so far
     Status { state: &'static str, why: String, spent: f64 },
-    /// what was spent this month so far, after each reply (the host's setting keeps it)
-    Spent(f64),
+    /// the agents Koetama has now, (id, version), sorted: after each change (and empty for a new session)
+    Known(Vec<(String, i64)>),
 }
 
 pub type OnEvent = Arc<dyn Fn(Event) + Send + Sync>;
@@ -63,10 +84,13 @@ pub struct Agents {
 }
 
 impl Agents {
-    pub fn start(cfg: Config, on_event: OnEvent, log: Log) -> Agents {
+    /// The service, counting what it spends in `ledger` (shared with whatever else asks the same model).
+    pub fn start(cfg: Config, ledger: Arc<Ledger>, on_event: OnEvent, log: Log) -> Agents {
         let (tx, rx) = mpsc::channel();
         let mut w = Worker {
             cfg,
+            ledger,
+            known: None,
             on_event,
             log,
             tx: tx.clone(),
@@ -119,15 +143,18 @@ struct Agent {
     history: Vec<Turn>,
     /// lines waiting for the agent to be free
     queue: Vec<AgentLine>,
-    /// the request under way: its generation (a reply from an older one is dropped), the lines it answers, and the
-    /// history's length before it (put back if it fails)
-    busy: Option<(u64, Vec<i64>, usize)>,
+    /// the request under way: its generation (a reply from an older one is dropped), the lines it answers, the
+    /// history's length before it (put back if it fails), and what the ledger holds for it
+    busy: Option<(u64, Vec<i64>, usize, f64)>,
     /// function calls waiting for the game's results
     waiting: Option<Waiting>,
 }
 
 struct Worker {
     cfg: Config,
+    ledger: Arc<Ledger>,
+    /// the agents as last told (Event::Known)
+    known: Option<Vec<(String, i64)>>,
     on_event: OnEvent,
     log: Log,
     tx: Sender<Msg>,
@@ -138,7 +165,8 @@ struct Worker {
     /// when the last requests were sent (requests a minute)
     sent: VecDeque<Instant>,
     gen: u64,
-    told: Option<(&'static str, String)>,
+    /// the state as last told (Event::Status): state, why, cents spent
+    told: Option<(&'static str, String, i64)>,
     /// the last request failed (and why), until one succeeds
     failed: Option<String>,
 }
@@ -194,15 +222,11 @@ impl Worker {
         loop {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(Msg::Config(c)) => {
-                    // (what was spent is the service's to count from here on: the setting may come with an older figure)
-                    let spent = self.cfg.spent.max(c.spent);
-                    self.cfg = Config { spent, ..c };
-                }
+                Ok(Msg::Config(c)) => self.cfg = c,
                 Ok(Msg::Feed { sid, agents, lines, results, forget }) => self.feed(sid, agents, lines, results, forget),
                 Ok(Msg::Done { agent, gen, result }) => self.done(&agent, gen, result),
                 Ok(Msg::Partial { agent, gen, text }) => {
-                    if let Some((g, ids, _)) = self.agents.get(&agent).and_then(|a| a.busy.as_ref()) {
+                    if let Some((g, ids, ..)) = self.agents.get(&agent).and_then(|a| a.busy.as_ref()) {
                         if *g == gen {
                             (self.on_event)(Event::Partial { ids: ids.clone(), agent, text });
                         }
@@ -229,9 +253,7 @@ impl Worker {
             n.def = d;
         }
         for id in forget {
-            if let Some(n) = self.agents.get_mut(&id) {
-                n.history.clear();
-            }
+            self.forget(&id);
         }
         for l in lines {
             if !self.seen.insert(l.id) {
@@ -244,8 +266,9 @@ impl Worker {
                 }
             }
             match self.agents.get_mut(&l.agent) {
-                Some(n) => n.queue.push(l),
-                None => self.reply(vec![l.id], &l.agent, String::new(), Vec::new(), format!("no agent \"{}\" (send it in agents first)", l.agent)),
+                Some(n) if n.queue.len() < MAX_QUEUE => n.queue.push(l),
+                Some(_) => self.fail(vec![l.id], &l.agent, error::QUEUE_FULL, format!("{MAX_QUEUE} lines already wait for it")),
+                None => self.fail(vec![l.id], &l.agent, error::UNKNOWN_AGENT, format!("no agent \"{}\": send its definition in agents", l.agent)),
             }
         }
         for (call, result) in results {
@@ -266,6 +289,25 @@ impl Worker {
             .collect();
         for k in ready {
             self.results_back(&k);
+        }
+    }
+
+    /// agent_forget: its conversation starts over, and what it had under way is cancelled (a request's reply dropped,
+    /// its lines, the waiting ones and those whose calls wait for results answered "cancelled").
+    fn forget(&mut self, k: &str) {
+        let Some(n) = self.agents.get_mut(k) else { return };
+        n.history.clear();
+        let mut ids: Vec<i64> = Vec::new();
+        if let Some((_, busy_ids, _, held)) = n.busy.take() {
+            ids.extend(busy_ids);
+            self.ledger.settle(held, 0.0);
+        }
+        if let Some((waiting_ids, ..)) = n.waiting.take() {
+            ids.extend(waiting_ids);
+        }
+        ids.extend(n.queue.drain(..).map(|l| l.id));
+        if !ids.is_empty() {
+            self.fail(ids, k, error::CANCELLED, "the game made it forget".into());
         }
     }
 
@@ -310,12 +352,6 @@ impl Worker {
             .map(|(k, _)| k.clone())
             .collect();
         for k in free {
-            if self.over_budget() {
-                let n = self.agents.get_mut(&k).expect("listed");
-                let ids: Vec<i64> = n.queue.drain(..).map(|l| l.id).collect();
-                self.reply(ids, &k, String::new(), Vec::new(), "budget".into());
-                continue;
-            }
             if !self.may_send() {
                 return; // (requests a minute reached: they wait)
             }
@@ -330,7 +366,7 @@ impl Worker {
     }
 
     fn over_budget(&self) -> bool {
-        self.cfg.spent >= self.cfg.budget
+        self.ledger.spent() >= self.cfg.budget
     }
 
     /// A request may go now (requests a minute): counted if so.
@@ -346,13 +382,24 @@ impl Worker {
         true
     }
 
-    /// Ask the LLM for agent k's next words (its history already has the new turn), on a thread of its own.
+    /// Ask the LLM for agent k's next words (its history already has the new turn), on a thread of its own - if the
+    /// ledger can hold what it could cost at worst (its prompt, about 4 characters a token, and its longest reply):
+    /// else its lines are answered "budget" and the turn taken back.
     fn ask(&mut self, k: &str, ids: Vec<i64>, before: usize) {
         let Some(n) = self.agents.get_mut(k) else { return };
-        self.gen += 1;
-        n.busy = Some((self.gen, ids, before));
         let (cfg, sys, functions, turns) = (self.cfg.clone(), system(&n.def), n.def.functions.clone(), n.history.clone());
         let max_tokens = (n.def.max_words.max(1) as u32).saturating_mul(2).saturating_add(256).min(4096);
+        let prompt: usize = sys.len()
+            + functions.iter().map(|f| f.description.len() + f.parameters.to_string().len()).sum::<usize>()
+            + turns.iter().map(api::turn_len).sum::<usize>();
+        let most = (prompt as f64 / 4.0 * cfg.price_in + max_tokens as f64 * cfg.price_out) / 1e6;
+        if !self.ledger.reserve(most, cfg.budget) {
+            n.history.truncate(before);
+            self.fail(ids, k, error::BUDGET, format!("this month's ${:.2} would be passed", cfg.budget));
+            return;
+        }
+        self.gen += 1;
+        n.busy = Some((self.gen, ids, before, most));
         let (tx, agent, gen, stream) = (self.tx.clone(), k.to_string(), self.gen, n.def.stream);
         std::thread::spawn(move || {
             let result = if stream {
@@ -374,9 +421,9 @@ impl Worker {
 
     fn done(&mut self, k: &str, gen: u64, result: Result<Reply, String>) {
         let Some(n) = self.agents.get_mut(k) else { return };
-        let Some((g, ids, before)) = n.busy.take() else { return };
+        let Some((g, ids, before, held)) = n.busy.take() else { return };
         if g != gen {
-            n.busy = Some((g, ids, before));
+            n.busy = Some((g, ids, before, held));
             return;
         }
         match result {
@@ -385,7 +432,7 @@ impl Worker {
                 if !r.calls.is_empty() {
                     n.waiting = Some((ids.clone(), r.calls.iter().map(|c| c.id.clone()).collect(), Vec::new(), Instant::now()));
                 }
-                self.cfg.spent += self.cfg.cost(&r);
+                self.ledger.settle(held, self.cfg.cost(&r));
                 self.failed = None;
                 (self.log)(&format!(
                     "agent {k}: replied ({} tokens in, {} out{})",
@@ -393,24 +440,34 @@ impl Worker {
                     r.tokens_out,
                     if r.calls.is_empty() { String::new() } else { format!(", {} function calls", r.calls.len()) }
                 ));
-                (self.on_event)(Event::Spent(self.cfg.spent));
-                self.reply(ids, k, r.text, r.calls, String::new());
+                self.reply(ids, k, r.text, r.calls);
             }
             Err(e) => {
                 n.history.truncate(before);
+                self.ledger.settle(held, 0.0);
                 (self.log)(&format!("agent {k}: {e}"));
                 self.failed = Some(e.clone());
-                self.reply(ids, k, String::new(), Vec::new(), e);
+                self.fail(ids, k, error::FAILED, e);
             }
         }
     }
 
-    fn reply(&self, ids: Vec<i64>, agent: &str, text: String, calls: Vec<Call>, error: String) {
-        (self.on_event)(Event::Reply { ids, agent: agent.to_string(), text, calls, error });
+    fn reply(&self, ids: Vec<i64>, agent: &str, text: String, calls: Vec<Call>) {
+        (self.on_event)(Event::Reply { ids, agent: agent.to_string(), text, calls, error: "", why: String::new() });
     }
 
-    /// The status when it changed.
+    fn fail(&self, ids: Vec<i64>, agent: &str, code: &'static str, why: String) {
+        (self.on_event)(Event::Reply { ids, agent: agent.to_string(), text: String::new(), calls: Vec::new(), error: code, why });
+    }
+
+    /// The status when it changed, and the agents it has when they changed.
     fn tell(&mut self) {
+        let mut known: Vec<(String, i64)> = self.agents.iter().map(|(k, a)| (k.clone(), a.def.version)).collect();
+        known.sort();
+        if self.known.as_ref() != Some(&known) {
+            (self.on_event)(Event::Known(known.clone()));
+            self.known = Some(known);
+        }
         let waiting = self.agents.values().any(|n| !n.queue.is_empty());
         let now = if self.over_budget() {
             ("budget", String::new())
@@ -421,8 +478,11 @@ impl Worker {
         } else {
             ("ready", String::new())
         };
+        // (again when the state changes, or what was spent by a cent: the game shows it)
+        let spent = self.ledger.spent();
+        let now = (now.0, now.1, (spent * 100.0).round() as i64);
         if self.told.as_ref() != Some(&now) {
-            (self.on_event)(Event::Status { state: now.0, why: now.1.clone(), spent: self.cfg.spent });
+            (self.on_event)(Event::Status { state: now.0, why: now.1.clone(), spent });
             self.told = Some(now);
         }
     }
@@ -441,7 +501,6 @@ mod tests {
             from_id: from.map(PlayerId::string),
             from_name: String::new(),
             state: state.into(),
-            heard_by: Vec::new(),
         }
     }
 

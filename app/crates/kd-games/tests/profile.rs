@@ -334,20 +334,20 @@ fn hosted_games() {
     assert!(err(&with(socket_profile(), "/uses", Some(json!(["hosted"])))).contains("at least one"));
 }
 
-/// "llm": the mod has agents (docs/llm-agents.md) - alone too. Whether the host's LLM serves them is the host's setting, for
-/// any mod (GameKind::with_llm), and only then does the hello name it.
+/// "llm": the mod has agents (docs/llm-agents.md) - accepted, alone too, but it turns nothing on. Whether the host's LLM
+/// serves them is the host's setting, for any mod (GameKind::with_llm), and only then does the hello name it.
 #[test]
 fn llm_games() {
     let p = parse(&with(socket_profile(), "/uses", Some(json!(["speech", "llm"])))).unwrap();
-    assert!(p.llm && p.speech && !p.voices);
-    assert!(parse(&with(socket_profile(), "/uses", Some(json!(["llm"])))).unwrap().llm, "llm alone");
-    assert!(!parse(&socket_profile()).unwrap().llm, "not unless the profile says so");
+    assert!(!p.llm && p.speech && !p.voices, "the file does not turn it on");
+    assert!(parse(&with(socket_profile(), "/uses", Some(json!(["llm"])))).is_ok(), "llm alone");
     assert!(err(&with(socket_profile(), "/uses", Some(json!(["llm", "x"])))).contains("\"llm\""));
     let kind = kd_games::GameKind::from_profile(p, false, None);
-    assert!(kind.llm && kd_games::api::features(&kind.profile).contains(&"llm"));
-    let off = kind.with_llm(false);
+    assert!(!kind.llm && !kd_games::api::features(&kind.profile).contains(&"llm"));
+    let on = kind.with_llm(true);
+    assert!(on.llm && kd_games::api::features(&on.profile).contains(&"llm"));
+    let off = on.with_llm(false);
     assert!(!off.llm && !kd_games::api::features(&off.profile).contains(&"llm"), "the host has it off");
-    assert!(kind.with_llm(true).llm);
     let any = kd_games::GameKind::from_profile(parse(&socket_profile()).unwrap(), false, None);
     let on = any.with_llm(true);
     assert!(on.llm && kd_games::api::features(&on.profile).contains(&"llm"), "any mod, once the host turns it on");

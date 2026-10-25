@@ -8,8 +8,14 @@ instead); a queue - lines that come while the model answers wait and go together
 preamble. In the window it is "Large Language Models": the feature has more uses than NPCs. Then (the user, the same
 day): "agents is a better terminology" - the protocol's names are agents, to_agent, agent_results, agent_forget,
 agent_reply, agent_status; an agent has `character` (true by default: Koetama's note before the persona; false: the
-persona alone - a director, a writer, a command parser); a mod sends its agents again after every hello. Below, the
-design as first written (npcs, to_npc, ...): PROTOCOL.md "Large language models: agents" is what is built.*
+persona alone - a director, a writer, a command parser); a mod sends an agent's definition when Koetama's
+`agents_known` does not have it (or has an older version). After a review (the same day): `error` is a code
+(`budget`, `unknown_agent`, `queue_full`, `cancelled`, `failed`) with `why` in words; `agents_known` and
+`received` tell the game what Koetama has, so it stops resending; `heard_by` is gone (nothing used it); `uses: "llm"`
+only informs (the host's switch decides, for any mod); prices come from OpenRouter's public list (the user: "if
+openrouter is trustworthy, use their numbers"), and one ledger counts the window's tries and the game's agents, each
+request reserving its worst case before it is sent. Below, the design as first written (npcs, to_npc, ...):
+PROTOCOL.md "Large language models: agents" is what is built.*
 
 ## The idea
 

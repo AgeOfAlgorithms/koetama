@@ -9,6 +9,14 @@ use kd_update::Release;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+mod llm;
+mod models;
+mod profiles;
+mod updates;
+
+use models::Deleting;
+use updates::UpdateMsg;
+
 const DEFAULT: &str = "(system default)";
 /// the automatic gain past this (dB): the window says the microphone is quiet (a normal one needs about +5..+15)
 const QUIET_MIC_DB: f32 = 22.0;
@@ -22,79 +30,6 @@ fn lang_name(code: &str) -> String {
     }
 }
 
-/// A model's state in words, and its colour.
-fn model_state(row: &crate::runtime::ModelRow, on_disk: bool) -> (String, Color32) {
-    use kd_speech::ModelState::*;
-    match (&row.state, on_disk) {
-        (Loaded, _) if row.needed => ("in memory".into(), theme::GOOD),
-        (Loaded, _) => ("in memory · letting go".into(), theme::MUTED),
-        (Loading, _) => ("loading".into(), theme::WARN),
-        (Downloading(f, d, t), _) => (format!("downloading {}", download_text(&(f.clone(), *d, *t))), theme::WARN),
-        (NotLoaded, true) if row.needed => ("on disk".into(), theme::MUTED),
-        (NotLoaded, true) => ("on disk · not needed".into(), theme::MUTED),
-        (NotLoaded, false) => ("not downloaded".into(), theme::MUTED),
-    }
-}
-
-/// Sizes as the model lists say them: "1.2 GB", "670 MB", "37 MB".
-fn gb(bytes: u64) -> String {
-    if bytes >= 1_000_000_000 {
-        format!("{:.1} GB", bytes as f64 / 1e9)
-    } else {
-        mb(bytes)
-    }
-}
-
-fn mb(bytes: u64) -> String {
-    format!("{} MB", (bytes + 500_000) / 1_000_000)
-}
-
-/// The translation directions a pair goes through, by folder ("ja-en"; two through English, as catalog::route).
-fn pair_keys(from: &str, to: &str) -> Vec<String> {
-    use kd_translate::catalog::mozilla_code;
-    let (Some(f), Some(t)) = (mozilla_code(from, true), mozilla_code(to, false)) else { return Vec::new() };
-    if f == "en" || t == "en" {
-        vec![format!("{f}-{t}")]
-    } else {
-        vec![format!("{f}-en"), format!("en-{t}")]
-    }
-}
-
-/// A model the player asked to delete, until they confirm.
-#[derive(Clone)]
-enum Deleting {
-    Speech { name: &'static str, title: &'static str, bytes: u64 },
-    Translation { key: String, label: String, bytes: u64 },
-}
-
-/// What a click in a model list asks for (done once the list is drawn).
-enum ModelAction {
-    FreeSpeech(&'static str),
-    FreeTranslation(String),
-    Delete(Deleting),
-}
-
-/// A model's two buttons: Free memory (when it is in memory) and the bin (Ok: Koetama may delete its files, and the
-/// hover text; Err: why not). Clicked: (free, delete).
-fn model_buttons(ui: &mut egui::Ui, in_memory: bool, free_hint: &str, delete: Result<String, String>) -> (bool, bool) {
-    // (only the buttons that do something: greyed-out ones looked broken - the user, 2026-10-24; the status says why)
-    let free = if in_memory {
-        ui.add(egui::Button::new(RichText::new("Free memory").size(12.0)).small()).on_hover_text(free_hint).clicked()
-    } else {
-        ui.label("");
-        false
-    };
-    let del = match delete {
-        Ok(hint) => theme::remove_button(ui, 22.0).on_hover_text(hint).clicked(),
-        Err(_) => {
-            ui.label("");
-            false
-        }
-    };
-    (free, del)
-}
-
-/// (file, bytes done, bytes total) -> "42 % of 640 MB" (or "120 MB" when the size is not known)
 /// The voice chat as the window says it: off, connecting, in the room (and how many voices it hears).
 pub fn voice_text(v: &kd_voice::VoiceStatus) -> (String, Color32) {
     match (v.state, v.heard) {
@@ -160,6 +95,7 @@ pub fn translate_line(st: &kd_translate::service::Status) -> String {
     }
 }
 
+/// (file, bytes done, bytes total) -> "42 % of 640 MB" (or "120 MB" when the size is not known)
 pub fn download_text(d: &(String, u64, u64)) -> String {
     let (_, done, total) = d;
     if *total > 0 {
@@ -167,14 +103,6 @@ pub fn download_text(d: &(String, u64, u64)) -> String {
     } else {
         format!("{:.0} MB", *done as f64 / 1e6)
     }
-}
-
-enum UpdateMsg {
-    Checked(Option<Release>, bool),
-    Failed(String, bool),
-    Progress(f64),
-    Downloaded(std::path::PathBuf),
-    DownloadFailed(String),
 }
 
 struct App {
@@ -221,6 +149,13 @@ struct App {
     llm_try: String,
     llm_trying: Option<Receiver<Result<kd_llm::Reply, String>>>,
     llm_tried: Result<String, String>,
+    /// what the LLM has cost this month: ONE count, shared with the running game's agents (Options.llm_ledger); the
+    /// month it is for (a new one starts it over); OpenRouter's price list on its way (loaded on a thread, once the
+    /// host has a model set: a player who never sets one up fetches nothing) and whether it was asked for
+    llm_ledger: std::sync::Arc<kd_llm::Ledger>,
+    llm_month: String,
+    llm_prices: Option<Receiver<Option<kd_llm::Prices>>>,
+    llm_prices_asked: bool,
     /// the translation models on this PC (the "Downloaded" list) and when the folder was last looked at
     downloaded: Vec<kd_translate::catalog::OnDisk>,
     downloaded_at: Option<Instant>,
@@ -251,6 +186,7 @@ impl App {
         theme::apply(&cc.egui_ctx);
         let settings = Settings::load();
         let llm = crate::llm_setting::LlmSetting::load(&settings);
+        let llm_spent = llm.spent_this_month();
         let (log_tx, log_rx) = channel();
         let (upd_tx, upd_rx) = channel();
         let ins = kd_audio::input_devices();
@@ -298,6 +234,10 @@ impl App {
             llm_try: String::new(),
             llm_trying: None,
             llm_tried: Ok(String::new()),
+            llm_ledger: kd_llm::Ledger::new(llm_spent),
+            llm_month: crate::llm_setting::this_month(),
+            llm_prices: None,
+            llm_prices_asked: false,
             downloaded: Vec::new(),
             downloaded_at: None,
             speech_disk: Vec::new(),
@@ -367,6 +307,7 @@ impl App {
             translate_downloads: self.translate_downloads,
             // (the agents' LLM: the host's, for a game whose profile uses it and that they turned it on for)
             llm: if self.joined.is_none() { self.llm.config_for(&kind.id) } else { None },
+            llm_ledger: Some(self.llm_ledger.clone()),
             ..Default::default()
         };
         let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
@@ -379,110 +320,6 @@ impl App {
         }
         self.kind = kind;
         self.rt = Some(rt);
-    }
-
-    // ---- game mod profiles: add (a file -> a preview of what it does -> installed), remove
-    fn add_profile(&mut self) {
-        let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(crate::dialog::pick_profile());
-        });
-        self.picking = Some(rx);
-    }
-
-    fn profiles_ui(&mut self, ctx: &egui::Context) {
-        if let Some(rx) = &self.picking {
-            if let Ok(picked) = rx.try_recv() {
-                self.picking = None;
-                if let Some(path) = picked {
-                    let r = kd_games::load_profile(&path);
-                    self.preview = Some((path, r));
-                }
-            }
-        }
-        if let Some((path, r)) = self.preview.clone() {
-            let mut close = false;
-            egui::Modal::new(egui::Id::new("profile-preview")).show(ctx, |ui| {
-                ui.set_width(520.0);
-                match &r {
-                    Ok(k) => {
-                        ui.label(RichText::new("Add this game mod?").size(18.0).family(theme::semibold()));
-                        theme::game_row(ui, &k.name, &k.mod_name, &k.author, false, true, 500.0);
-                        ui.label(RichText::new(&k.mod_url).size(12.5).color(theme::MUTED));
-                        ui.add_space(4.0);
-                        ui.label(RichText::new("What it does on this PC").family(theme::semibold()));
-                        for line in &k.summary {
-                            ui.label(format!("• {line}"));
-                        }
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new("A profile is not a program: it only points Koetama's own connectors at these \
-                                 files and ports. Add it if you trust where it came from.")
-                                .size(12.5)
-                                .color(theme::MUTED),
-                        );
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            if theme::primary_button(ui, "Add game mod", true).clicked() {
-                                match kd_games::install_profile(&path) {
-                                    Ok(k) => {
-                                        self.kinds = kd_games::games();
-                                        self.profile_msg = format!("Added {} ({} mod).", k.name, k.mod_name);
-                                        self.switch_game(&k.id.clone());
-                                    }
-                                    Err(e) => self.profile_msg = format!("Could not add it: {e}"),
-                                }
-                                close = true;
-                            }
-                            if ui.button("Cancel").clicked() {
-                                close = true;
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        ui.label(RichText::new("This file is not a game mod profile Koetama can use").size(16.0).family(theme::semibold()));
-                        ui.label(RichText::new(path.display().to_string()).size(12.5).color(theme::MUTED));
-                        ui.label(RichText::new(e).color(theme::BAD));
-                        if ui.button("Close").clicked() {
-                            close = true;
-                        }
-                    }
-                }
-            });
-            if close {
-                self.preview = None;
-            }
-        }
-        if let Some(k) = self.removing.clone() {
-            let mut close = false;
-            egui::Modal::new(egui::Id::new("profile-remove")).show(ctx, |ui| {
-                ui.set_width(420.0);
-                ui.label(RichText::new(format!("Remove {} ({} mod)?", k.name, k.mod_name)).size(16.0).family(theme::semibold()));
-                ui.label(RichText::new("Its profile file is deleted. You can add it again later.").color(theme::MUTED));
-                ui.horizontal(|ui| {
-                    if ui.button("Remove").clicked() {
-                        match kd_games::remove_profile(&k.id) {
-                            Ok(()) => {
-                                self.profile_msg = format!("Removed {}.", k.name);
-                                self.kinds = kd_games::games();
-                                if self.game_id == k.id {
-                                    let first = self.kinds[0].id.clone();
-                                    self.switch_game(&first);
-                                }
-                            }
-                            Err(e) => self.profile_msg = format!("Could not remove it: {e}"),
-                        }
-                        close = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                });
-            });
-            if close {
-                self.removing = None;
-            }
-        }
     }
 
     /// The player ticked or unticked a language (none: follow the game's setting).
@@ -571,341 +408,6 @@ impl App {
         ui.label(RichText::new("on this PC, with Mozilla's translation models").size(12.0).color(theme::MUTED));
     }
 
-    /// The translation models: every one on this PC or on its way, each in memory / on disk / downloading, with Free
-    /// memory and a bin; then the pairs that have no model (none exists, downloads off, failed).
-    fn translation_models_ui(&mut self, ui: &mut egui::Ui) {
-        use kd_translate::catalog;
-        use kd_translate::service::State;
-        if self.downloaded_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
-            self.downloaded = catalog::downloaded(&catalog::root());
-            self.downloaded_at = Some(Instant::now());
-        }
-        let st = self.status.as_ref().and_then(|s| s.translate.clone()).unwrap_or_default();
-        struct Row {
-            key: String,
-            label: String,
-            bytes: Option<u64>,
-            memory: bool,
-            busy: Option<(String, Color32)>,
-        }
-        fn row_for(rows: &mut Vec<Row>, key: &str) -> usize {
-            if let Some(i) = rows.iter().position(|r| r.key == key) {
-                return i;
-            }
-            let (f, t) = match (key.strip_suffix("-en"), key.strip_prefix("en-")) {
-                (Some(f), _) => (f, "en"),
-                (_, Some(t)) => ("en", t),
-                _ => (key, ""),
-            };
-            let label = format!("{} → {}", model_lang(f), model_lang(t));
-            rows.push(Row { key: key.to_string(), label, bytes: None, memory: false, busy: None });
-            rows.len() - 1
-        }
-        let mut rows: Vec<Row> = Vec::new();
-        for d in &self.downloaded {
-            let i = row_for(&mut rows, &d.key());
-            rows[i].bytes = Some(rows[i].bytes.unwrap_or(0) + d.bytes);
-        }
-        for id in &st.loaded {
-            let i = row_for(&mut rows, id.split_once('/').map_or(id.as_str(), |(k, _)| k));
-            rows[i].memory = true;
-        }
-        let mut problems = Vec::new();
-        for p in &st.pairs {
-            match p.state {
-                State::Downloading(_) | State::Loading => {
-                    let (_, text, colour) = pair_text(p);
-                    for k in pair_keys(&p.from, &p.to) {
-                        let i = row_for(&mut rows, &k);
-                        if !rows[i].memory {
-                            rows[i].busy = Some((text.clone(), colour));
-                        }
-                    }
-                }
-                State::Unavailable | State::NotDownloaded | State::Error => problems.push(pair_text(p)),
-                State::Ready => {}
-            }
-        }
-        if rows.is_empty() && problems.is_empty() {
-            return;
-        }
-        rows.sort_by(|a, b| a.label.cmp(&b.label));
-        let memory: u64 = rows.iter().filter(|r| r.memory).filter_map(|r| r.bytes).sum();
-        let disk: u64 = rows.iter().filter_map(|r| r.bytes).sum();
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(format!("Translation models · about {} in memory · {} on disk", mb(memory), mb(disk)))
-                .size(12.5)
-                .color(theme::MUTED),
-        );
-        let mut act = None;
-        egui::Grid::new("translation-models").num_columns(5).spacing([10.0, 4.0]).show(ui, |ui| {
-            for r in &rows {
-                ui.label(RichText::new(&r.label).color(theme::FG));
-                ui.label(RichText::new(r.bytes.map(mb).unwrap_or_default()).color(theme::MUTED));
-                let (text, colour) = match (&r.busy, r.memory, r.bytes.is_some()) {
-                    (Some(b), _, _) => b.clone(),
-                    (None, true, _) => ("in memory".to_string(), theme::GOOD),
-                    (None, false, true) => ("on disk".to_string(), theme::MUTED),
-                    (None, false, false) => ("not on disk".to_string(), theme::MUTED),
-                };
-                theme::pill(ui, &text, colour);
-                let delete = match (r.bytes, &r.busy) {
-                    (_, Some(_)) => Err("Wait until it is ready".to_string()),
-                    (Some(b), None) => Ok(format!("Delete it ({}): it downloads again the next time a chat line needs it", mb(b))),
-                    (None, None) => Err("Not on disk".to_string()),
-                };
-                let hint = "Let go of it now: it loads again the next time a chat line needs it";
-                let (free, del) = model_buttons(ui, r.memory, hint, delete);
-                if free {
-                    act = Some(ModelAction::FreeTranslation(r.key.clone()));
-                }
-                if del {
-                    let bytes = r.bytes.unwrap_or(0);
-                    act = Some(ModelAction::Delete(Deleting::Translation { key: r.key.clone(), label: r.label.clone(), bytes }));
-                }
-                ui.end_row();
-            }
-            for (pair, text, colour) in &problems {
-                ui.label(RichText::new(pair).color(theme::FG));
-                ui.label("");
-                theme::pill(ui, text, *colour);
-                ui.end_row();
-            }
-        });
-        if let Some(a) = act {
-            self.model_action(a);
-        }
-    }
-
-    /// A click in a model list: free a model's memory now, or ask before deleting it.
-    fn model_action(&mut self, a: ModelAction) {
-        match a {
-            ModelAction::FreeSpeech(name) => {
-                if let Some(rt) = self.rt.as_mut() {
-                    rt.free_speech_model(name);
-                }
-            }
-            ModelAction::FreeTranslation(key) => {
-                if let Some(rt) = self.rt.as_ref() {
-                    rt.free_translation(&key);
-                }
-            }
-            ModelAction::Delete(d) => self.deleting = Some(d),
-        }
-    }
-
-    /// Deleting a model, once the player confirms: its memory let go first, then its files.
-    fn delete_modal(&mut self, ctx: &egui::Context) {
-        let Some(d) = self.deleting.clone() else { return };
-        let (title, body) = match &d {
-            Deleting::Speech { title, bytes, .. } => (
-                format!("Delete {title}?"),
-                format!(
-                    "Its files ({}) are deleted from this PC. It downloads again the next time the game wants your voice \
-                     in a language that needs it.",
-                    gb(*bytes)
-                ),
-            ),
-            Deleting::Translation { label, bytes, .. } => (
-                format!("Delete the {label} model?"),
-                format!("Its files ({}) are deleted from this PC. It downloads again the next time a chat line needs it.", mb(*bytes)),
-            ),
-        };
-        let mut close = false;
-        egui::Modal::new(egui::Id::new("model-delete")).show(ctx, |ui| {
-            ui.set_width(420.0);
-            ui.label(RichText::new(&title).size(16.0).family(theme::semibold()));
-            ui.label(RichText::new(&body).color(theme::MUTED));
-            ui.horizontal(|ui| {
-                if ui.button("Delete").clicked() {
-                    let line = match &d {
-                        Deleting::Speech { name, title, .. } => {
-                            if let Some(rt) = self.rt.as_mut() {
-                                rt.free_speech_model(name);
-                            }
-                            match kd_speech::delete_model(name) {
-                                Ok(b) => format!("deleted the speech model {title} ({})", gb(b)),
-                                Err(e) => format!("could not delete: {e}"),
-                            }
-                        }
-                        Deleting::Translation { key, label, bytes } => {
-                            if let Some(rt) = self.rt.as_ref() {
-                                rt.free_translation(key);
-                            }
-                            match kd_translate::catalog::delete(&kd_translate::catalog::root(), key) {
-                                Ok(()) => format!("translation: deleted the {label} model ({})", mb(*bytes)),
-                                Err(e) => format!("translation: could not delete the {label} model: {e}"),
-                            }
-                        }
-                    };
-                    let _ = self.log_tx.send(line);
-                    self.downloaded_at = None;
-                    self.speech_disk_at = None;
-                    close = true;
-                }
-                if ui.button("Cancel").clicked() {
-                    close = true;
-                }
-            });
-        });
-        if close {
-            self.deleting = None;
-        }
-    }
-
-    /// "Large Language Models": the host's LLM for this game's mod - its agents and whatever else it asks (docs/llm-agents.md)
-    /// - on for this game or not, the API,
-    /// address, model, key, the month's budget, the model's price, requests a minute; its state and what was spent.
-    /// Turning it on or off (or it becoming usable) starts the game link again (the hello names "llm" or not).
-    fn llm_ui(&mut self, ui: &mut egui::Ui) {
-        let game = self.kind.id.clone();
-        let before = self.llm.config_for(&game).is_some();
-        let mut changed = false;
-        let mut on = self.llm.on_for(&game);
-        if ui.checkbox(&mut on, format!("Let the {} mod use my language model", self.kind.mod_name)).changed() {
-            self.llm.set_on(&game, on);
-            changed = true;
-        }
-        ui.label(
-            RichText::new(
-                "For the host: what the mod sends (what players say to its characters) goes with your key to the \
-                 model chosen here, and it costs you. The other players need nothing. Tell them the game uses one.",
-            )
-            .size(12.0)
-            .color(theme::MUTED),
-        );
-        egui::Grid::new("llm").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-            ui.label(RichText::new("API").color(theme::MUTED));
-            let api = self.llm.api;
-            egui::ComboBox::from_id_salt("llm-api")
-                .width(220.0)
-                .selected_text(match api {
-                    kd_llm::Api::OpenAi => "OpenAI-compatible",
-                    kd_llm::Api::Anthropic => "Anthropic",
-                })
-                .show_ui(ui, |ui| {
-                    changed |= ui.selectable_value(&mut self.llm.api, kd_llm::Api::OpenAi, "OpenAI-compatible").changed();
-                    changed |= ui.selectable_value(&mut self.llm.api, kd_llm::Api::Anthropic, "Anthropic").changed();
-                });
-            ui.end_row();
-            ui.label(RichText::new("Address").color(theme::MUTED));
-            let r = ui.add(egui::TextEdit::singleline(&mut self.llm.url).hint_text(self.llm.api.default_url()).desired_width(330.0));
-            changed |= r.lost_focus();
-            ui.end_row();
-            ui.label(RichText::new("Model").color(theme::MUTED));
-            let r = ui.add(egui::TextEdit::singleline(&mut self.llm.model).hint_text("the model's id, as the API names it").desired_width(330.0));
-            changed |= r.lost_focus();
-            ui.end_row();
-            ui.label(RichText::new("Key").color(theme::MUTED));
-            let hint = if self.llm.key.is_empty() { "your API key" } else { "saved (type to replace it)" };
-            let r = ui.add(egui::TextEdit::singleline(&mut self.llm_key).password(true).hint_text(hint).desired_width(330.0));
-            if r.lost_focus() && !self.llm_key.trim().is_empty() {
-                self.llm.key = std::mem::take(&mut self.llm_key).trim().to_string();
-                changed = true;
-            }
-            ui.end_row();
-            ui.label(RichText::new("Budget").color(theme::MUTED));
-            ui.horizontal(|ui| {
-                let r = ui.add(egui::DragValue::new(&mut self.llm.budget).range(0.0..=1000.0).speed(0.25).prefix("$").suffix(" a month"));
-                changed |= r.drag_stopped() || r.lost_focus();
-                ui.label(RichText::new(format!("spent this month: about ${:.2}", self.llm.spent_this_month())).color(theme::MUTED))
-                    .on_hover_text("Estimated from typical prices ($1 a million tokens in, $5 out): your provider's bill is what counts.");
-            });
-            ui.end_row();
-            ui.label(RichText::new("Requests").color(theme::MUTED));
-            ui.horizontal(|ui| {
-                let r = ui.add(egui::DragValue::new(&mut self.llm.per_minute).range(1..=600).suffix(" a minute"));
-                changed |= r.drag_stopped() || r.lost_focus();
-                ui.label(RichText::new("at most (more lines wait)").size(12.0).color(theme::MUTED));
-            });
-            ui.end_row();
-        });
-        self.llm_try_ui(ui);
-        if on && !self.llm.complete() {
-            ui.label(RichText::new("Add a model and a key to turn it on.").size(12.5).color(theme::WARN));
-        }
-        if let Some(n) = self.status.as_ref().and_then(|s| s.agent.as_ref()) {
-            let (text, colour) = match n.state {
-                "ready" => ("ready".to_string(), theme::GOOD),
-                "busy" => ("busy: lines wait (requests a minute)".to_string(), theme::WARN),
-                "budget" => ("this month's budget is spent".to_string(), theme::BAD),
-                "error" => (format!("failed: {}", n.why), theme::BAD),
-                _ => ("starting".to_string(), theme::MUTED),
-            };
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Status").color(theme::MUTED));
-                theme::pill(ui, &text, colour);
-            });
-        }
-        if changed {
-            self.llm.save(&mut self.settings);
-            self.settings.save();
-            let after = self.llm.config_for(&game);
-            if before != after.is_some() {
-                // (on or off for this game: the game link starts again, its hello naming "llm" or not)
-                self.switch_game(&game);
-            } else if let (Some(cfg), Some(rt)) = (after, self.rt.as_mut()) {
-                rt.set_llm(cfg);
-            }
-        }
-    }
-
-    /// "Try it": a message to the model as the card is set now (the switch need not be on) and its answer, or exactly
-    /// why there is none. What it costs counts in this month's spend.
-    fn llm_try_ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(rx) = &self.llm_trying {
-            if let Ok(r) = rx.try_recv() {
-                self.llm_trying = None;
-                self.llm_tried = match r {
-                    Ok(reply) => {
-                        if let Some(cfg) = self.llm.config() {
-                            self.llm.set_spent(self.llm.spent_this_month() + cfg.cost(&reply));
-                            self.llm.save(&mut self.settings);
-                            self.settings.save();
-                        }
-                        let calls = if reply.calls.is_empty() { String::new() } else { format!(" ({} function calls)", reply.calls.len()) };
-                        Ok(format!("{}{calls}  ·  {} tokens in, {} out", reply.text, reply.tokens_in, reply.tokens_out))
-                    }
-                    Err(e) => Err(e),
-                };
-            } else {
-                ui.ctx().request_repaint_after(Duration::from_millis(200));
-            }
-        }
-        let cfg = self.llm.config();
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Try it").color(theme::MUTED));
-            let r = ui.add(egui::TextEdit::singleline(&mut self.llm_try).hint_text("say something to the model").desired_width(330.0));
-            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let ready = cfg.is_some() && self.llm_trying.is_none() && !self.llm_try.trim().is_empty();
-            let send = ui.add_enabled(ready, egui::Button::new(if self.llm_trying.is_some() { "Waiting..." } else { "Send" })).clicked();
-            if (send || enter) && ready {
-                let (tx, rx) = channel();
-                let (cfg, text) = (cfg.clone().expect("ready"), self.llm_try.trim().to_string());
-                std::thread::spawn(move || {
-                    let turns = [kd_llm::Turn::User(text)];
-                    let system = "You are being tried out from Koetama's settings. Answer briefly.";
-                    let _ = tx.send(kd_llm::api::complete(&cfg, system, &[], &turns, 300, Duration::from_secs(60)));
-                });
-                self.llm_trying = Some(rx);
-                self.llm_tried = Ok(String::new());
-            }
-        });
-        if cfg.is_none() {
-            ui.label(RichText::new("Add a model and a key to try it.").size(12.0).color(theme::MUTED));
-        }
-        match &self.llm_tried {
-            Ok(t) if !t.is_empty() => {
-                ui.label(RichText::new(t).color(theme::FG));
-            }
-            Err(e) => {
-                ui.label(RichText::new(e).size(12.5).color(theme::BAD));
-            }
-            _ => {}
-        }
-    }
-
     /// "Languages I speak": what is in use (chips), and (Choose) every language by how well it is written.
     fn languages_ui(&mut self, ui: &mut egui::Ui) {
         let (langs, from_game) = match &self.status {
@@ -980,76 +482,6 @@ impl App {
             // (in the order of the list: the first is the fallback for a short line before any other was heard)
             chosen.sort_by_key(|c| kd_speech::LANGS.iter().position(|l| l.code == c));
             self.set_langs(chosen);
-        }
-    }
-
-    /// The speech models: each the languages need or that is on this PC - in memory / on disk / not downloaded, its
-    /// size (on disk, else its download), Free memory and a bin.
-    fn models_ui(&mut self, ui: &mut egui::Ui) {
-        if self.speech_disk_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
-            self.speech_disk = kd_speech::MODEL_INFO.iter().map(|m| (m.name, kd_speech::on_disk(m.name))).collect();
-            self.speech_disk_at = Some(Instant::now());
-        }
-        let Some(st) = &self.status else { return };
-        let disk = |name: &str| self.speech_disk.iter().find(|(n, _)| *n == name).and_then(|(_, d)| d.clone());
-        let memory: u32 = st.models.iter().filter(|m| m.state == kd_speech::ModelState::Loaded).map(|m| m.memory_mb).sum();
-        let on_disk: u64 = self.speech_disk.iter().filter_map(|(_, d)| d.as_ref().map(|d| d.bytes)).sum();
-        ui.label(
-            RichText::new(format!(
-                "Speech models · about {} in memory · {} on disk. The ones your languages need load when the game \
-                 wants your voice (downloaded the first time).",
-                gb(memory as u64 * 1_000_000),
-                gb(on_disk)
-            ))
-                .size(12.5)
-                .color(theme::MUTED),
-        );
-        let mut act = None;
-        egui::Grid::new("models").num_columns(6).spacing([8.0, 4.0]).show(ui, |ui| {
-            for row in &st.models {
-                let d = disk(row.name);
-                if !row.needed && row.state == kd_speech::ModelState::NotLoaded && d.is_none() {
-                    continue; // (not needed, not loaded, not on this PC: nothing to show)
-                }
-                let loaded = row.state == kd_speech::ModelState::Loaded;
-                let busy = matches!(row.state, kd_speech::ModelState::Loading | kd_speech::ModelState::Downloading(..));
-                let (mut text, colour) = model_state(row, d.is_some());
-                // (on disk but not Koetama's to delete: say whose)
-                match &d {
-                    Some(d) if !d.ours && row.name == "langid" => text.push_str(" · comes with Koetama"),
-                    Some(d) if !d.ours => text.push_str(" · Hugging Face cache"),
-                    _ => {}
-                }
-                theme::dot(ui, colour, loaded && row.needed);
-                ui.label(row.title);
-                let size = d.as_ref().map_or(row.download_mb as u64 * 1_000_000, |d| d.bytes);
-                ui.label(RichText::new(gb(size)).color(theme::MUTED));
-                theme::pill(ui, &text, colour);
-                let delete = match &d {
-                    _ if busy => Err("Wait until it is ready".to_string()),
-                    Some(d) if d.ours => Ok(format!("Delete its files ({}): it downloads again when it is needed", gb(d.bytes))),
-                    Some(_) if row.name == "langid" => Err("It comes with Koetama".to_string()),
-                    Some(_) => Err("It is in the Hugging Face cache, not Koetama's folder: left alone".to_string()),
-                    None => Err("Not downloaded".to_string()),
-                };
-                let hint = if row.needed {
-                    "Let go of it now: it loads again the next time the game wants your voice"
-                } else {
-                    "Let go of it now"
-                };
-                let (free, del) = model_buttons(ui, loaded, hint, delete);
-                if free {
-                    act = Some(ModelAction::FreeSpeech(row.name));
-                }
-                if del {
-                    let bytes = d.map_or(0, |d| d.bytes);
-                    act = Some(ModelAction::Delete(Deleting::Speech { name: row.name, title: row.title, bytes }));
-                }
-                ui.end_row();
-            }
-        });
-        if let Some(a) = act {
-            self.model_action(a);
         }
     }
 
@@ -1187,107 +619,39 @@ impl App {
         self.start_game();
     }
 
-    // ---- updates
-    fn check_updates(&mut self, quiet: bool) {
-        if self.update.is_some() {
-            return self.do_update();
-        }
-        if !quiet {
-            self.upd_text = "checking...".into();
-        }
-        let tx = self.upd_tx.clone();
-        std::thread::spawn(move || {
-            let _ = match kd_update::check(Duration::from_secs(10)) {
-                Ok(r) => tx.send(UpdateMsg::Checked(r, quiet)),
-                Err(e) => tx.send(UpdateMsg::Failed(e, quiet)),
-            };
-        });
-    }
-
-    fn do_update(&mut self) {
-        let Some(info) = self.update.clone() else {
-            return;
-        };
-        if !(cfg!(windows) && info.installable()) {
-            open_url(&info.page);
-            return;
-        }
-        self.upd_busy = true;
-        let tx = self.upd_tx.clone();
-        std::thread::spawn(move || {
-            let p = tx.clone();
-            let r = kd_update::download(&info, &move |f| {
-                let _ = p.send(UpdateMsg::Progress(f));
-            });
-            let _ = match r {
-                Ok(path) => tx.send(UpdateMsg::Downloaded(path)),
-                Err(e) => tx.send(UpdateMsg::DownloadFailed(e)),
-            };
-        });
-    }
-
-    fn handle_updates(&mut self, ctx: &egui::Context) {
-        while let Ok(m) = self.upd_rx.try_recv() {
-            match m {
-                UpdateMsg::Checked(r, quiet) => {
-                    self.upd_text = match &r {
-                        None if quiet => String::new(),
-                        None => "You have the latest version.".into(),
-                        Some(i) if cfg!(windows) && i.installable() => {
-                            "A new version is ready.".into()
-                        }
-                        // (its checksums are not signed with the release key, or do not hold: the page only)
-                        Some(Release { refused: Some(why), .. }) if cfg!(windows) => {
-                            format!("A new version is out, but not installed from here: {why}. Get it from the download page.")
-                        }
-                        Some(_) => "A new version is out (download page).".into(),
-                    };
-                    self.update = r;
-                }
-                UpdateMsg::Failed(e, quiet) => {
-                    if !quiet {
-                        self.upd_text = match e.strip_prefix(kd_update::NO_RELEASES) {
-                            // (not "the latest version": nothing to compare with - the page may have moved)
-                            Some(at) => format!("No releases found on GitHub ({}).", at.trim_start_matches(" at ")),
-                            None => format!("could not check for updates ({e})"),
-                        };
-                    }
-                }
-                UpdateMsg::Progress(f) => self.upd_text = format!("downloading {:.0} %", f * 100.0),
-                UpdateMsg::Downloaded(path) => {
-                    self.upd_text = "installing...".into();
-                    if let Some(mut rt) = self.rt.take() {
-                        rt.stop();
-                    }
-                    match kd_update::install(&path) {
-                        Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                        Err(e) => {
-                            self.upd_text = format!("update failed: {e}");
-                            self.upd_busy = false;
-                        }
-                    }
-                }
-                UpdateMsg::DownloadFailed(e) => {
-                    self.upd_text = format!("update failed: {e}");
-                    self.upd_busy = false;
-                }
-            }
-        }
-    }
-
     // ---- every 250 ms
     fn refresh(&mut self) {
         if let Some(rt) = self.rt.as_mut() {
             rt.tick();
             self.status = Some(rt.status());
         }
-        // (what the agents' LLM spent this month: kept in the settings as it grows)
-        if let Some(spent) = self.status.as_ref().and_then(|s| s.agent.as_ref()).map(|n| n.spent) {
-            if spent > self.llm.spent_this_month() + 1e-9 {
-                self.llm.set_spent(spent);
-                self.llm.save(&mut self.settings);
-                self.settings.save();
+        // (OpenRouter's prices: asked for once a model is set; once here, the running game's agents count with them)
+        if !self.llm_prices_asked && !self.llm.model.trim().is_empty() {
+            self.llm_prices_asked = true;
+            let (tx, rx) = channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::llm_setting::load_prices());
+            });
+            self.llm_prices = Some(rx);
+        }
+        if let Some(Ok(prices)) = self.llm_prices.as_ref().map(|rx| rx.try_recv()) {
+            self.llm_prices = None;
+            self.llm.prices = prices;
+            if let (Some(cfg), Some(rt)) = (self.llm.config_for(&self.game_id), self.rt.as_mut()) {
+                rt.set_llm(cfg);
             }
+        }
+        // (what the LLM spent this month: one ledger, kept in the settings as it grows; a new month starts it over)
+        let month = crate::llm_setting::this_month();
+        if month != self.llm_month {
+            self.llm_month = month;
+            self.llm_ledger.set(0.0);
+        }
+        let spent = self.llm_ledger.spent();
+        if (spent - self.llm.spent_this_month()).abs() > 1e-9 {
+            self.llm.set_spent(spent);
+            self.llm.save(&mut self.settings);
+            self.settings.save();
         }
         while let Ok(line) = self.log_rx.try_recv() {
             self.log_lines.push(format!("{} {line}", clock()));

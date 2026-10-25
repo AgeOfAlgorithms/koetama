@@ -11,9 +11,9 @@ The exact fields and rules: PROTOCOL.md, "Large language models: agents". This p
 
 Any mod can use agents. The host opens the **Large Language Models** card in Koetama with your game picked: they pick
 the API (OpenAI-compatible or Anthropic), the model and their key, set a budget, try it, and tick "Let the <your mod>
-mod use my language model". (You may add `"llm"` to your profile's `uses` to say your mod has agents; Koetama does
-not require it.) Until the host turns it on, Koetama's `hello` does not list `llm` and ignores your agent fields - so
-check:
+mod use my language model". That switch alone decides: `"llm"` in your profile's `uses` is not needed (it only says
+your mod has agents). Until the host turns it on, Koetama's `hello` does not list `llm` and drops your agent fields -
+so check, and send them only when it is on:
 
 ```lua
 local llmOn = hello.features contains "llm"
@@ -22,7 +22,7 @@ local llmOn = hello.features contains "llm"
 Only the host's game needs to do any of this: your mod already carries players' chat and spoken lines to the host
 (Koetama's speech to text gives each player's words to their own game; your networking brings them to the host).
 
-## 2. Define your agents (after every hello)
+## 2. Define your agents (when Koetama does not have them)
 
 ```json
 "agents": [{
@@ -40,9 +40,13 @@ Only the host's game needs to do any of this: your mod already carries players' 
 }]
 ```
 
-- **Send `agents` again after every `hello`** (Koetama restarted, a new session): it keeps them only for its session.
-  It is fine to send them in every feed; to keep feeds small, send them for a few seconds after a hello and whenever
-  one changes (raise its `version`).
+- **Koetama tells you which agents it has**: the standing object
+  `{"type": "agents_known", "agents": [{"id": "pig_king", "version": 1}]}`, after each hello and whenever it changes.
+  Put an agent in `agents` when it is missing there or its version is older than yours; leave it out otherwise.
+  After a restart or a new session the list is empty, so your definitions go again by themselves. Raise `version`
+  whenever the persona or functions change.
+- (An older Koetama sends no `agents_known`: then send `agents` for a few seconds after each hello and whenever one
+  changes. Sending them in every feed also works, but each persona can be 8 KB.)
 - `"stream": true` to get its words as they are written (several `agent_reply` objects with `"final": false`, each
   with all the words so far, then the whole reply with `"final": true` - only that one answers your lines).
 - `"character": false` for an agent that is not a character in the world (a director, a writer, a command parser):
@@ -57,8 +61,10 @@ Only the host's game needs to do any of this: your mod already carries players' 
               "state": "winter, day 31; Wendy holds 12 meat"}]
 ```
 
-- `id`: a number of yours, unique in the session. **Keep the line in every feed until its `agent_reply` comes**, then
-  drop it (Koetama answers each id once, however often it sees it).
+- `id`: a number of yours, unique in the session. **Keep the line in the feed until Koetama says it has it**:
+  `{"type": "received", "to_agent": [41], "agent_results": ["call_1"]}` (once for each line and result; the answer comes
+  later as before). Koetama answers each id once, however often it sees it, so sending it a little longer does no
+  harm. (An older Koetama sends no `received`: keep the line until its final `agent_reply`.)
 - No `from`: an event you tell the agent ("the museum alarm went off").
 - `state`: what the agent should know right now (short: it is sent with every turn).
 - Decide **who** an agent hears: only players near it, only those who face it, only chat with its name in it...
@@ -80,9 +86,17 @@ Only the host's game needs to do any of this: your mod already carries players' 
 "agent_results": [{"call": "call_1", "result": "ok: offered 1 football helmet for 12 meat"}]
 ```
   (or `"error: Wendy has only 8 meat"`). The agent's follow-up comes as another `agent_reply` to the same `ids`.
-- **`error`** not empty: no reply - `"budget"` (the host's month is spent), `no agent "x"` (send `agents` again), or
-  what failed. Say something in character ("The Pig King ignores you").
-- `agent_status` tells you `ready`, `busy`, `budget` or `error`: show it to the host, or hide your agents' talk.
+- **`error`** not empty: no reply. It is a code, and `why` says the same in words for your log (never show `why` as the
+  agent's words). Say something in character ("The Pig King ignores you"), and:
+  - `budget`: the host's month is spent - nothing more until they raise it;
+  - `unknown_agent`: Koetama has no definition for it - send it (see `agents_known`), then the line again, with a new id;
+  - `queue_full`: more than 16 lines are waiting for that agent - slow down;
+  - `cancelled`: your `agent_forget` dropped the lines - nothing to do;
+  - `failed` (or a code you do not know): the request failed (a wrong key, no connection...).
+- `agent_status` tells you `ready`, `busy`, `budget` or `error`, the model, and what the host has spent this month of
+  their budget: show it to the host, or hide your agents' talk.
+- With the files connector, a streaming agent's newer words take the place of ones you have not read yet: you may not
+  see every `"final": false`, only the newest.
 
 ## 5. Tell the players
 
@@ -126,13 +140,19 @@ end
 answers the calls and checks every reply. The loop at its heart:
 
 ```python
-feed = {"type": "feed", "agents": [pig], "to_agent": [l for l in lines if l["id"] not in answered],
-        "agent_results": results}
+feed = {"type": "feed",
+        "agents": [a for a in my_agents if known.get(a["id"], -1) < a["version"]],
+        "to_agent": [l for l in lines if l["id"] not in got_lines],
+        "agent_results": [r for r in results if r["call"] not in got_results]}
 sock.sendall((json.dumps(feed) + "\n").encode())
 for o in received_objects():
-    if o["type"] == "agent_reply":
-        answered.update(o["ids"])
-        show(o["agent"], o["text"])
+    if o["type"] == "agents_known":
+        known = {a["id"]: a["version"] for a in o["agents"]}
+    elif o["type"] == "received":
+        got_lines.update(o.get("to_agent", []))
+        got_results.update(o.get("agent_results", []))
+    elif o["type"] == "agent_reply" and o["final"]:
+        show(o["agent"], o["text"] or fallback(o["agent"], o["error"]))
         for c in o["calls"]:
             ok, why = game_allows(c["name"], c["args"])          # YOUR rules
             results.append({"call": c["call"], "result": ("ok: " if ok else "error: ") + why})

@@ -1,8 +1,10 @@
 """Agents, end to end on one PC (docs/llm-agents.md): a real Koetama (`koetama --cli`) between a fake game (the
-socket connector, a profile that uses "llm") and a fake LLM (an OpenAI-style server on 127.0.0.1). The game defines
-an agent with a function, sends lines to it, runs the function the agent calls and answers with its result; the test
-checks the hello names "llm", the agent_status, each agent_reply (lines that came while the agent was busy answered
-together), the function call and the follow-up, and what the LLM was sent.
+socket connector) and a fake LLM (an OpenAI-style server on 127.0.0.1). The game behaves as PROTOCOL.md asks: it
+sends the agent's definition until agents_known says Koetama has it, each line and function result until a "received"
+names it; it sends lines to the agent, runs the function the agent calls and answers with its result, and one line to
+an agent it never defined. The test checks the hello names "llm", agents_known, received, the agent_status, each
+agent_reply (lines that came while the agent was busy answered together), the function call and the follow-up, the
+unknown agent's error code and why, and what the LLM was sent.
 
     python tools/agents_e2e.py              (builds koetama first)
     python tools/agents_e2e.py --real       (instead of the fake: the LLM in KOETAMA_LLM_KEY, KOETAMA_LLM_MODEL,
@@ -60,7 +62,7 @@ def main():
     port = free_port()
     profiles = tempfile.mkdtemp()
     json.dump({'format': 1, 'id': 'agents-e2e', 'game': 'agent test', 'mod': 'Fake game', 'url': 'https://example.com',
-               'author': 'agents_e2e.py', 'uses': ['llm'], 'connector': {'type': 'socket', 'port': port}},
+               'author': 'agents_e2e.py', 'uses': ['speech'], 'connector': {'type': 'socket', 'port': port}},
               open(os.path.join(profiles, 'agents-e2e.json'), 'w'))
     env = dict(os.environ, KOETAMA_PROFILES_DIR=profiles)
     if REAL:
@@ -98,17 +100,23 @@ def main():
         pending = [{'id': 41, 'agent': 'pig_king', 'text': '10 meat for a football helmet?', 'from': who('Wendy'),
                     'state': 'winter, day 31; Wendy holds 12 meat'}]
         results, answered, t_extra, partials = [], set(), None, []
+        known, got_lines, got_results, sent_defs = {}, set(), set(), 0
         deadline = time.time() + (90 if REAL else 30)
         while time.time() < deadline:
-            feed = {'type': 'feed', 'lang': 'en', 'agents': [pig], 'to_agent': [p for p in pending if p['id'] not in answered],
-                    'agent_results': results}
+            # (what Koetama has is not sent again: the definition once agents_known has it, a line or result once received)
+            defs = [a for a in [pig] if known.get(a['id'], -1) < a['version']]
+            sent_defs += bool(defs)
+            feed = {'type': 'feed', 'lang': 'en', 'agents': defs,
+                    'to_agent': [p for p in pending if p['id'] not in answered and p['id'] not in got_lines],
+                    'agent_results': [r for r in results if r['call'] not in got_results]}
             sock.sendall((json.dumps(feed) + '\n').encode())
             if t_extra is None and objects and any(o.get('type') == 'hello' for o in objects):
                 t_extra = time.time()
             if t_extra and time.time() - t_extra > 0.3 and len(pending) == 1:
                 # (two more lines while the first is being answered: they wait, then go as one turn)
                 pending += [{'id': 42, 'agent': 'pig_king', 'text': 'I want a helmet too', 'from': who('Wes')},
-                            {'id': 43, 'agent': 'pig_king', 'text': 'and me', 'from': who('Wilson')}]
+                            {'id': 43, 'agent': 'pig_king', 'text': 'and me', 'from': who('Wilson')},
+                            {'id': 44, 'agent': 'nobody', 'text': 'hello?', 'from': who('Willow')}]
             try:
                 buf += sock.recv(65536)
             except (socket.timeout, BlockingIOError):
@@ -120,7 +128,12 @@ def main():
                 except ValueError:
                     continue
                 objects.append(o)
-                if o.get('type') == 'agent_reply' and o.get('final') is False:
+                if o.get('type') == 'agents_known':
+                    known = {a['id']: a['version'] for a in o.get('agents', [])}
+                elif o.get('type') == 'received':
+                    got_lines.update(o.get('to_agent', []))
+                    got_results.update(o.get('agent_results', []))
+                elif o.get('type') == 'agent_reply' and o.get('final') is False:
                     partials.append(o)                                   # (a streaming agent's words so far)
                     print('    ...', o['text'], flush=True)
                 elif o.get('type') == 'agent_reply':
@@ -129,7 +142,7 @@ def main():
                     for c in o.get('calls', []):
                         results.append({'call': c['call'], 'result': 'ok: offered 1 %s for %s meat' % (c['args'].get('item'), c['args'].get('price'))})
             replies = [o for o in objects if o.get('type') == 'agent_reply' and o.get('final') is not False]
-            if len(replies) >= 3 and {41, 42, 43} <= answered:
+            if len(replies) >= 4 and {41, 42, 43, 44} <= answered & got_lines and {r['call'] for r in results} <= got_results:
                 break
             time.sleep(0.1)
     finally:
@@ -145,8 +158,19 @@ def main():
         problems.append('the hello does not name "llm": %s' % hello)
     if not status:
         problems.append('no agent_status')
-    if not {41, 42, 43} <= answered:
+    if not {41, 42, 43, 44} <= answered:
         problems.append('not every line was answered: %s' % sorted(answered))
+    if known.get('pig_king') != 1:
+        problems.append('agents_known does not have pig_king 1: %s' % known)
+    if sent_defs > 3:
+        problems.append('the definition was sent %d times: agents_known came late or not at all' % sent_defs)
+    if not {41, 42, 43, 44} <= got_lines:
+        problems.append('not every line was received: %s' % sorted(got_lines))
+    if results and not {r['call'] for r in results} <= got_results:
+        problems.append('a function result was not received: %s' % sorted(got_results))
+    nobody = next((r for r in replies if r['ids'] == [44]), None)
+    if not nobody or nobody.get('error') != 'unknown_agent' or not nobody.get('why'):
+        problems.append('the line to an unknown agent has no unknown_agent error and why: %s' % nobody)
     if not REAL:
         first = next((r for r in replies if r['ids'] == [41] and r['calls']), None)
         if not first or first['calls'][0]['name'] != 'offer_trade' or first['calls'][0]['args'].get('price') != 12:
@@ -163,6 +187,7 @@ def main():
             problems.append('the key did not go as a bearer token')
     print('hello:', hello)
     print('agent_status:', status[-1] if status else None)
+    print('agents_known:', known, '- the definition went in', sent_defs, 'feeds')
     for l in lines[-8:]:
         print('  koetama |', l)
     if problems:

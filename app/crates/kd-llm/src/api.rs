@@ -46,9 +46,8 @@ pub struct Config {
     pub url: String,
     pub model: String,
     pub key: String,
-    /// this month's budget and what was spent of it so far (US dollars)
+    /// this month's budget (US dollars; what was spent is the Ledger's)
     pub budget: f64,
-    pub spent: f64,
     /// the model's price, dollars a million tokens in (the prompt) and out (the reply)
     pub price_in: f64,
     pub price_out: f64,
@@ -361,7 +360,8 @@ fn request(
     }
 }
 
-fn turn_len(t: &Turn) -> usize {
+/// About how long a turn is (characters): the prompt's size, for a cost before the answer counts it.
+pub fn turn_len(t: &Turn) -> usize {
     match t {
         Turn::User(s) => s.len(),
         Turn::Assistant { text, calls } => text.len() + calls.iter().map(|c| c.args.to_string().len()).sum::<usize>(),

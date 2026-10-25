@@ -6,7 +6,7 @@
 //! Teardown runs on Windows; on Linux (Steam Deck) through Proton - its files are then inside its Proton prefix.
 use crate::files::{self, FilesGame};
 use crate::profile::{self, Connector, Profile, TestVoice};
-use crate::{steam, Game};
+use crate::Game;
 use kd_common::feed::FeedSink;
 use kd_common::{paths, Log};
 use std::collections::HashMap;
@@ -79,14 +79,6 @@ pub fn work_dir() -> PathBuf {
 }
 
 // ---------------------------------------------------------------- where Teardown's files are
-/// The Windows user folder Teardown sees: this one on Windows (None); inside its Proton prefix on Linux.
-pub fn teardown_user() -> Option<PathBuf> {
-    if cfg!(windows) {
-        return None;
-    }
-    steam::proton_user(APPID, None)
-}
-
 /// Teardown's savegame.xml (empty when it cannot be known: Linux without the Proton prefix). SAVEPROBE_DIR: tests.
 pub fn savegame_path() -> PathBuf {
     files::feed_file(files_config())

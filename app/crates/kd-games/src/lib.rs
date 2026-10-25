@@ -165,8 +165,7 @@ pub struct GameKind {
     pub speech: bool,
     /// Koetama translates the chat lines the game sends (PROTOCOL.md "Translation": the translation models are needed)
     pub translate: bool,
-    /// the mod's agents talk through the host's LLM (docs/llm-agents.md): the profile asks for it AND the host turned it
-    /// on for this game (with_llm)
+    /// the mod's agents talk through the host's LLM (docs/llm-agents.md): the host turned it on for this game (with_llm)
     pub llm: bool,
     /// the profile itself
     pub profile: Arc<Profile>,
@@ -215,9 +214,7 @@ impl GameKind {
         k
     }
 
-    /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
-    /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
-    /// This game with the host's LLM for its agents on or off (the host's setting decides, for any mod - the user,
+    /// This game with the host's LLM for its agents on or off (the host's setting alone decides, for any mod - the user,
     /// 2026-10-24: "it should be available for any mod"; a profile's "uses": "llm" only says the mod has agents): off,
     /// the hello does not name "llm" and the feed's agent fields are dropped.
     pub fn with_llm(&self, on: bool) -> GameKind {
@@ -231,6 +228,8 @@ impl GameKind {
         k
     }
 
+    /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
+    /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
     pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game> {
         if let Some(code) = &self.join_code {
             return Box::new(joined::JoinedGame::new(self.profile.clone(), code.clone(), sink, log));
@@ -252,7 +251,6 @@ impl GameKind {
 
 /// Don't Starve Together's Proximity Comms (github.com/AgeOfAlgorithms/dst-proximity-comms): the HTTP connector, so
 /// the profile is all of it (the mod keeps the same file in its repo, koetama/).
-pub const DST_ID: &str = "dont-starve-together-proximity-comms";
 pub const DST_PROFILE_JSON: &str = include_str!("profiles/dont-starve-together-proximity-comms.json");
 static DST: LazyLock<Arc<Profile>> =
     LazyLock::new(|| Arc::new(Profile::parse(DST_PROFILE_JSON).expect("the built-in Don't Starve Together profile is valid (tested)")));

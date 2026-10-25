@@ -47,8 +47,8 @@ counts a game as gone after 1.5 s without one). Every field is optional; a missi
 | `transmit` | false | this player's voice is going into a device now ("Devices"): `true` - also to everyone in the voice room; a list of player ids - also to them |
 | `region` | `""` | where the voice room should live: `wnam`, `enam`, `sam`, `weur`, `eeur`, `apac`, `apac-ne`, `apac-se`, `oc`, `afr`, `me`; `""` (or anything else): wherever the first player is. Every player of a session sends the same one |
 | `translate` | true | false: stop translating for a while (Koetama answers nothing new until it is true again). What is translated into what is the player's setting in Koetama's window, not the game's: "Translation" |
-| `agents`, `to_agent`, `agent_results`, `agent_forget` | none | a mod's agents (characters that talk and act, or other uses) and what is said to them, for the host's large language model ("Large language models: agents"; a profile that uses `llm`) |
-| `to_translate` | none | the chat lines to translate: `{"id", "text"}`, at most 16, each at most 400 bytes of UTF-8. Ids are the game's (1 to 15 digits, unique in the session). Keep a line in every feed until its `translation` arrives (drop it after ~10 s without one) |
+| `agents`, `to_agent`, `agent_results`, `agent_forget` | none | a mod's agents (characters that talk and act, or other uses) and what is said to them, for the host's large language model ("Large language models: agents"; once the host turns it on for the game) |
+| `to_translate` | none | the chat lines to translate: `{"id", "text"}`, at most 16, each at most 400 bytes of UTF-8. Ids are the game's (1 to 15 digits, unique in the session). Keep a line in every feed until its `translation` arrives or a `received` names it (drop it after ~10 s without either) |
 
 Bad values are skipped or replaced by the default (a bad room, key or `me`: no room). Numbers may be written as
 decimals (`1.0`) and an empty list as `{}` (Lua's JSON libraries do both).
@@ -57,7 +57,7 @@ A **hub** (a game whose script runs only on the host, "Hub") adds `players`: one
 
 ### Koetama -> game
 
-Each object has a `"type"` first.
+Each object has a `"type"` first. Ignore an object whose type you do not know (newer Koetamas send more).
 
 | object | when |
 |---|---|
@@ -71,7 +71,9 @@ Each object has a `"type"` first.
 | `{"type":"status","speech":"ready","microphone":"open"}` | after the hello, and when it changes: `speech` `off` (the game does not ask for it, or this Koetama listens to no microphone: started to take typed lines only), `loading` (the models load; the first time they are downloaded), `ready` or `error`; `microphone` `closed`, `open` or `none` (no microphone). Lines said before `ready` and `open` are not heard |
 | `{"type":"translation","id":7,"text":"Hello","from":"es","to":"en"}` | the translation of line `id`, exactly one per id; `from` / `to`: the pair that was used (left out with `""`). `""`: nothing to show (translation off, nothing in a language the player doesn't speak, no model for it, the same as the line, or a bad line). A line that comes while its language's models are downloading or loading waits for them (up to 2 minutes). At most 1000 characters |
 | `{"type":"translations_status","into":"en","translations":[{"from":"ja","to":"en","state":"downloading","progress":0.42}]}` | the player's translation: `into`, the language their chat is translated into (`""`: off), and each pair in use this session with its state - after the hello and when one changes (at most every 0.5 s while downloading): `ready`, `downloading` (with `progress` 0..1), `loading`, `unavailable` (no model for it, or not on this PC with downloads off) or `error` (tried again after a minute) |
-| `{"type":"agent_reply","ids":[41],"agent":"pig_king","text":"Twelve meat.","calls":[...],"error":""}` | an agent's reply to the game's lines `ids` ("Large language models: agents") |
+| `{"type":"received","to_agent":[41],"agent_results":["call_1"],"to_translate":[7]}` | Koetama has these of the feed's requests: the game may stop sending them (their answers come as before). Once for each; a list with nothing is left out. Koetama 0.5.10 and later - an older one sends none, so keep sending until the answer then |
+| `{"type":"agent_reply","ids":[41],"agent":"pig_king","text":"Twelve meat.","calls":[...],"error":"","why":"","final":true}` | an agent's reply to the game's lines `ids` ("Large language models: agents") |
+| `{"type":"agents_known","agents":[{"id":"pig_king","version":1}]}` | the agents Koetama has now (standing): send an agent's definition only when it is not here or is older ("Large language models: agents") |
 | `{"type":"agent_status","state":"ready","why":"","model":"...","spent":0.42,"budget":5}` | the host's large language model: after the hello and when it changes ("Large language models: agents") |
 | `{"type":"join_code","player":"7656...02","code":"K7QF-4MXA"}` | a hub only ("Hub"): the code that player types into their Koetama to join |
 | `{"type":"player","player":"7656...02","joined":true}` | a hub only: that player's Koetama joined (or left) |
@@ -307,42 +309,63 @@ MB a direction) and answers each with a `translation`. A game sends `"translate"
 
 ## Large language models: agents
 
-Any mod can ask the **host's** large language model through **agents** (a profile may list `"llm"` in `uses` to say
-its mod has them; Koetama does not require it): a character in
-the game's world (an NPC that talks and acts), or anything else the mod wants a model for (a director that plans the
-next wave, a quest writer, a parser that turns what players say into commands). The host turns it on for that game in
-Koetama's window ("Large Language Models": the API - OpenAI-compatible or Anthropic -, address, model, key, a monthly
-budget, the model's price, requests a minute), and the `hello` then names `llm`. Only the host's Koetama talks to the
-model: the game already carries every player's words to the host's script, which sends them on. The key never leaves
-the host's PC except to that API (sealed by Windows; never in a feed, a log or an object). A how-to for mod makers,
-with examples: docs/agents-guide.md; the design: docs/llm-agents.md.
+Any mod can ask the **host's** large language model through **agents**: a character in the game's world (an NPC
+that talks and acts), or anything else the mod wants a model for (a director that plans the next wave, a quest writer,
+a parser that turns what players say into commands). The host turns it on for that game in Koetama's window ("Large
+Language Models": the API - OpenAI-compatible or Anthropic -, address, model, key, a monthly budget, requests a
+minute), and the `hello` then names `llm`; that switch alone decides (a profile may list `"llm"` in `uses`, which only
+says its mod has agents). Without `llm` in the hello, Koetama drops the feed's agent fields: send them only when it is
+there. Only the host's Koetama talks to the model: the game already carries every player's words to the host's script,
+which sends them on. The key never leaves the host's PC except to that API (sealed by Windows; never in a feed, a log
+or an object). A how-to for mod makers, with examples: docs/agents-guide.md; the design: docs/llm-agents.md.
 
 **Game -> Koetama** (the top feed only; a hub's players' feeds carry none):
 
 | Field | What |
 |---|---|
-| `agents` | the agents, `[{"id", "version", "character", "stream", "persona", "functions", "max_words", "voice"}]`, at most 32 a feed. **Send them after every `hello`** (Koetama keeps them only for its session: after a restart or a new session a line for an agent it does not know is answered `no agent "x"`), and again when one changes; a feed may carry only some of them (the socket connector's lines are at most 64 KB: send a large set over several feeds). `id` 1-64 of `A-Z a-z 0-9 _ . : -`; `version` raised when the persona or functions change; `character` true (the default: a character in the game's world - Koetama puts a short note of its own before the persona, below) or false (the persona alone is the system prompt); `stream` false (the default) or true (its words come as they are written: below); `persona` (who it is and how it talks, or what it is for; what it refuses) at most 8 KB; `functions` at most 16, each `{"name", "description", "parameters": <JSON Schema object>}`, names 1-64 of `A-Z a-z 0-9 _ -`, each once; `max_words` the longest reply (1-1000, default 80); `voice` the voice it will speak with (for spoken agents, to come). An agent that breaks a rule is left out |
-| `to_agent` | the lines for agents: `[{"id": 41, "agent": "pig_king", "text": "10 meat for a helmet?", "from": {"id": "7656...02", "name": "Wendy"}, "state": "winter, day 31; Wendy holds 12 meat", "heard_by": ["7656...02"]}]`, at most 8 kept per feed. `id` as `to_translate`'s; `text` 1-400 bytes; no `from`: an event the game tells it ("the museum alarm went off"); `state` (what the game says is going on) at most 2 KB; `heard_by` optional. Keep a line in every feed until its `agent_reply` comes: each is answered once |
-| `agent_results` | the results of the functions an agent called: `[{"call": "call_1", "result": "ok: offered 1 football helmet for 12 meat"}]` (or `"error: Wendy has only 8 meat"`), at most 1 KB each. Send each until the follow-up `agent_reply` comes |
+| `agents` | the agents' definitions, `[{"id", "version", "character", "stream", "persona", "functions", "max_words", "voice"}]`, at most 32 a feed. **Send one when `agents_known` does not have it, or has an older `version`** (Koetama keeps them only for its session: after a restart or a new session `agents_known` is empty again, and a line for an agent it does not know is answered with the error `unknown_agent`); a feed may carry only some of them (the socket connector's lines are at most 64 KB: send a large set over several feeds). Sending them in every feed works too, at a cost: up to 8 KB of persona each. `id` 1-64 of `A-Z a-z 0-9 _ . : -`; `version` an integer, raised when the persona or functions change (Koetama takes each definition it is sent, and `agents_known` reports its version: that is how the game knows to send a changed one); `character` true (the default: a character in the game's world - Koetama puts a short note of its own before the persona, below) or false (the persona alone is the system prompt); `stream` false (the default) or true (its words come as they are written: below); `persona` (who it is and how it talks, or what it is for; what it refuses) at most 8 KB; `functions` at most 16, each `{"name", "description", "parameters": <JSON Schema object>}`, names 1-64 of `A-Z a-z 0-9 _ -`, each once; `max_words` the longest reply (1-1000, default 80); `voice` reserved (a voice for spoken agents, to come: Koetama keeps it and does nothing with it yet). An agent that breaks a rule is left out |
+| `to_agent` | the lines for agents: `[{"id": 41, "agent": "pig_king", "text": "10 meat for a helmet?", "from": {"id": "7656...02", "name": "Wendy"}, "state": "winter, day 31; Wendy holds 12 meat"}]`, at most 8 kept per feed. `id` as `to_translate`'s; `text` 1-400 bytes; no `from`: an event the game tells it ("the museum alarm went off"); `state` (what the game says is going on) at most 2 KB. Keep a line in the feed until a `received` names it (or, from an older Koetama, its final `agent_reply` comes): each is answered once |
+| `agent_results` | the results of the functions an agent called: `[{"call": "call_1", "result": "ok: offered 1 football helmet for 12 meat"}]` (or `"error: Wendy has only 8 meat"`), at most 1 KB each. Send each until a `received` names it (or the follow-up `agent_reply` comes) |
 | `agent_forget` | agent ids whose conversation starts over (a new day, the character died) |
 
 **Koetama -> game:**
 
-- `agent_reply`: `{"type":"agent_reply","ids":[41],"agent":"pig_king","text":"Twelve meat, not ten.","calls":[{"call":"call_1","name":"offer_trade","args":{"item":"footballhat","price":12}}],"error":"","final":true}`
+- `agent_reply`: `{"type":"agent_reply","ids":[41],"agent":"pig_king","text":"Twelve meat, not ten.","calls":[{"call":"call_1","name":"offer_trade","args":{"item":"footballhat","price":12}}],"error":"","why":"","final":true}`
   - **`final`**: true for the reply. An agent with `"stream": true` first gets replies with `"final": false`: all its
     words so far (only ever growing; no calls, no error), at most every 0.15 s while the model writes - show them as
-    live words. The `"final": true` reply comes after, with the whole text and the calls; only it answers the lines
-    (keep them in the feed until then).
+    live words. The `"final": true` reply comes after, with the whole text and the calls; only it answers the lines.
+    With the files connector a newer `"final": false` for the same lines takes the place of one the game has not
+    read yet, so a slow game reads the newest words, not a backlog: never count on seeing each one.
   - **Lines that come while an agent is answering wait**, and then go to the model together: one reply answers them
     all (`ids`).
   - **`calls`** are requests, never commands: the game checks each against its own rules (inventories, cooldowns,
     what players may not make an agent do), runs it or refuses it, and answers in `agent_results`. With every call
     answered (or after 20 s without), the results go back to the model and its follow-up comes as another
     `agent_reply` to the same `ids`. Lines for that agent wait meanwhile.
-  - **`error`** when there is no reply: `"budget"` (the host's month is spent), `no agent "x"` (not in `agents`), or
-    what failed; then `text` is `""` and `calls` empty. At most 2,000 characters of text.
-- `agent_status` (standing: after each hello and when it changes): `state` `ready`, `busy` (the host's requests a
-  minute reached: lines wait), `budget`, `error` (`why`); `model`, `spent` and `budget` (dollars this month).
+  - **`error`** when there is no reply, a code - then `text` is `""` and `calls` empty - and **`why`** the same in
+    words, for a log or the host (at most 500 characters; never show it to players as the agent's words):
+
+    | `error` | what happened | what to do |
+    |---|---|---|
+    | `budget` | the host's monthly budget is spent (or this request could cost more than is left) | a fallback line; nothing more this month unless the host raises it |
+    | `unknown_agent` | no definition for that agent (Koetama restarted, a new session, or it broke a rule) | send its definition (check `agents_known`), then the line again with a new id |
+    | `queue_full` | more than 16 lines were waiting for that agent | it is talked to faster than it answers: slow down |
+    | `cancelled` | `agent_forget` started its conversation over before it answered | nothing: the lines were dropped on purpose |
+    | `failed` | the request to the model failed (`why`: the API's message - a wrong key, a model that does not exist, no connection, a timeout) | a fallback line; `agent_status` says `error` until a request succeeds |
+
+    A code Koetama adds later is like `failed`. At most 2,000 characters of text.
+- `agents_known` (standing: after each hello and when it changes): `{"type":"agents_known","agents":[{"id":"pig_king",
+  "version":1}]}` - every agent Koetama has a definition for now, with its version. Empty after a restart or a new
+  session. The game sends a definition when its agent is missing here or older.
+- `received`: `{"type":"received","to_agent":[41,42],"agent_results":["call_1"]}` - Koetama has these lines and
+  results (and `to_translate` lines): stop sending them. The answer comes later as before.
+- `agent_status` (standing: after each hello and when it changes - its state, or what was spent by a cent): `state`
+  `ready`, `busy` (the host's requests a minute reached: lines wait), `budget`, `error` (`why`); `model`, `spent` and
+  `budget` (dollars this month). What a request costs is counted from the tokens the API says it used and the
+  model's price in OpenRouter's public list (openrouter.ai/api/v1/models: the providers' own prices, fetched by the
+  host's Koetama at most once a day); a model not in the list counts at $3 a million tokens in and $15 out. Before
+  each request Koetama sets aside the most it could cost (its prompt and `max_words`): a request that might go past
+  the budget is not sent (`budget`). The provider's bill is what counts.
 
 How Koetama asks: the lines of one turn as `Name: words`, an event in [brackets], the newest `state` as
 `[the game: ...]`; for a `character`, a short note before its persona (it is a character in a multiplayer game, lines

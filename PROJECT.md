@@ -143,7 +143,19 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
   using it (DST), what the mod sends (state, memory), streaming, voices. **Renamed to agents** (the user: "agents is a
   better terminology"; the feature has more uses than NPCs): agents / to_agent / agent_results / agent_forget /
   agent_reply / agent_status, kd-llm's Agents, docs/llm-agents.md, tools/agents_e2e.py; `character` (default true;
-  false: the persona alone).
+  false: the persona alone). Step 3 (streaming: `"stream": true`, `final: false` replies) built and pushed.
+  **Reviewed (2026-10-24, the user: "lets make all these changes ... If openrouter is trustworthy, use their
+  numbers"):** `error` is a code (budget, unknown_agent, queue_full, cancelled, failed) with `why` in words;
+  `agents_known` (standing: the game sends a definition only when it is missing or older) and `received` (lines,
+  results and lines to translate Koetama has: the game stops resending) - both new objects, so an older mod is
+  unaffected; `heard_by` dropped (nothing used it); `uses: "llm"` informative (the host's switch alone); a queue cap
+  (16 a agent) and `agent_forget` cancelling what is under way; prices from OpenRouter's public list (kd-llm prices.rs,
+  llm-prices.json, fetched at most daily and only once a model is set; not listed: $3 / $15), and ONE ledger
+  (ledger.rs) for the window's "Try it" and the game's agents, each request reserving its worst case so the budget
+  cannot be overrun by requests in flight; agent_status resent when a cent more is spent; the files connector lets a
+  newer `final: false` replace an unread older one. Dead code removed (DST_ID, teardown_user, kd_voice::PACKET);
+  gui.rs split (gui/llm.rs, models.rs, profiles.rs, updates.rs) and runtime.rs (runtime/agents.rs, received.rs).
+  The mods (Proximity Comms' voice.lua, the DST mod) still need: agents_known, received, the error codes.
 
 - **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
   hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and

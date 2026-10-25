@@ -120,16 +120,51 @@ pub fn translation(id: i64, text: &str, rule: Option<(&str, &str)>) -> String {
 /// the longest agent reply sent to the game (characters)
 pub const MAX_AGENT_REPLY_CHARS: usize = 2000;
 
-/// {"type":"agent_reply","ids":[..],"agent":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..,"final":..}:
-/// an agent's reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it calls (the game checks
-/// and runs them, and answers with agent_results), or why there is none ("budget", what failed). final false: the
-/// words so far of a streaming agent (no calls yet; the whole reply follows with final true).
-pub fn agent_reply(ids: &[i64], agent: &str, text: &str, calls: &[(String, String, serde_json::Value)], error: &str, last: bool) -> String {
+/// {"type":"agent_reply","ids":[..],"agent":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..,"why":..,
+/// "final":..}: an agent's reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it calls
+/// (the game checks and runs them, and answers with agent_results), or why there is none: `error` a code
+/// (kd_llm::error: budget, unknown_agent, failed, cancelled, queue_full) and `why` in words. final false: the words so
+/// far of a streaming agent (no calls yet; the whole reply follows with final true).
+#[allow(clippy::too_many_arguments)]
+pub fn agent_reply(
+    ids: &[i64],
+    agent: &str,
+    text: &str,
+    calls: &[(String, String, serde_json::Value)],
+    error: &str,
+    why: &str,
+    last: bool,
+) -> String {
     let text: String = text.chars().take(MAX_AGENT_REPLY_CHARS).collect();
+    let why: String = why.chars().take(500).collect();
     let calls: Vec<serde_json::Value> =
         calls.iter().map(|(id, name, args)| serde_json::json!({"call": id, "name": name, "args": args})).collect();
-    serde_json::json!({"type": "agent_reply", "ids": ids, "agent": agent, "text": text, "calls": calls, "error": error, "final": last})
-        .to_string()
+    serde_json::json!({"type": "agent_reply", "ids": ids, "agent": agent, "text": text, "calls": calls, "error": error,
+        "why": why, "final": last})
+    .to_string()
+}
+
+/// {"type":"agents_known","agents":[{"id":..,"version":..}]} (standing): the agents Koetama has now - the game sends an
+/// agent's definition only when it is not here or is older.
+pub fn agents_known(agents: &[(String, i64)]) -> String {
+    let a: Vec<serde_json::Value> = agents.iter().map(|(id, v)| serde_json::json!({"id": id, "version": v})).collect();
+    serde_json::json!({"type": "agents_known", "agents": a}).to_string()
+}
+
+/// {"type":"received","to_agent":[..],"agent_results":[..],"to_translate":[..]}: what of the feed's requests Koetama
+/// now has (the game may stop sending them; their answers come as before). Lists that are empty are left out.
+pub fn received(to_agent: &[i64], agent_results: &[String], to_translate: &[i64]) -> String {
+    let mut o = serde_json::json!({"type": "received"});
+    if !to_agent.is_empty() {
+        o["to_agent"] = serde_json::json!(to_agent);
+    }
+    if !agent_results.is_empty() {
+        o["agent_results"] = serde_json::json!(agent_results);
+    }
+    if !to_translate.is_empty() {
+        o["to_translate"] = serde_json::json!(to_translate);
+    }
+    o.to_string()
 }
 
 /// {"type":"agent_status","state":..,"why":..,"model":..,"spent":..,"budget":..}: the host's LLM for the agents - "ready",
@@ -501,7 +536,7 @@ fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
 }
 
 /// A `to_agent` item, or None (left out): an id as to_translate's, a good agent id, a text of 1 to MAX_REQUEST_BYTES;
-/// `from`, `state` (at most MAX_STATE_BYTES, else ""), `heard_by` (the first 64, bad ones left out) optional.
+/// `from` and `state` (at most MAX_STATE_BYTES, else "") optional.
 fn parse_agent_line(o: &Value) -> Option<feed::AgentLine> {
     o.as_object()?;
     let id = o.get("id").and_then(whole).filter(|n| (1..=feed::MAX_REQUEST_ID).contains(n))?;
@@ -509,12 +544,6 @@ fn parse_agent_line(o: &Value) -> Option<feed::AgentLine> {
     let text = fits(o.get("text"), feed::MAX_REQUEST_BYTES).filter(|t| !t.is_empty())?;
     let from = o.get("from").filter(|f| f.is_object());
     let from_id = from.and_then(|f| f.get("id")).filter(|v| !v.is_null()).and_then(player_id);
-    let mut heard_by: Vec<PlayerId> = Vec::new();
-    for h in o.get("heard_by").and_then(Value::as_array).map_or(&[][..], |a| &a[..a.len().min(64)]) {
-        if let Some(p) = player_id(h).filter(|p| !heard_by.contains(p)) {
-            heard_by.push(p);
-        }
-    }
     Some(feed::AgentLine {
         id,
         agent: agent.into(),
@@ -522,7 +551,6 @@ fn parse_agent_line(o: &Value) -> Option<feed::AgentLine> {
         from_id,
         from_name: short_text(from.and_then(|f| f.get("name"))),
         state: fits(o.get("state"), feed::MAX_STATE_BYTES).unwrap_or("").into(),
-        heard_by,
     })
 }
 

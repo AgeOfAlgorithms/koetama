@@ -28,6 +28,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod agents;
+mod received;
+pub use agents::AgentStatus;
+use received::Received;
+
 /// Makes the microphone-like the listener hears instead of the real microphone (--mic-wav, --auto-speech).
 /// (the voice chat too, when the game plays voices: a recording can be heard by the other players as the microphone is)
 pub type MicSource = Box<dyn FnOnce(Listener, Log, Option<kd_voice::Voice>) -> Box<dyn Mic>>;
@@ -56,16 +61,8 @@ pub struct Options {
     pub noise: kd_voice::denoise::Level,
     /// the host's LLM for this game's agents (docs/llm-agents.md; None: off - only a profile that uses "llm" gets it)
     pub llm: Option<kd_llm::Config>,
-}
-
-/// The agents' LLM as the window shows it.
-#[derive(Clone, Debug, Default)]
-pub struct AgentStatus {
-    /// "ready", "busy", "budget", "error" ("" before the first word from the service)
-    pub state: &'static str,
-    pub why: String,
-    /// dollars spent this month (the window keeps it in the settings)
-    pub spent: f64,
+    /// what the host's LLM has cost this month (shared with the window's "Try it"; None: a ledger of this run's own)
+    pub llm_ledger: Option<Arc<kd_llm::Ledger>>,
 }
 
 /// Where the mixer plays: a sound device, or a wav file (Options::out_wav).
@@ -100,6 +97,7 @@ impl Default for Options {
             out_wav: None,
             noise: kd_voice::denoise::Level::Standard,
             llm: None,
+            llm_ledger: None,
         }
     }
 }
@@ -206,6 +204,8 @@ pub struct Runtime {
     /// the agents' LLM (a game whose profile uses "llm", the host's setting on) and its state for the window
     agents: Option<kd_llm::Agents>,
     agent_status: Arc<Mutex<AgentStatus>>,
+    /// the "received" objects the sink made, for the next tick to send (the feed's thread does not take the game)
+    receipts: Arc<Mutex<Vec<String>>>,
 }
 
 /// The game, once it is made (the translator's replies go to it; the translator starts before it).
@@ -239,8 +239,12 @@ struct Sink {
     /// the translator, and the session its ids belong to
     translator: Option<Translator>,
     sid: Mutex<Option<i64>>,
-    /// the agents' LLM (the host's, for a game whose profile uses "llm")
+    /// the agents' LLM (the host's, once they turned it on for this game)
     agents: Option<kd_llm::Agents>,
+    /// what of the feed's requests (to_agent, agent_results, to_translate) the game has been told Koetama has, this
+    /// session; and the "received" objects for the next tick to send
+    received: Mutex<Received>,
+    receipts: Arc<Mutex<Vec<String>>>,
 }
 
 impl kd_common::feed::FeedSink for Sink {
@@ -273,6 +277,7 @@ impl kd_common::feed::FeedSink for Sink {
             // (every feed: the service answers each line once, and a new session starts its agents over)
             n.feed(feed.sid, &feed.agents, &feed.to_agent, &feed.agent_results, &feed.agent_forget);
         }
+        self.acknowledge(&feed);
         if let Some(t) = &self.translator {
             // (a new session: the game's ids start over)
             let mut sid = self.sid.lock().unwrap();
@@ -339,41 +344,11 @@ impl Runtime {
                 log.clone(),
             )
         });
-        // (the agents' LLM: replies and its state go straight to the game; the window reads the state and what was spent)
+        // (the agents' LLM: replies and its state go straight to the game; the window reads the state)
         let agent_status: Arc<Mutex<AgentStatus>> = Arc::default();
+        let receipts: Arc<Mutex<Vec<String>>> = Arc::default();
         let agents = match (&opts.llm, kind.llm) {
-            (Some(cfg), true) => {
-                let (slot, st, model, budget) = (slot.clone(), agent_status.clone(), cfg.model.clone(), cfg.budget);
-                st.lock().unwrap().spent = cfg.spent;
-                Some(kd_llm::Agents::start(
-                    cfg.clone(),
-                    Arc::new(move |e| {
-                        let game = slot.lock().unwrap().clone();
-                        match e {
-                            kd_llm::Event::Reply { ids, agent, text, calls, error } => {
-                                let calls: Vec<(String, String, serde_json::Value)> =
-                                    calls.into_iter().map(|c| (c.id, c.name, c.args)).collect();
-                                if let Some(g) = game {
-                                    g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &calls, &error, true));
-                                }
-                            }
-                            kd_llm::Event::Partial { ids, agent, text } => {
-                                if let Some(g) = game {
-                                    g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &[], "", false));
-                                }
-                            }
-                            kd_llm::Event::Status { state, why, spent } => {
-                                *st.lock().unwrap() = AgentStatus { state, why: why.clone(), spent };
-                                if let Some(g) = game {
-                                    g.lock().unwrap().set_standing("agent_status", kd_games::api::agent_status(state, &why, &model, spent, budget));
-                                }
-                            }
-                            kd_llm::Event::Spent(s) => st.lock().unwrap().spent = s,
-                        }
-                    }),
-                    log.clone(),
-                ))
-            }
+            (Some(cfg), true) => Some(agents::start(cfg, opts.llm_ledger.clone(), &slot, &agent_status, &log)),
             _ => None,
         };
         let sink: Arc<dyn kd_common::feed::FeedSink> = Arc::new(Sink {
@@ -384,6 +359,8 @@ impl Runtime {
             translator: translator.clone(),
             sid: Mutex::new(None),
             agents: agents.clone(),
+            received: Mutex::new(Received::default()),
+            receipts: receipts.clone(),
         });
         let game = kind.make(sink, log.clone(), opts.io_dir.clone());
         // (no test voices: the game's test speakers are silent)
@@ -429,6 +406,7 @@ impl Runtime {
             rules_told,
             agents,
             agent_status,
+            receipts,
         };
         rt.apply_translation();
         if rt.kind.voices {
@@ -541,6 +519,8 @@ impl Runtime {
     pub fn set_llm(&mut self, cfg: kd_llm::Config) {
         if let Some(n) = &self.agents {
             n.set_config(cfg.clone());
+            let mut st = self.agent_status.lock().unwrap();
+            (st.model, st.budget) = (cfg.model.clone(), cfg.budget);
         }
         self.opts.llm = Some(cfg);
     }
@@ -776,6 +756,14 @@ impl Runtime {
     }
 
     pub fn tick(&mut self) {
+        // (what the feed's thread acknowledged: sent here, where the game may be taken)
+        let receipts = std::mem::take(&mut *self.receipts.lock().unwrap());
+        if !receipts.is_empty() {
+            let g = self.game.lock().unwrap();
+            for r in receipts {
+                g.send_object(r);
+            }
+        }
         // (the languages spoken may follow the game's setting: the translator gets them as they are now)
         self.apply_translation();
         self.send_room();

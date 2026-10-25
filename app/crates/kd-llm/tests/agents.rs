@@ -2,7 +2,7 @@
 //! and go as one turn, function calls go to the game and their results back to the LLM, the host's budget and
 //! requests a minute, a failed request, a new session, an agent nobody defined.
 use kd_common::feed::{AgentDef, AgentFunction, AgentLine, PlayerId};
-use kd_llm::{Api, Config, Event, Agents};
+use kd_llm::{Agents, Api, Config, Event, Ledger};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -81,24 +81,27 @@ fn openai_text(text: &str) -> Value {
 struct Rig {
     agents: Agents,
     events: Arc<(Mutex<Vec<Event>>, Condvar)>,
+    ledger: Arc<Ledger>,
 }
 
 fn rig(cfg: Config) -> Rig {
     let events: Arc<(Mutex<Vec<Event>>, Condvar)> = Arc::default();
     let ev = events.clone();
+    let ledger = Ledger::new(0.0);
     let agents = Agents::start(
         cfg,
+        ledger.clone(),
         Arc::new(move |e| {
             ev.0.lock().unwrap().push(e);
             ev.1.notify_all();
         }),
         kd_common::null_log(),
     );
-    Rig { agents, events }
+    Rig { agents, events, ledger }
 }
 
 fn config(api: Api, url: &str) -> Config {
-    Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), budget: 5.0, price_in: 1.0, price_out: 5.0, per_minute: 60, ..Default::default() }
+    Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), budget: 5.0, price_in: 1.0, price_out: 5.0, per_minute: 60 }
 }
 
 fn pig(functions: Vec<AgentFunction>) -> AgentDef {
@@ -127,7 +130,9 @@ impl Rig {
             .unwrap()
             .iter()
             .filter_map(|e| match e {
-                Event::Reply { ids, text, calls, error, .. } => Some((ids.clone(), text.clone(), calls.len(), error.clone())),
+                Event::Reply { ids, text, calls, error, why, .. } => {
+                    Some((ids.clone(), text.clone(), calls.len(), if error.is_empty() { String::new() } else { format!("{error}: {why}") }))
+                }
                 _ => None,
             })
             .collect()
@@ -168,7 +173,7 @@ fn lines_that_come_while_it_answers_go_as_one_turn() {
     assert!(seen[0].0.contains("authorization: Bearer sk-test") || seen[0].0.to_ascii_lowercase().contains("authorization: bearer sk-test"));
     assert_eq!(seen[1].1["messages"].as_array().unwrap().len(), 4, "system, the first turn, its reply, the new turn");
     drop(seen);
-    let spent = r.events.0.lock().unwrap().iter().rev().find_map(|e| if let Event::Spent(s) = e { Some(*s) } else { None }).unwrap();
+    let spent = r.ledger.spent();
     assert!((spent - 2.0 * (100.0 * 1.0 + 20.0 * 5.0) / 1e6).abs() < 1e-12, "spent {spent}");
     r.agents.stop();
 }
@@ -212,14 +217,14 @@ fn function_calls_go_to_the_game_and_their_results_back() {
 #[test]
 fn the_budget_and_requests_a_minute() {
     let f = fake(Box::new(|_, _| (200, openai_text("ok"), Duration::ZERO)));
-    // (one reply costs 100 * 1 + 20 * 5 = 200 millionths of a dollar: a budget of 150 millionths is spent by one)
-    let r = rig(Config { budget: 0.000150, ..config(Api::OpenAi, &f.url) });
+    // (a request holds what it could cost at worst - its prompt and 336 tokens out: ~1,800 millionths of a dollar -
+    //  and one reply costs 100 * 1 + 20 * 5 = 200: with 1,950 the first goes, the second would pass the budget)
+    let r = rig(Config { budget: 0.001950, ..config(Api::OpenAi, &f.url) });
     r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a")], &[], &[]);
     r.wait_replies(1);
     r.agents.feed(1, &[], &[line(2, "pig", "Wendy", "b")], &[], &[]);
     let got = r.wait_replies(2);
-    assert_eq!(got[1], (vec![2], String::new(), 0, "budget".into()));
-    r.wait("the budget status", |ev| ev.iter().any(|e| matches!(e, Event::Status { state: "budget", .. })));
+    assert!(got[1].0 == vec![2] && got[1].3.starts_with("budget"), "{:?}", got[1]);
     assert_eq!(f.seen.lock().unwrap().len(), 1);
     r.agents.stop();
     // (one request a minute: a second agent's line waits - "busy")
@@ -246,8 +251,8 @@ fn a_failed_request_a_new_session_and_an_unknown_agent() {
     let r = rig(config(Api::OpenAi, &f.url));
     r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a"), line(2, "nobody", "Wendy", "b")], &[], &[]);
     let got = r.wait_replies(2);
-    assert!(got.iter().any(|g| g.0 == vec![2] && g.3.contains("no agent \"nobody\"")));
-    assert!(got.iter().any(|g| g.0 == vec![1] && g.3.contains("401") && g.3.contains("Incorrect API key")), "{got:?}");
+    assert!(got.iter().any(|g| g.0 == vec![2] && g.3.starts_with("unknown_agent")), "{got:?}");
+    assert!(got.iter().any(|g| g.0 == vec![1] && g.3.starts_with("failed") && g.3.contains("401") && g.3.contains("Incorrect API key")), "{got:?}");
     r.wait("the error status", |ev| ev.iter().any(|e| matches!(e, Event::Status { state: "error", .. })));
     r.agents.feed(1, &[], &[line(3, "pig", "Wendy", "c")], &[], &[]);
     r.wait_replies(3);
@@ -327,5 +332,44 @@ fn a_streaming_agent_says_its_words_as_they_come() {
     assert!(partial.len() >= 2, "the words came as they were written: {partial:?}");
     assert!(partial.windows(2).all(|w| w[1].starts_with(&w[0]) && w[1].len() > w[0].len()), "each the words so far: {partial:?}");
     assert!(partial[0].starts_with("Twelve"));
+    r.agents.stop();
+}
+
+#[test]
+fn forgetting_cancels_and_the_queue_has_a_cap() {
+    let f = fake(Box::new(|_, _| (200, openai_text("Hm."), Duration::from_millis(600))));
+    let r = rig(config(Api::OpenAi, &f.url));
+    r.agents.feed(1, &[pig(vec![])], &[line(1, "pig", "Wendy", "a")], &[], &[]);
+    std::thread::sleep(Duration::from_millis(150));
+    // (while it answers: 17 more lines - 16 wait, the 17th is refused)
+    let more: Vec<_> = (2..=18).map(|i| line(i, "pig", "Wes", "b")).collect();
+    r.agents.feed(1, &[], &more[..8], &[], &[]);
+    r.agents.feed(1, &[], &more[8..16], &[], &[]);
+    r.agents.feed(1, &[], &more[16..], &[], &[]);
+    r.wait("the queue refused one", |ev| ev.iter().any(|e| matches!(e, Event::Reply { error: "queue_full", .. })));
+    // (forget: what was under way and what waited answered "cancelled"; the late reply is dropped)
+    r.agents.feed(1, &[], &[], &[], &["pig".to_string()]);
+    // (one reply for all it cancelled, after the queue's refusal)
+    let got = r.wait_replies(2);
+    let cancelled: Vec<i64> = got.iter().filter(|g| g.3.starts_with("cancelled")).flat_map(|g| g.0.clone()).collect();
+    assert!(cancelled.contains(&1) && cancelled.contains(&2) && cancelled.contains(&17), "{got:?}");
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(!r.replies().iter().any(|g| g.1 == "Hm."), "the reply under way was dropped");
+    assert!(r.ledger.spent() == 0.0, "and its hold let go, nothing counted");
+    r.agents.stop();
+}
+
+#[test]
+fn what_it_knows_is_told() {
+    let f = fake(Box::new(|_, _| (200, openai_text("ok"), Duration::ZERO)));
+    let r = rig(config(Api::OpenAi, &f.url));
+    let mut cow = pig(vec![]);
+    cow.id = "cow".into();
+    cow.version = 7;
+    r.agents.feed(1, &[pig(vec![]), cow], &[], &[], &[]);
+    r.wait("the known agents", |ev| ev.iter().any(|e| matches!(e, Event::Known(k) if k == &vec![("cow".to_string(), 7), ("pig".to_string(), 1)])));
+    // (a new session: nothing known until the game sends them again)
+    r.agents.feed(2, &[], &[], &[], &[]);
+    r.wait("nothing known", |ev| matches!(ev.iter().rev().find(|e| matches!(e, Event::Known(_))), Some(Event::Known(k)) if k.is_empty()));
     r.agents.stop();
 }

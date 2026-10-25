@@ -312,8 +312,8 @@ pub struct Profile {
     /// the mod runs only on the host's PC: the other players join with a code ("uses": "hosted"; PROTOCOL.md "Hub") -
     /// the window offers "Join a hosted game" only when a profile says so
     pub hosted: bool,
-    /// the mod's agents talk through the host's LLM ("uses": "llm"; docs/llm-agents.md) - only once the host turns it on
-    /// for this game in Koetama (GameKind::with_llm)
+    /// the mod's agents talk through the host's LLM (docs/llm-agents.md): the host's switch alone, for any mod
+    /// (GameKind::with_llm) - never the file's ("uses": "llm" is accepted, and says only that the mod has agents)
     pub llm: bool,
     pub test_voices: Vec<TestVoice>,
     pub speaker_names: BTreeMap<i64, String>,
@@ -491,7 +491,7 @@ impl Profile {
                 if !(v || s || t || l) {
                     return Err("\"uses\": list at least one of \"voices\", \"speech\", \"translate\", \"llm\"".into());
                 }
-                (v, s, t, h, l)
+                (v, s, t, h, false)
             }
             Some(_) => {
                 return Err(

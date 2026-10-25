@@ -59,9 +59,9 @@ struct Args {
     /// the agents' budget for this run, in dollars (spent from 0)
     #[arg(long = "llm-budget", default_value_t = 1.0)]
     llm_budget: f64,
-    /// the model's price, dollars a million tokens in and out (the budget counts with it)
-    #[arg(long = "llm-price", value_name = "IN,OUT", default_value = "1,5")]
-    llm_price: String,
+    /// the model's price, dollars a million tokens in and out (the budget counts with it); by default OpenRouter's list
+    #[arg(long = "llm-price", value_name = "IN,OUT")]
+    llm_price: Option<String>,
     /// requests to the LLM a minute, at most
     #[arg(long = "llm-per-minute", default_value_t = 20)]
     llm_per_minute: u32,
@@ -488,6 +488,7 @@ pub fn main(argv: Vec<String>) -> i32 {
                 return 1;
             }
         },
+        llm_ledger: None,
         llm: match llm_config(&args) {
             Ok(c) => c,
             Err(e) => {
@@ -605,17 +606,27 @@ fn llm_config(args: &Args) -> Result<Option<kd_llm::Config>, String> {
     let Some(model) = args.llm_model.clone().filter(|m| !m.trim().is_empty()) else { return Ok(None) };
     let api = kd_llm::Api::from_name(&args.llm_api).ok_or("--llm-api: openai or anthropic")?;
     let key = std::env::var("KOETAMA_LLM_KEY").map_err(|_| "--llm-model: put the LLM's key in KOETAMA_LLM_KEY")?;
-    let price: Vec<f64> = args.llm_price.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-    let [price_in, price_out] = price[..] else { return Err("--llm-price: IN,OUT (dollars a million tokens)".into()) };
-    Ok(Some(kd_llm::Config {
-        api,
-        url: args.llm_url.clone().unwrap_or_default(),
-        model,
-        key,
-        budget: args.llm_budget,
-        spent: 0.0,
-        price_in,
-        price_out,
-        per_minute: args.llm_per_minute,
-    }))
+    let url = args.llm_url.clone().unwrap_or_default();
+    let (price_in, price_out) = match &args.llm_price {
+        Some(p) => {
+            let price: Vec<f64> = p.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            let [i, o] = price[..] else { return Err("--llm-price: IN,OUT (dollars a million tokens)".into()) };
+            (i, o)
+        }
+        None => {
+            let at = if url.is_empty() { api.default_url() } else { url.as_str() };
+            match crate::llm_setting::load_prices().and_then(|p| p.find(api, at, &model)) {
+                Some((i, o, id)) => {
+                    println!("the model's price: ${i} in, ${o} out a million tokens (OpenRouter's {id})");
+                    (i, o)
+                }
+                None => {
+                    let (i, o) = kd_llm::prices::UNKNOWN;
+                    println!("the model is not in OpenRouter's price list: counted at ${i} in, ${o} out a million tokens");
+                    (i, o)
+                }
+            }
+        }
+    };
+    Ok(Some(kd_llm::Config { api, url, model, key, budget: args.llm_budget, price_in, price_out, per_minute: args.llm_per_minute }))
 }

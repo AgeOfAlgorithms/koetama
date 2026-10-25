@@ -100,7 +100,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
         .iter()
         .map(|l| {
             serde_json::json!({"id": l.id, "agent": l.agent, "text": l.text, "from_id": l.from_id.as_ref().map(p),
-                "from_name": l.from_name, "state": l.state, "heard_by": l.heard_by.iter().map(p).collect::<Vec<_>>()})
+                "from_name": l.from_name, "state": l.state})
         })
         .collect();
     assert_eq!(Value::Array(lines), want["to_agent"], "{text}: to_agent");

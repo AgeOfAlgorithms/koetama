@@ -9,8 +9,12 @@
 //!   results, and the host's limits (requests a minute, the month's budget).
 //!
 //! It knows no game: an agent is an id, a persona and functions the mod gives.
-pub mod api;
 pub mod agents;
+pub mod api;
+pub mod ledger;
+pub mod prices;
 
 pub use api::{Api, Call, Config, Reply, Turn};
-pub use agents::{Event, Agents, OnEvent};
+pub use agents::{error, Agents, Event, OnEvent};
+pub use ledger::Ledger;
+pub use prices::Prices;

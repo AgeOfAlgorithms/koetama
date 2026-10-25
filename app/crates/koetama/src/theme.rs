@@ -287,6 +287,7 @@ pub const CARD_H: f32 = 62.0;
 
 /// A game mod as the picker shows it: a tile with the mod's initial in the gradient, then three lines - the mod, "by"
 /// its author, the game it runs in (the user 2026-10-17) - and a badge after the game (a community profile).
+#[allow(clippy::too_many_arguments)]
 fn game_face(ui: &egui::Ui, rect: Rect, game: &str, mod_name: &str, author: &str, hovered: bool, selected: bool, badge: Option<&str>) {
     let p = ui.painter();
     let fill = if hovered { WIDGET_HOVER } else if selected { CARD } else { WIDGET };

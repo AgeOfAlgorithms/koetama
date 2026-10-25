@@ -345,7 +345,8 @@ engine/games/teardown.py: feed.json fixtures).
 ```rust
 pub mod api {
     Api { OpenAi, Anthropic } .name() .from_name() .default_url()
-    Config { api, url, model, key, budget, spent, price_in, price_out, per_minute } .url() .cost(&Reply)
+    Config { api, url, model, key, budget, price_in, price_out, per_minute } .url() .cost(&Reply)
+    turn_len(&Turn)                 // its characters (what a request could cost: ~4 a token)
     Call { id, name, args: Value }   Turn { User(text), Assistant { text, calls }, Results(Vec<(call, result)>) }
     Reply { text, calls, tokens_in, tokens_out }
     endpoint(api, url)              // <url>/chat/completions | <url>/v1/messages
@@ -359,20 +360,41 @@ pub mod api {
                                     // with "none" (OpenAI's reasoning models refuse functions otherwise)
 }
 pub mod agents {
-    Agents::start(Config, on_event, log) .set_config(c) .feed(sid, agents, lines, results, forget) .stop()
-    Event { Reply { ids, agent, text, calls, error }, Partial { ids, agent, text } (a streaming agent's words so far, at
-            most every PARTIAL_EVERY 150 ms), Status { state, why, spent }, Spent(f64) }
-    MAX_TURNS 24, RESULTS_WAIT 20 s, TIMEOUT 60 s
+    Agents::start(Config, Arc<Ledger>, on_event, log) .set_config(c) .feed(sid, agents, lines, results, forget) .stop()
+    Event { Reply { ids, agent, text, calls, error: &'static str (error::*), why }, Partial { ids, agent, text } (a
+            streaming agent's words so far, at most every PARTIAL_EVERY 150 ms), Status { state, why, spent } (on a
+            change of state, or of a cent spent), Known(Vec<(id, version)>) (on a change) }
+    error { BUDGET, UNKNOWN_AGENT, FAILED, CANCELLED, QUEUE_FULL }  // agent_reply's codes ("" none)
+    MAX_TURNS 24, MAX_QUEUE 16, RESULTS_WAIT 20 s, TIMEOUT 60 s
+}
+pub mod ledger {
+    Ledger::new(spent) -> Arc .spent() .add(cost) .set(spent) .reserve(most, budget) -> bool .settle(most, cost)
+                                    // the month's spend, ONE for the window's "Try it" and the running game's agents;
+                                    // a request holds the most it could cost until it is settled
+}
+pub mod prices {
+    Prices(Vec<(id, in, out)>) ::parse(json) .find(api, url, model) -> Option<(in, out, id)>
+                                    // OpenRouter's list (LIST_URL): "openai/gpt-4o-mini"; the provider from the
+                                    // address (api.openai.com, api.deepseek.com, ...), "." and "-" alike, ":batch" not
+    Prices::load(path, get)         // the copy on this PC, fetched again after MAX_AGE (a day); offline: the old copy
+    UNKNOWN (3, 15)                 // a model the list does not have
 }
 ```
 
 The service's thread keeps each agent's definition, conversation (MAX_TURNS, starting with a player's turn), queue
 (lines that come while it is busy or its calls wait: one turn, one reply for all) and the calls waiting for the
 game's results; requests run on threads of their own (a reply from an older one - a new session - is dropped). The
-host's limits are the service's: requests a minute (more wait: "busy"), the month's budget (spent: an error reply,
-"budget"). koetama: Options.llm (llm_setting.rs: settings.json "llm", the key sealed by secret.rs - DPAPI on Windows),
-GameKind::with_llm (off: the hello does not name "llm", the feed's agent fields are dropped), the window's "Large
-Language Models" card, cli --llm-*. Tests: kd-llm's unit tests and tests/agents.rs (a fake LLM, both styles),
+host's limits are the service's: requests a minute (more wait: "busy"), the month's budget (each request reserves
+its worst case - the prompt's characters / 4 at the price in, max_tokens at the price out - in the Ledger, and is not
+sent when that could go past the budget: "budget"), at most MAX_QUEUE lines waiting per agent ("queue_full");
+agent_forget cancels what an agent has under way ("cancelled"). koetama: Options.llm and Options.llm_ledger
+(llm_setting.rs: settings.json "llm", the key sealed by secret.rs - DPAPI on Windows; the price from
+llm_setting::load_prices, llm-prices.json in Koetama's folder), runtime/agents.rs (the service's events to the game:
+agent_reply, agents_known and agent_status as standing objects), runtime/received.rs (the "received" objects for what
+the feed asked: lines, results, lines to translate), GameKind::with_llm (the host's switch alone; off: the hello does
+not name "llm", the feed's agent fields are dropped), the window's "Large Language Models" card (gui/llm.rs), cli
+--llm-* (--llm-price, else OpenRouter's). The files connector lets a streaming agent's newer words take the place of
+an unread older object for the same lines (files.rs replace_partial). Tests: kd-llm's unit tests and tests/agents.rs (a fake LLM, both styles),
 tools/agents_e2e.py (a real Koetama between a fake game and a fake LLM; --real for a real one).
 
 ## Building and testing a crate (parallel work)

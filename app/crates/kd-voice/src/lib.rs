@@ -33,8 +33,6 @@ pub const RATE: u32 = 48000;
 pub const FRAME: usize = 960;
 /// Opus frames in one packet (60 ms)
 pub const PER_PACKET: usize = 3;
-/// samples in one packet
-pub const PACKET: usize = FRAME * PER_PACKET;
 /// bits a second (Opus VOIP)
 pub const BITRATE: i32 = 24000;
 
