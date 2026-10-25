@@ -58,13 +58,28 @@ impl App {
                 let r = ui.add(egui::DragValue::new(&mut self.llm.budget).range(0.0..=1000.0).speed(0.25).prefix("$").suffix(" a month"));
                 changed |= r.drag_stopped() || r.lost_focus();
                 ui.label(RichText::new(format!("spent this month: ${:.2}", self.llm_ledger.spent())).color(theme::MUTED))
-                    .on_hover_text("Counted from the tokens each reply used and the model's price: your provider's bill is what counts.");
+                    .on_hover_text(
+                        "Counted from the tokens each reply used and the model's price - an estimate (a provider's \
+                         peak-hour or discount prices are not known): your provider's bill is what counts.",
+                    );
+                // (the count can be set back when the provider's bill says less - the user, 2026-10-25)
+                if ui.small_button("Reset")
+                    .on_hover_text("Set this month's count back to $0 (when your provider's usage page says it is less).")
+                    .clicked()
+                {
+                    self.llm_ledger.set(0.0);
+                }
             });
             ui.end_row();
             ui.label(RichText::new("Price").color(theme::MUTED));
-            let ((i, o), id) = self.llm.price();
-            let (text, colour) = match (&id, self.llm_prices.is_some()) {
-                (Some(id), _) => (format!("${i} in, ${o} out a million tokens ({id} in OpenRouter's price list)"), theme::MUTED),
+            let price = self.llm.price();
+            let unknown = kd_llm::Price::unknown();
+            let (i, o) = (unknown.input, unknown.output);
+            let (text, colour) = match (&price, self.llm_prices.is_some()) {
+                (Some(p), _) => {
+                    let cached = p.cache_read.map(|c| format!(" (${c} cached)")).unwrap_or_default();
+                    (format!("${} in{cached}, ${} out a million tokens ({} in OpenRouter's price list)", p.input, p.output, p.id), theme::MUTED)
+                }
                 (None, true) => ("loading the price list...".to_string(), theme::MUTED),
                 (None, false) if self.llm.model.trim().is_empty() => ("from OpenRouter's price list, once a model is set".to_string(), theme::MUTED),
                 (None, false) => (format!("not in OpenRouter's price list: counted at ${i} in, ${o} out a million tokens"), theme::WARN),
@@ -127,7 +142,8 @@ impl App {
                             self.llm_ledger.add(cfg.cost(&reply));
                         }
                         let calls = if reply.calls.is_empty() { String::new() } else { format!(" ({} function calls)", reply.calls.len()) };
-                        Ok(format!("{}{calls}  ·  {} tokens in, {} out", reply.text, reply.tokens_in, reply.tokens_out))
+                        let cached = if reply.tokens_cached > 0 { format!(" ({} cached)", reply.tokens_cached) } else { String::new() };
+                        Ok(format!("{}{calls}  ·  {} tokens in{cached}, {} out", reply.text, reply.tokens_in, reply.tokens_out))
                     }
                     Err(e) => Err(e),
                 };

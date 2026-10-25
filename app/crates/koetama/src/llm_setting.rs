@@ -110,13 +110,10 @@ impl LlmSetting {
         self.spent.insert(this_month(), json!(x));
     }
 
-    /// The model's price, dollars a million tokens in and out, and the list's id for it (None: not in OpenRouter's
-    /// list, or the list is not loaded - counted at kd_llm::prices::UNKNOWN).
-    pub fn price(&self) -> ((f64, f64), Option<String>) {
-        match self.prices.as_ref().and_then(|p| p.find(self.api, self.url_or_default(), &self.model)) {
-            Some((i, o, id)) => ((i, o), Some(id)),
-            None => (kd_llm::prices::UNKNOWN, None),
-        }
+    /// The model's price in OpenRouter's list (None: not in it, or the list is not loaded - counted at
+    /// kd_llm::Price::unknown).
+    pub fn price(&self) -> Option<kd_llm::Price> {
+        self.prices.as_ref().and_then(|p| p.find(self.api, self.url_or_default(), &self.model))
     }
 
     fn url_or_default(&self) -> &str {
@@ -139,15 +136,18 @@ impl LlmSetting {
 
     /// The config as the setting is now, whatever game (None: not complete) - the window's "Try it".
     pub fn config(&self) -> Option<kd_llm::Config> {
-        self.complete().then(|| kd_llm::Config {
-            api: self.api,
-            url: self.url.trim().to_string(),
-            model: self.model.trim().to_string(),
-            key: self.key.trim().to_string(),
-            budget: self.budget,
-            price_in: self.price().0 .0,
-            price_out: self.price().0 .1,
-            per_minute: self.per_minute,
+        self.complete().then(|| {
+            let mut c = kd_llm::Config {
+                api: self.api,
+                url: self.url.trim().to_string(),
+                model: self.model.trim().to_string(),
+                key: self.key.trim().to_string(),
+                budget: self.budget,
+                per_minute: self.per_minute,
+                ..Default::default()
+            };
+            self.price().unwrap_or_else(kd_llm::Price::unknown).apply(&mut c);
+            c
         })
     }
 }

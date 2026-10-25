@@ -345,10 +345,14 @@ engine/games/teardown.py: feed.json fixtures).
 ```rust
 pub mod api {
     Api { OpenAi, Anthropic } .name() .from_name() .default_url()
-    Config { api, url, model, key, budget, price_in, price_out, per_minute } .url() .cost(&Reply)
+    Config { api, url, model, key, budget, price_in, price_out, price_cached, price_cache_write, per_minute } .url()
+           .cost(&Reply)        // the prompt's cached tokens at price_cached (None: price_in)
     turn_len(&Turn)                 // its characters (what a request could cost: ~4 a token)
     Call { id, name, args: Value }   Turn { User(text), Assistant { text, calls }, Results(Vec<(call, result)>) }
-    Reply { text, calls, tokens_in, tokens_out }
+    Reply { text, calls, tokens_in, tokens_cached, tokens_cache_write, tokens_out }
+                                    // usage: OpenAI's cached_tokens, DeepSeek's prompt_cache_hit_tokens, Anthropic's
+                                    // cache_read / cache_creation_input_tokens; streamed: stream_options include_usage
+                                    // at api.openai.com, api.deepseek.com, openrouter.ai
     endpoint(api, url)              // <url>/chat/completions | <url>/v1/messages
     body(api, url, model, system, functions, turns, max_tokens) -> Value
                                     // a call left without results gets "(not run)", same-side turns made one;
@@ -373,9 +377,11 @@ pub mod ledger {
                                     // a request holds the most it could cost until it is settled
 }
 pub mod prices {
-    Prices(Vec<(id, in, out)>) ::parse(json) .find(api, url, model) -> Option<(in, out, id)>
+    Price { id, input, output, cache_read, cache_write, created } ::unknown() .apply(&mut Config)
+    Prices(Vec<Price>) ::parse(json) .find(api, url, model) -> Option<Price>
                                     // OpenRouter's list (LIST_URL): "openai/gpt-4o-mini"; the provider from the
-                                    // address (api.openai.com, api.deepseek.com, ...), "." and "-" alike, ":batch" not
+                                    // address (api.openai.com, api.deepseek.com, ...), "." and "-" alike, ":batch" not;
+                                    // a company's alias: its newest model with the same words and version numbers
     Prices::load(path, get)         // the copy on this PC, fetched again after MAX_AGE (a day); offline: the old copy
     UNKNOWN (3, 15)                 // a model the list does not have
 }

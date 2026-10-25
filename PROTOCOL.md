@@ -361,9 +361,12 @@ or an object). A how-to for mod makers, with examples: docs/agents-guide.md; the
   results (and `to_translate` lines): stop sending them. The answer comes later as before.
 - `agent_status` (standing: after each hello and when it changes - its state, or what was spent by a cent): `state`
   `ready`, `busy` (the host's requests a minute reached: lines wait), `budget`, `error` (`why`); `model`, `spent` and
-  `budget` (dollars this month). What a request costs is counted from the tokens the API says it used and the
+  `budget` (dollars this month). What a request costs is counted from the tokens the API says it used (the
+  prompt's cached tokens at the cached price: an agent's persona and history are the same every turn) and the
   model's price in OpenRouter's public list (openrouter.ai/api/v1/models: the providers' own prices, fetched by the
-  host's Koetama at most once a day); a model not in the list counts at $3 a million tokens in and $15 out. Before
+  host's Koetama at most once a day; a company's alias such as `deepseek-flash` is its newest model there); a model
+  not in the list counts at $3 a million tokens in and $15 out. Peak-hour and discount prices are not known: it is
+  an estimate, and the host can reset the month's count. Before
   each request Koetama sets aside the most it could cost (its prompt and `max_words`): a request that might go past
   the budget is not sent (`budget`). The provider's bill is what counts.
 

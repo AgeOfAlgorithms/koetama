@@ -101,7 +101,7 @@ fn rig(cfg: Config) -> Rig {
 }
 
 fn config(api: Api, url: &str) -> Config {
-    Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), budget: 5.0, price_in: 1.0, price_out: 5.0, per_minute: 60 }
+    Config { api, url: url.into(), model: "m".into(), key: "sk-test".into(), budget: 5.0, price_in: 1.0, price_out: 5.0, per_minute: 60, ..Default::default() }
 }
 
 fn pig(functions: Vec<AgentFunction>) -> AgentDef {

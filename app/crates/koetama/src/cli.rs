@@ -607,26 +607,29 @@ fn llm_config(args: &Args) -> Result<Option<kd_llm::Config>, String> {
     let api = kd_llm::Api::from_name(&args.llm_api).ok_or("--llm-api: openai or anthropic")?;
     let key = std::env::var("KOETAMA_LLM_KEY").map_err(|_| "--llm-model: put the LLM's key in KOETAMA_LLM_KEY")?;
     let url = args.llm_url.clone().unwrap_or_default();
-    let (price_in, price_out) = match &args.llm_price {
+    let price = match &args.llm_price {
         Some(p) => {
             let price: Vec<f64> = p.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-            let [i, o] = price[..] else { return Err("--llm-price: IN,OUT (dollars a million tokens)".into()) };
-            (i, o)
+            let [input, output] = price[..] else { return Err("--llm-price: IN,OUT (dollars a million tokens)".into()) };
+            kd_llm::Price { input, output, ..Default::default() }
         }
         None => {
             let at = if url.is_empty() { api.default_url() } else { url.as_str() };
             match crate::llm_setting::load_prices().and_then(|p| p.find(api, at, &model)) {
-                Some((i, o, id)) => {
-                    println!("the model's price: ${i} in, ${o} out a million tokens (OpenRouter's {id})");
-                    (i, o)
+                Some(p) => {
+                    let cached = p.cache_read.map(|c| format!(" (${c} cached)")).unwrap_or_default();
+                    println!("the model's price: ${} in{cached}, ${} out a million tokens (OpenRouter's {})", p.input, p.output, p.id);
+                    p
                 }
                 None => {
-                    let (i, o) = kd_llm::prices::UNKNOWN;
-                    println!("the model is not in OpenRouter's price list: counted at ${i} in, ${o} out a million tokens");
-                    (i, o)
+                    let p = kd_llm::Price::unknown();
+                    println!("the model is not in OpenRouter's price list: counted at ${} in, ${} out a million tokens", p.input, p.output);
+                    p
                 }
             }
         }
     };
-    Ok(Some(kd_llm::Config { api, url, model, key, budget: args.llm_budget, price_in, price_out, per_minute: args.llm_per_minute }))
+    let mut c = kd_llm::Config { api, url, model, key, budget: args.llm_budget, per_minute: args.llm_per_minute, ..Default::default() };
+    price.apply(&mut c);
+    Ok(Some(c))
 }

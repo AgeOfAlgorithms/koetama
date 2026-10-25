@@ -51,6 +51,10 @@ pub struct Config {
     /// the model's price, dollars a million tokens in (the prompt) and out (the reply)
     pub price_in: f64,
     pub price_out: f64,
+    /// the prompt's tokens the provider read from its cache, and wrote to it (Anthropic), when they cost otherwise
+    /// (None: as price_in). An agent's persona and history are the same every turn: most of a prompt is cached.
+    pub price_cached: Option<f64>,
+    pub price_cache_write: Option<f64>,
     /// requests a minute, at most
     pub per_minute: u32,
 }
@@ -64,9 +68,14 @@ impl Config {
         }
     }
 
-    /// What a reply's tokens cost (dollars).
+    /// What a reply's tokens cost (dollars): the prompt's cached tokens at the cached price.
     pub fn cost(&self, r: &Reply) -> f64 {
-        (r.tokens_in as f64 * self.price_in + r.tokens_out as f64 * self.price_out) / 1e6
+        let fresh = r.tokens_in.saturating_sub(r.tokens_cached).saturating_sub(r.tokens_cache_write);
+        (fresh as f64 * self.price_in
+            + r.tokens_cached as f64 * self.price_cached.unwrap_or(self.price_in)
+            + r.tokens_cache_write as f64 * self.price_cache_write.unwrap_or(self.price_in)
+            + r.tokens_out as f64 * self.price_out)
+            / 1e6
     }
 }
 
@@ -89,13 +98,47 @@ pub enum Turn {
     Results(Vec<(String, String)>),
 }
 
-/// What the LLM answered: its words, its function calls, and the tokens it counted.
+/// What the LLM answered: its words, its function calls, and the tokens it counted - in (the whole prompt; of them,
+/// those read from the provider's cache and those written to it) and out.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Reply {
     pub text: String,
     pub calls: Vec<Call>,
     pub tokens_in: u64,
+    pub tokens_cached: u64,
+    pub tokens_cache_write: u64,
     pub tokens_out: u64,
+}
+
+/// A response's `usage` into the reply: OpenAI's prompt_tokens (cached: prompt_tokens_details.cached_tokens, or
+/// DeepSeek's prompt_cache_hit_tokens) and completion_tokens; Anthropic's input_tokens, cache_read_input_tokens and
+/// cache_creation_input_tokens (all three the prompt) and output_tokens. Counts it does not give are left as they are.
+fn take_usage(api: Api, u: &Value, r: &mut Reply) {
+    let n = |k: &str| u.get(k).and_then(Value::as_u64);
+    match api {
+        Api::OpenAi => {
+            if let Some(x) = n("prompt_tokens") {
+                r.tokens_in = x;
+            }
+            if let Some(x) = u.pointer("/prompt_tokens_details/cached_tokens").and_then(Value::as_u64).or(n("prompt_cache_hit_tokens")) {
+                r.tokens_cached = x;
+            }
+            if let Some(x) = n("completion_tokens") {
+                r.tokens_out = x;
+            }
+        }
+        Api::Anthropic => {
+            let (fresh, read, write) = (n("input_tokens"), n("cache_read_input_tokens"), n("cache_creation_input_tokens"));
+            if fresh.is_some() || read.is_some() || write.is_some() {
+                r.tokens_in = fresh.unwrap_or(0) + read.unwrap_or(0) + write.unwrap_or(0);
+                r.tokens_cached = read.unwrap_or(0);
+                r.tokens_cache_write = write.unwrap_or(0);
+            }
+            if let Some(x) = n("output_tokens") {
+                r.tokens_out = x.max(r.tokens_out);
+            }
+        }
+    }
 }
 
 /// The API's address for a request.
@@ -219,7 +262,10 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
         let msg = e.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| e.to_string());
         return Err(msg);
     }
-    let tokens = |k: &str| v.get("usage").and_then(|u| u.get(k)).and_then(Value::as_u64).unwrap_or(0);
+    let mut r = Reply::default();
+    if let Some(u) = v.get("usage") {
+        take_usage(api, u, &mut r);
+    }
     match api {
         Api::OpenAi => {
             let m = v.pointer("/choices/0/message").ok_or("the answer has no choices[0].message")?;
@@ -232,12 +278,7 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
                     args: serde_json::from_str(args).unwrap_or_else(|_| json!(args)),
                 });
             }
-            Ok(Reply {
-                text: m.get("content").and_then(Value::as_str).unwrap_or("").trim().to_string(),
-                calls,
-                tokens_in: tokens("prompt_tokens"),
-                tokens_out: tokens("completion_tokens"),
-            })
+            Ok(Reply { text: m.get("content").and_then(Value::as_str).unwrap_or("").trim().to_string(), calls, ..r })
         }
         Api::Anthropic => {
             let content = v.get("content").and_then(Value::as_array).ok_or("the answer has no content")?;
@@ -253,9 +294,7 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
                     _ => {}
                 }
             }
-            // (cached prompt tokens are counted apart: they are still tokens in)
-            let tokens_in = tokens("input_tokens") + tokens("cache_read_input_tokens") + tokens("cache_creation_input_tokens");
-            Ok(Reply { text: text.trim().to_string(), calls, tokens_in, tokens_out: tokens("output_tokens") })
+            Ok(Reply { text: text.trim().to_string(), calls, ..r })
         }
     }
 }
@@ -299,8 +338,10 @@ fn request(
     let mut b = body(cfg.api, cfg.url(), &cfg.model, system, functions, turns, max_tokens);
     if on_text.is_some() {
         b["stream"] = json!(true);
-        if cfg.api == Api::OpenAi && cfg.url().contains("api.openai.com") {
-            // (OpenAI's own sends the tokens counted only when asked; other OpenAI-style servers may refuse the field)
+        let asks = ["api.openai.com", "api.deepseek.com", "openrouter.ai"];
+        if cfg.api == Api::OpenAi && asks.iter().any(|h| cfg.url().contains(h)) {
+            // (these send the tokens counted - cached ones too - only when asked; other OpenAI-style servers may refuse
+            // the field: theirs are counted from the characters)
             b["stream_options"] = json!({"include_usage": true});
         }
     }
@@ -387,12 +428,10 @@ pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&
             return Err(e.get("message").and_then(Value::as_str).map_or_else(|| e.to_string(), str::to_string));
         }
         let before = reply.text.len();
-        let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
         match api {
             Api::OpenAi => {
                 if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
-                    reply.tokens_in = n(u, "prompt_tokens");
-                    reply.tokens_out = n(u, "completion_tokens");
+                    take_usage(api, u, &mut reply);
                 }
                 let Some(d) = v.pointer("/choices/0/delta") else { continue };
                 if let Some(t) = d.get("content").and_then(Value::as_str) {
@@ -422,8 +461,7 @@ pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&
             Api::Anthropic => match v.get("type").and_then(Value::as_str) {
                 Some("message_start") => {
                     if let Some(u) = v.pointer("/message/usage") {
-                        reply.tokens_in = n(u, "input_tokens") + n(u, "cache_read_input_tokens") + n(u, "cache_creation_input_tokens");
-                        reply.tokens_out = n(u, "output_tokens");
+                        take_usage(api, u, &mut reply);
                     }
                 }
                 Some("content_block_start") => {
@@ -447,7 +485,7 @@ pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&
                 }
                 Some("message_delta") => {
                     if let Some(u) = v.get("usage") {
-                        reply.tokens_out = n(u, "output_tokens").max(reply.tokens_out);
+                        take_usage(api, u, &mut reply);
                     }
                 }
                 Some("message_stop") => break,
@@ -557,6 +595,34 @@ mod tests {
         assert_eq!(parse_reply(Api::Anthropic, &json!({"type": "error", "error": {"message": "overloaded"}})), Err("overloaded".into()));
         let cfg = Config { price_in: 1.0, price_out: 5.0, ..Default::default() };
         assert!((cfg.cost(&Reply { tokens_in: 1_000_000, tokens_out: 200_000, ..Default::default() }) - 2.0).abs() < 1e-9);
+    }
+
+    /// The prompt's cached tokens, as each API counts them, at the cached price (the user, 2026-10-25: Koetama's
+    /// count was "WAY off" DeepSeek's bill - an agent's prompt is mostly the same every turn, and cached).
+    #[test]
+    fn cached_tokens_cost_less() {
+        let deepseek = json!({"choices": [{"message": {"content": "Hi"}}],
+            "usage": {"prompt_tokens": 2000, "prompt_cache_hit_tokens": 1800, "prompt_cache_miss_tokens": 200, "completion_tokens": 50}});
+        let r = parse_reply(Api::OpenAi, &deepseek).unwrap();
+        assert_eq!((r.tokens_in, r.tokens_cached, r.tokens_out), (2000, 1800, 50));
+        let openai = json!({"choices": [{"message": {"content": "Hi"}}],
+            "usage": {"prompt_tokens": 2000, "prompt_tokens_details": {"cached_tokens": 1536}, "completion_tokens": 50}});
+        assert_eq!(parse_reply(Api::OpenAi, &openai).unwrap().tokens_cached, 1536);
+        let anthropic = json!({"content": [{"type": "text", "text": "Hi"}],
+            "usage": {"input_tokens": 20, "cache_read_input_tokens": 1500, "cache_creation_input_tokens": 480, "output_tokens": 50}});
+        let a = parse_reply(Api::Anthropic, &anthropic).unwrap();
+        assert_eq!((a.tokens_in, a.tokens_cached, a.tokens_cache_write), (2000, 1500, 480));
+        // (deepseek-flash, off-peak: $0.15 a million in, $0.003 cached, $0.6 out)
+        let cfg = Config { price_in: 0.15, price_out: 0.6, price_cached: Some(0.003), ..Default::default() };
+        let want = (200.0 * 0.15 + 1800.0 * 0.003 + 50.0 * 0.6) / 1e6;
+        assert!((cfg.cost(&r) - want).abs() < 1e-12, "{} {want}", cfg.cost(&r));
+        let no_cache_price = Config { price_in: 0.15, price_out: 0.6, ..Default::default() };
+        assert!((no_cache_price.cost(&r) - (2000.0 * 0.15 + 50.0 * 0.6) / 1e6).abs() < 1e-12, "no cached price: as tokens in");
+        let stream = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\
+                      data: {\"choices\":[],\"usage\":{\"prompt_tokens\":900,\"prompt_cache_hit_tokens\":640,\"completion_tokens\":3}}\n\n\
+                      data: [DONE]\n";
+        let s = read_stream(Api::OpenAi, stream.as_bytes(), &mut |_| {}).unwrap();
+        assert_eq!((s.tokens_in, s.tokens_cached, s.tokens_out), (900, 640, 3));
     }
 
     #[test]

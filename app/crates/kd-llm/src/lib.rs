@@ -17,4 +17,4 @@ pub mod prices;
 pub use api::{Api, Call, Config, Reply, Turn};
 pub use agents::{error, Agents, Event, OnEvent};
 pub use ledger::Ledger;
-pub use prices::Prices;
+pub use prices::{Price, Prices};
