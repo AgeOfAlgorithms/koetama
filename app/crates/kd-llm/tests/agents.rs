@@ -254,6 +254,9 @@ fn a_failed_request_a_new_session_and_an_unknown_agent() {
     assert!(got.iter().any(|g| g.0 == vec![2] && g.3.starts_with("unknown_agent")), "{got:?}");
     assert!(got.iter().any(|g| g.0 == vec![1] && g.3.starts_with("failed") && g.3.contains("401") && g.3.contains("Incorrect API key")), "{got:?}");
     r.wait("the error status", |ev| ev.iter().any(|e| matches!(e, Event::Status { state: "error", .. })));
+    // (another model: the old one's failure is not shown as its own - the user, 2026-10-24: it "didn't get cleared")
+    r.agents.set_config(Config { model: "other".into(), ..config(Api::OpenAi, &f.url) });
+    r.wait("ready again", |ev| matches!(ev.last(), Some(Event::Status { state: "ready", .. })));
     r.agents.feed(1, &[], &[line(3, "pig", "Wendy", "c")], &[], &[]);
     r.wait_replies(3);
     assert_eq!(f.seen.lock().unwrap()[1].1["messages"].as_array().unwrap().len(), 2, "the failed turn was left out");

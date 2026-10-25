@@ -64,12 +64,14 @@ impl App {
             ui.label(RichText::new("Price").color(theme::MUTED));
             let ((i, o), id) = self.llm.price();
             let (text, colour) = match (&id, self.llm_prices.is_some()) {
-                (Some(id), _) => (format!("${i} in, ${o} out a million tokens (OpenRouter's list: {id})"), theme::MUTED),
-                (None, true) => ("loading OpenRouter's price list...".to_string(), theme::MUTED),
-                (None, false) if self.llm.model.trim().is_empty() => ("from OpenRouter's list, once a model is set".to_string(), theme::MUTED),
-                (None, false) => (format!("not in OpenRouter's list: counted at ${i} in, ${o} out a million tokens"), theme::WARN),
+                (Some(id), _) => (format!("${i} in, ${o} out a million tokens ({id} in OpenRouter's price list)"), theme::MUTED),
+                (None, true) => ("loading the price list...".to_string(), theme::MUTED),
+                (None, false) if self.llm.model.trim().is_empty() => ("from OpenRouter's price list, once a model is set".to_string(), theme::MUTED),
+                (None, false) => (format!("not in OpenRouter's price list: counted at ${i} in, ${o} out a million tokens"), theme::WARN),
             };
-            ui.label(RichText::new(text).size(12.0).color(colour));
+            ui.label(RichText::new(text).size(12.0).color(colour)).on_hover_text(
+                "Koetama only reads the prices from OpenRouter's public list, to count what the model costs. Your requests                  go to the address above with your key - not through OpenRouter.",
+            );
             ui.end_row();
             ui.label(RichText::new("Requests").color(theme::MUTED));
             ui.horizontal(|ui| {
@@ -88,13 +90,17 @@ impl App {
                 "ready" => ("ready".to_string(), theme::GOOD),
                 "busy" => ("busy: lines wait (requests a minute)".to_string(), theme::WARN),
                 "budget" => ("this month's budget is spent".to_string(), theme::BAD),
-                "error" => (format!("failed: {}", n.why), theme::BAD),
+                "error" => ("failed".to_string(), theme::BAD),
                 _ => ("starting".to_string(), theme::MUTED),
             };
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Status").color(theme::MUTED));
                 theme::pill(ui, &text, colour);
             });
+            // (why it failed, on lines of its own: an API's message can be long)
+            if n.state == "error" && !n.why.is_empty() {
+                ui.add(egui::Label::new(RichText::new(&n.why).size(12.0).color(theme::BAD)).wrap());
+            }
         }
         if changed {
             self.llm.save(&mut self.settings);

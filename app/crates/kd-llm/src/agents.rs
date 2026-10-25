@@ -222,7 +222,13 @@ impl Worker {
         loop {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(Msg::Config(c)) => self.cfg = c,
+                Ok(Msg::Config(c)) => {
+                    // (another API, address, model or key: the last failure was the old one's - not shown as this one's)
+                    if (c.api, &c.url, &c.model, &c.key) != (self.cfg.api, &self.cfg.url, &self.cfg.model, &self.cfg.key) {
+                        self.failed = None;
+                    }
+                    self.cfg = c;
+                }
                 Ok(Msg::Feed { sid, agents, lines, results, forget }) => self.feed(sid, agents, lines, results, forget),
                 Ok(Msg::Done { agent, gen, result }) => self.done(&agent, gen, result),
                 Ok(Msg::Partial { agent, gen, text }) => {
