@@ -2,6 +2,23 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.7: noise suppression
+
+- **Noise suppression for the voice you send.** A new "Noise suppression" setting under Mic boost takes typing, mouse
+  clicks, fans and other room noise out of your voice before other players hear it:
+  - **Standard** (the default) uses RNNoise: it takes out steady noise (fans, hum, a vacuum cleaner) and some keyboard
+    clicks, for about half a percent of one core and 10 ms.
+  - **Strong** uses DeepFilterNet 3: it takes out keyboard and mouse clicks too and keeps your voice natural, for about
+    8-10 % of one core and 30 ms. Its model (8 MB) downloads the first time you pick it.
+  - **Off** sends your microphone as it is.
+
+  "Hear yourself" plays your voice with it, so you can compare. Speech to text still listens to your raw microphone:
+  in our tests, fully cleaned audio helped it with typing but hurt it with steady noise like a fan.
+- **The game list is tidier:** each game mod's author shows in its card, after the mod's name, and a community game
+  mod's Remove button (a bin) sits on the same line, next to its mod page link.
+- **For developers:** `--noise off|standard|strong` on the command line; the benchmarks behind these choices are in
+  `docs/noise-suppression.md`.
+
 ### 0.5.6: every microphone heard
 
 - **Headsets heard far too quietly: fixed.** Some headsets send their voice in two channels with one of them
