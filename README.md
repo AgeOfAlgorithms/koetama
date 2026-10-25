@@ -211,6 +211,16 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.11: language model fixes
+
+- **A model's short name finds its price:** "deepseek-flash" at DeepSeek's address is now priced as DeepSeek's newest
+  Flash model. Before, it counted at the $3 / $15 fallback, so the budget ran out about 30 times too early.
+- **A new model starts clean:** switching the API, address, model or key clears the last model's error from the
+  status.
+- **Long errors wrap:** the status says "failed", and the reason shows in full underneath.
+- **Clearer price row:** Koetama only reads prices from OpenRouter's public list. Your requests go to the address you
+  set, with your key.
+
 ### 0.5.10: game characters that talk
 
 - **Large language models for game mods.** A host can let a game mod use a large language model, so its characters
@@ -239,14 +249,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 - **The microphone test sounds like the real thing:** it no longer raises the noise in your room between words.
 - **For developers:** `tools/mic_levels.py` and `cargo run -p kd-voice --example mic_check` measure a real
   microphone's levels; a very quiet simulated microphone (`--sim-mic very-quiet`) is in the tests.
-
-### 0.5.8: your models, in plain sight
-
-- **See what's in memory and what's on disk.** The Speech to text and Translation cards now list every model the
-  same way: whether it's in memory, on disk or not downloaded yet, and its size, with totals at the top ("about 680
-  MB in memory · 1.2 GB on disk"). Translation models you downloaded before are listed too, not only the ones in use
-  this session.
-- **Free memory and delete, per model.** "Free memory" lets go of a model now; it loads again the next time it's
-  needed. The bin deletes its files to free disk space (after asking); it downloads again if it's needed later.
-- **Game mod cards are easier to read:** the mod, "by" its author, then the game, each on its own line, and a
-  community mod's bin is set apart from its mod page link.
