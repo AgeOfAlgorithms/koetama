@@ -117,12 +117,21 @@ pub fn folding_card(
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let off = on.as_ref().is_some_and(|o| !**o);
-                let text = format!("{}  {}", if *open { "▾" } else { "▸" }, title.to_uppercase());
                 let colour = if off { MUTED.gamma_multiply(0.7) } else { MUTED };
-                let r = ui
-                    .add(egui::Label::new(RichText::new(text).size(12.5).color(colour).family(semibold())).sense(Sense::click()))
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(if *open { "Fold" } else { "Unfold" });
+                // (the fold arrow drawn: the UI font has no triangles)
+                let (rect, icon) = ui.allocate_exact_size(Vec2::new(12.0, 16.0), Sense::click());
+                let (c, s) = (rect.center(), 4.5);
+                let points = if *open {
+                    vec![c + Vec2::new(-s, -s * 0.55), c + Vec2::new(s, -s * 0.55), c + Vec2::new(0.0, s * 0.75)]
+                } else {
+                    vec![c + Vec2::new(-s * 0.55, -s), c + Vec2::new(-s * 0.55, s), c + Vec2::new(s * 0.75, 0.0)]
+                };
+                ui.painter().add(egui::Shape::convex_polygon(points, colour, Stroke::NONE));
+                let r = ui.add(
+                    egui::Label::new(RichText::new(title.to_uppercase()).size(12.5).color(colour).family(semibold()))
+                        .sense(Sense::click()),
+                );
+                let r = r.union(icon).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(if *open { "Fold" } else { "Unfold" });
                 if r.clicked() {
                     *open = !*open;
                 }
@@ -195,7 +204,7 @@ pub fn chip(ui: &mut egui::Ui, text: &str) {
 }
 
 /// A small state label in a colour (loaded, loading...).
-pub fn pill(ui: &mut egui::Ui, text: &str, colour: Color32) {
+pub fn pill(ui: &mut egui::Ui, text: &str, colour: Color32) -> egui::Response {
     egui::Frame::new()
         .fill(colour.gamma_multiply(0.16))
         .corner_radius(CornerRadius::same(255))
@@ -207,7 +216,8 @@ pub fn pill(ui: &mut egui::Ui, text: &str, colour: Color32) {
                     .color(colour)
                     .family(semibold()),
             );
-        });
+        })
+        .response
 }
 
 /// A dot in a colour (the connection, each model).

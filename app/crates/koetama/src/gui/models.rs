@@ -289,18 +289,35 @@ impl App {
                 }
                 let loaded = row.state == kd_speech::ModelState::Loaded;
                 let busy = matches!(row.state, kd_speech::ModelState::Loading | kd_speech::ModelState::Downloading(..));
-                let (mut text, colour) = model_state(row, d.is_some());
-                // (on disk but not Koetama's to delete: say whose)
-                match &d {
-                    Some(d) if !d.ours && row.name == "langid" => text.push_str(" · comes with Koetama"),
-                    Some(d) if !d.ours => text.push_str(" · Hugging Face cache"),
-                    _ => {}
-                }
+                let (text, colour) = model_state(row, d.is_some());
+                // (on disk but not Koetama's to delete: whose, on hover - a row that says it all is wider than the
+                //  window, and widens every card with it)
+                let whose = match &d {
+                    Some(d) if !d.ours && row.name == "langid" => "It comes with Koetama.",
+                    Some(d) if !d.ours => "It is in the Hugging Face cache (shared with other programs).",
+                    Some(_) => "It is in Koetama's folder.",
+                    None => "",
+                };
                 theme::dot(ui, colour, loaded && row.needed);
-                ui.label(row.title);
+                // (the name, and what it is for on a small line under it: "Parakeet v3" / "English and the other ...")
+                let (name, what) = match row.title.split_once(" (") {
+                    Some((n, w)) => (n, w.trim_end_matches(')')),
+                    None => (row.title, ""),
+                };
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    // (not wrapped: a grid's cell gives a wrapping label almost no width)
+                    ui.add(egui::Label::new(name).extend());
+                    if !what.is_empty() {
+                        ui.add(egui::Label::new(RichText::new(what).size(11.5).color(theme::MUTED)).extend());
+                    }
+                });
                 let size = d.as_ref().map_or(row.download_mb as u64 * 1_000_000, |d| d.bytes);
                 ui.label(RichText::new(gb(size)).color(theme::MUTED));
-                theme::pill(ui, &text, colour);
+                let r = theme::pill(ui, &text, colour);
+                if !whose.is_empty() {
+                    r.on_hover_text(whose);
+                }
                 let delete = match &d {
                     _ if busy => Err("Wait until it is ready".to_string()),
                     Some(d) if d.ours => Ok(format!("Delete its files ({}): it downloads again when it is needed", gb(d.bytes))),
