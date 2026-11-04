@@ -2,6 +2,22 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.10: game characters that talk
+
+- **Large language models for game mods.** A host can let a game mod use a large language model, so its characters
+  (or anything else the mod wants, like a director that plans the next wave) answer what players say, by voice or
+  typed, and act in the game through functions the mod checks. Open the new **Large Language Models** card, pick the
+  API (OpenAI-compatible, which covers OpenAI, DeepSeek, OpenRouter and others, or Anthropic), the model and your key,
+  set a monthly budget, and tick "Let the ... mod use my language model". It's off unless you turn it on, for each
+  game, and only the host needs it. **Try it** sends the model a message and shows the answer.
+- **Your key stays on your PC,** sealed by Windows, and goes only to the API you chose. What a mod sends goes to that
+  service with your key and costs you: Koetama counts the cost with OpenRouter's public price list and stops at your
+  budget.
+- **Updates are checked at start, and you see it:** "You have the latest version." (or the update) shows by itself, so
+  there's no need to click.
+- **For mod makers:** agents, their lines, function calls and replies (streamed word by word if you like) are in
+  PROTOCOL.md, "Large language models: agents", with a how-to in docs/agents-guide.md.
+
 ### 0.5.9: louder voices
 
 - **Voices are louder.** Players heard each other too quietly next to a game. Koetama now evens every microphone out

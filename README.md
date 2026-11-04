@@ -211,6 +211,19 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.13: cards that fold and switch
+
+- **Every card folds:** click its title to fold or unfold it. Koetama remembers which cards you folded.
+- **A clear on/off switch on each card:**
+  - **Voice chat** (was "Sound"): off, your voice isn't sent and other players' voices aren't played.
+  - **Speech to text:** off, nothing you say is written and no speech model loads. Voice chat still hears your
+    microphone.
+  - **Translation:** off, your chosen language is kept for when you turn it back on.
+  - **Large Language Models:** the switch lets the game's mod use your model (it was a checkbox).
+- **No more cut-off text:** a long note (such as the quiet-microphone warning) or a long model row no longer makes
+  the cards wider than the window. The speech model list now shows each model's languages on a small line under
+  its name.
+
 ### 0.5.12: language model limits in tokens
 
 - **Limit by tokens, not dollars.** The Large Language Models card now sets how many tokens in and out the mod may use
@@ -231,19 +244,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 - **Long errors wrap:** the status says "failed", and the reason shows in full underneath.
 - **Clearer price row:** Koetama only reads prices from OpenRouter's public list. Your requests go to the address you
   set, with your key.
-
-### 0.5.10: game characters that talk
-
-- **Large language models for game mods.** A host can let a game mod use a large language model, so its characters
-  (or anything else the mod wants, like a director that plans the next wave) answer what players say, by voice or
-  typed, and act in the game through functions the mod checks. Open the new **Large Language Models** card, pick the
-  API (OpenAI-compatible, which covers OpenAI, DeepSeek, OpenRouter and others, or Anthropic), the model and your key,
-  set a monthly budget, and tick "Let the ... mod use my language model". It's off unless you turn it on, for each
-  game, and only the host needs it. **Try it** sends the model a message and shows the answer.
-- **Your key stays on your PC,** sealed by Windows, and goes only to the API you chose. What a mod sends goes to that
-  service with your key and costs you: Koetama counts the cost with OpenRouter's public price list and stops at your
-  budget.
-- **Updates are checked at start, and you see it:** "You have the latest version." (or the update) shows by itself, so
-  there's no need to click.
-- **For mod makers:** agents, their lines, function calls and replies (streamed word by word if you like) are in
-  PROTOCOL.md, "Large language models: agents", with a how-to in docs/agents-guide.md.
