@@ -211,6 +211,22 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.14: characters that choose when to answer
+
+- **A game's characters can listen to everything said near them** and answer only what concerns them. A mod gives
+  a character a few things to look for ("is it about the dog?", "treats or the ball?", "is someone in danger?"). A
+  very short request to the language model rates what was said on each, and the mod decides from those scores and
+  what it knows of the game whether the character answers. What it lets pass is still remembered, so the character
+  knows what went on when it does speak.
+- **The second request is cheap:** the rating request is the reply's own request with one question added, so when
+  the character does answer, your provider has most of it cached already (DeepSeek and OpenAI by themselves,
+  Anthropic through a cache mark Koetama adds).
+- **No thinking:** the language model answers straight away instead of thinking first (DeepSeek thought by default),
+  and no model's thinking ever reaches a game mod, whatever the server.
+- **For mod makers:** agents' `criteria`, `to_agent`'s `context` (an event that is only for the agent to know),
+  `agent_scores`, the feed's `agent_decisions`, `agent_reply`'s `skipped`, and `agent_scores` in the hello's features:
+  PROTOCOL.md, "Large language models: agents", "Scores".
+
 ### 0.5.13: cards that fold and switch
 
 - **Every card folds:** click its title to fold or unfold it. Koetama remembers which cards you folded.
@@ -234,13 +250,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 - **Streamed replies are counted exactly** with DeepSeek and OpenRouter too, not estimated from their length.
 - **For mod makers:** `agent_status` now has `tokens_in`, `tokens_out`, `limit_in` and `limit_out` instead of `spent`
   and `budget`. The `budget` state and error mean the month's tokens are used up.
-
-### 0.5.11: language model fixes
-
-- **A model's short name finds its price:** "deepseek-flash" at DeepSeek's address is now priced as DeepSeek's newest
-  Flash model. Before, it counted at the $3 / $15 fallback, so the budget ran out about 30 times too early.
-- **A new model starts clean:** switching the API, address, model or key clears the last model's error from the
-  status.
-- **Long errors wrap:** the status says "failed", and the reason shows in full underneath.
-- **Clearer price row:** Koetama only reads prices from OpenRouter's public list. Your requests go to the address you
-  set, with your key.

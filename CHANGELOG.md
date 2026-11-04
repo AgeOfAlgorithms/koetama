@@ -2,6 +2,16 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.11: language model fixes
+
+- **A model's short name finds its price:** "deepseek-flash" at DeepSeek's address is now priced as DeepSeek's newest
+  Flash model. Before, it counted at the $3 / $15 fallback, so the budget ran out about 30 times too early.
+- **A new model starts clean:** switching the API, address, model or key clears the last model's error from the
+  status.
+- **Long errors wrap:** the status says "failed", and the reason shows in full underneath.
+- **Clearer price row:** Koetama only reads prices from OpenRouter's public list. Your requests go to the address you
+  set, with your key.
+
 ### 0.5.10: game characters that talk
 
 - **Large language models for game mods.** A host can let a game mod use a large language model, so its characters
