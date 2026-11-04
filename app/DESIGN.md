@@ -360,8 +360,12 @@ pub mod api {
     complete_streaming(.., on_text)  // "stream": true; on_text(all the words so far) as they come; read_stream (SSE:
                                     // OpenAI's deltas and tool-call pieces, Anthropic's content blocks; no counts: ~4 chars a token)
     complete(&Config, system, functions, turns, max_tokens, timeout)  // a 400 naming reasoning_effort: asked again
-                                    // with "none" (OpenAI's reasoning models refuse functions otherwise)
+                                    // with "none" (OpenAI's reasoning models refuse functions otherwise), or without it
+    spoken(text, so_far)            // the words said aloud: no <think>...</think> ever reaches a mod (whole or streamed)
 }
+                                    // No thinking (the user, 2026-11-04: off by default): body() sends each provider's
+                                    // own field, by its address - api.deepseek.com thinking {type: disabled},
+                                    // api.openai.com reasoning_effort none; any other server none (no field is universal)
 pub mod agents {
     Agents::start(Config, Arc<Ledger>, on_event, log) .set_config(c) .feed(sid, agents, lines, results, forget) .stop()
     Event { Reply { ids, agent, text, calls, error: &'static str (error::*), why }, Partial { ids, agent, text } (a

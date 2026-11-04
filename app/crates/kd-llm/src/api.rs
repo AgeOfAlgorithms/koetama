@@ -197,6 +197,14 @@ pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFu
             let limit = if url.contains("api.openai.com") { "max_completion_tokens" } else { "max_tokens" };
             let mut b = json!({"model": model, "messages": messages});
             b[limit] = json!(max_tokens);
+            // (no thinking - the user, 2026-11-04: off by default; a reply is what is said aloud, at once): each
+            // provider's own field, as its address says - there is no field every server knows, and some refuse one
+            // they do not (OpenAI's own among them); any other gets none (and the retry in `request` if it asks)
+            if url.contains("api.deepseek.com") {
+                b["thinking"] = json!({"type": "disabled"}); // (DeepSeek thinks unless told: its default is on)
+            } else if url.contains("api.openai.com") {
+                b["reasoning_effort"] = json!("none"); // (a model that knows none: sent again without it)
+            }
             if !functions.is_empty() {
                 b["tools"] = functions
                     .iter()
@@ -269,7 +277,7 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
                     args: serde_json::from_str(args).unwrap_or_else(|_| json!(args)),
                 });
             }
-            Ok(Reply { text: m.get("content").and_then(Value::as_str).unwrap_or("").trim().to_string(), calls, ..r })
+            Ok(Reply { text: spoken(m.get("content").and_then(Value::as_str).unwrap_or(""), false), calls, ..r })
         }
         Api::Anthropic => {
             let content = v.get("content").and_then(Value::as_array).ok_or("the answer has no content")?;
@@ -285,7 +293,7 @@ pub fn parse_reply(api: Api, v: &Value) -> Result<Reply, String> {
                     _ => {}
                 }
             }
-            Ok(Reply { text: text.trim().to_string(), calls, ..r })
+            Ok(Reply { text: spoken(&text, false), calls, ..r })
         }
     }
 }
@@ -354,10 +362,15 @@ fn request(
     if resp.status().as_u16() >= 400 {
         // (an error comes whole, streamed or not)
         let (status, v) = whole(resp)?;
-        if cfg.api == Api::OpenAi && status == 400 && b.get("reasoning_effort").is_none() && wants_no_reasoning(&v) {
-            // (a reasoning model refuses functions on chat completions unless its reasoning is off - and a character's
-            //  reply wants no long thinking anyway; a model that knows no reasoning_effort is never sent it)
-            b["reasoning_effort"] = json!("none");
+        if cfg.api == Api::OpenAi && status == 400 && wants_no_reasoning(&v) {
+            // (the answer names reasoning_effort: a reasoning model refuses functions on chat completions unless its
+            //  reasoning is off - sent with "none"; a model that knows no reasoning_effort, or not "none" (one sent it
+            //  at OpenAI's own address) - sent without it, thinking as it does)
+            if b.get("reasoning_effort").is_none() {
+                b["reasoning_effort"] = json!("none");
+            } else if let Some(o) = b.as_object_mut() {
+                o.remove("reasoning_effort");
+            }
             resp = send(&b)?;
         } else {
             return Err(match parse_reply(cfg.api, &v) {
@@ -405,6 +418,7 @@ pub fn turn_len(t: &Turn) -> usize {
 /// so far, each time more come), the calls put together from their pieces, the tokens counted.
 pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&str)) -> Result<Reply, String> {
     let mut reply = Reply::default();
+    let mut told = 0; // (the length of the words so far last given to on_text)
     // (calls by their index in the answer: id, name, the arguments' JSON as it comes)
     let mut parts: Vec<(usize, String, String, String)> = Vec::new();
     for line in r.lines() {
@@ -484,10 +498,15 @@ pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&
             },
         }
         if reply.text.len() > before {
-            on_text(reply.text.trim_start());
+            // (only the words said aloud, and only when there are more of them: they only ever grow)
+            let now = spoken(&reply.text, true);
+            if now.len() > told {
+                told = now.len();
+                on_text(&now);
+            }
         }
     }
-    reply.text = reply.text.trim().to_string();
+    reply.text = spoken(&reply.text, false);
     parts.sort_by_key(|p| p.0);
     reply.calls = parts
         .into_iter()
@@ -498,6 +517,43 @@ pub fn read_stream(api: Api, r: impl std::io::BufRead, on_text: &mut dyn FnMut(&
         })
         .collect();
     Ok(reply)
+}
+
+/// What a model's answer says aloud - its words without any thinking written into them: every `<think>...</think>`
+/// (some servers - Ollama, LM Studio, vLLM with Qwen or a DeepSeek-R1 - put a reasoning model's thoughts in the answer
+/// itself; DeepSeek's, OpenAI's and Anthropic's own come apart from the words, and are never read), an unclosed one to
+/// the end (still thinking), and all before a `</think>` that none opened (a server whose prompt opened the tag). A
+/// game mod never gets a model's thinking, whatever the model and server (the user, 2026-11-04). `so_far`: the words of
+/// a streamed answer so far - the start kept trimmed, the end not, and a tag that may be starting ("<", "<thi") held
+/// back for the next words, so what is shown only grows.
+pub fn spoken(text: &str, so_far: bool) -> String {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+    let mut rest = text;
+    if let Some(i) = rest.find(CLOSE) {
+        if !rest[..i].contains(OPEN) {
+            rest = &rest[i + CLOSE.len()..];
+        }
+    }
+    let mut out = String::new();
+    loop {
+        let Some(i) = rest.find(OPEN) else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..i]);
+        match rest[i..].find(CLOSE) {
+            Some(j) => rest = &rest[i + j + CLOSE.len()..],
+            None => break,
+        }
+    }
+    if !so_far {
+        return out.trim().to_string();
+    }
+    if let Some(k) = (1..OPEN.len()).rev().find(|k| out.ends_with(&OPEN[..*k])) {
+        out.truncate(out.len() - k);
+    }
+    out.trim_start().to_string()
 }
 
 /// The API refused the request over its reasoning (OpenAI: "... set reasoning_effort to 'none'").
@@ -584,6 +640,37 @@ mod tests {
         let r = parse_reply(Api::Anthropic, &a).unwrap();
         assert_eq!((r.calls[0].id.as_str(), r.tokens_in), ("t1", 120));
         assert_eq!(parse_reply(Api::Anthropic, &json!({"type": "error", "error": {"message": "overloaded"}})), Err("overloaded".into()));
+    }
+
+    /// No thinking: each provider's own field to turn it off, none for a server nobody knows; and no thinking ever in
+    /// what is said aloud, whole or streamed (the user, 2026-11-04).
+    #[test]
+    fn no_thinking() {
+        let deepseek = body(Api::OpenAi, "https://api.deepseek.com", "deepseek-flash", "s", &[], &talk(), 100);
+        assert_eq!(deepseek["thinking"], json!({"type": "disabled"}));
+        assert!(deepseek.get("reasoning_effort").is_none());
+        let openai = body(Api::OpenAi, "https://api.openai.com/v1", "gpt-6-luna", "s", &[], &talk(), 100);
+        assert_eq!(openai["reasoning_effort"], "none");
+        let other = body(Api::OpenAi, "http://localhost:11434/v1", "qwen3", "s", &[], &talk(), 100);
+        assert!(other.get("thinking").is_none() && other.get("reasoning_effort").is_none(), "unknown fields: none");
+        assert!(body(Api::Anthropic, "https://api.anthropic.com", "m", "s", &[], &talk(), 100).get("thinking").is_none());
+
+        assert_eq!(spoken("<think>they want meat</think>\n Twelve meat. ", false), "Twelve meat.");
+        assert_eq!(spoken("hm</think>Twelve.", false), "Twelve.", "a close that none opened");
+        assert_eq!(spoken("Twelve.<think>more", false), "Twelve.", "an unclosed one");
+        assert_eq!(spoken("a<think>x</think> b <think>y</think>c", false), "a b c");
+        assert_eq!(spoken("2 < 3", false), "2 < 3");
+        let o = json!({"choices": [{"message": {"content": "<think>pondering</think>Oink."}}]});
+        assert_eq!(parse_reply(Api::OpenAi, &o).unwrap().text, "Oink.");
+
+        // (streamed: the thinking never shown, a tag starting held back, the words only grow)
+        let ev = |t: &str| format!("data: {}\n\n", json!({"choices": [{"delta": {"content": t}}]}));
+        let s: String = ["<thi", "nk>I should", " bark</think>", " Woof", "! <", "3"].iter().map(|t| ev(t)).collect::<String>() + "data: [DONE]\n";
+        let mut seen: Vec<String> = Vec::new();
+        let r = read_stream(Api::OpenAi, s.as_bytes(), &mut |t| seen.push(t.to_string())).unwrap();
+        assert_eq!(r.text, "Woof! <3");
+        assert_eq!(seen, ["Woof", "Woof! ", "Woof! <3"]);
+        assert!(seen.windows(2).all(|w| w[1].starts_with(&w[0])), "only ever growing: {seen:?}");
     }
 
     /// The prompt's cached tokens, as each API counts them (they are tokens in all the same).
