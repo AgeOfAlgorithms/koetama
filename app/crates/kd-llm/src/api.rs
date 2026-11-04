@@ -80,6 +80,11 @@ pub enum Turn {
     Assistant { text: String, calls: Vec<Call> },
     /// the game's results for those calls: (call id, result)
     Results(Vec<(String, String)>),
+    /// Koetama's own words at the very end of a request, never in an agent's conversation (a score request's
+    /// question): with the user's turn before it in one message, after the cache point - so the request before it is
+    /// the reply's own, which the provider has then cached (OpenAI and DeepSeek by themselves; Anthropic at the
+    /// cache_control mark)
+    Note(String),
 }
 
 /// What the LLM answered: its words, its function calls, and the tokens it counted - in (the whole prompt; of them,
@@ -167,6 +172,11 @@ fn mended(turns: &[Turn]) -> Vec<Turn> {
     merged
 }
 
+/// A note's words as they follow the turn before it in the same message.
+fn note_text(n: &str) -> String {
+    format!("\n\n{n}")
+}
+
 /// The request body for `api`: the system prompt, the functions, the conversation, the longest reply.
 pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFunction], turns: &[Turn], max_tokens: u32) -> Value {
     let turns = mended(turns);
@@ -191,6 +201,14 @@ pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFu
                             messages.push(json!({"role": "tool", "tool_call_id": id, "content": r}));
                         }
                     }
+                    // (at the end of the last user message: all before it is the reply's request as it would be)
+                    Turn::Note(n) => match messages.last_mut() {
+                        Some(m) if m["role"] == "user" => {
+                            let s = format!("{}{}", m["content"].as_str().unwrap_or(""), note_text(n));
+                            m["content"] = json!(s);
+                        }
+                        _ => messages.push(json!({"role": "user", "content": n})),
+                    },
                 }
             }
             // (OpenAI's own newer models refuse max_tokens; other OpenAI-style servers know only max_tokens)
@@ -235,6 +253,29 @@ pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFu
                             .collect();
                         messages.push(json!({"role": "user", "content": content}));
                     }
+                    Turn::Note(n) => {
+                        // (its own block after the user's, past the cache mark below)
+                        let block = json!({"type": "text", "text": note_text(n).trim_start()});
+                        match messages.last_mut() {
+                            Some(m) if m["role"] == "user" => {
+                                blocks(m).push(block);
+                                m["note"] = json!(true);
+                            }
+                            _ => messages.push(json!({"role": "user", "content": [block], "note": true})),
+                        }
+                    }
+                }
+            }
+            // (the conversation so far cached too: its last block before any note marked - the next request, which
+            //  starts the same, reads it at a tenth of the price; a score request's then is the reply's)
+            if let Some(m) = messages.last_mut() {
+                let note = m.as_object_mut().and_then(|o| o.remove("note")).is_some();
+                let b = blocks(m);
+                let at = b.len().saturating_sub(if note { 2 } else { 1 });
+                if note && b.len() < 2 {
+                    // (a note alone: nothing of the conversation in this message to mark)
+                } else if let Some(block) = b.get_mut(at) {
+                    block["cache_control"] = json!({"type": "ephemeral"});
                 }
             }
             // (the persona and functions are the same every time: cached, they cost a fraction after the first)
@@ -253,6 +294,17 @@ pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFu
             b
         }
     }
+}
+
+/// An Anthropic message's content as blocks (a string made one text block).
+fn blocks(m: &mut Value) -> &mut Vec<Value> {
+    if let Some(s) = m["content"].as_str().map(str::to_string) {
+        m["content"] = json!([{"type": "text", "text": s}]);
+    }
+    if !m["content"].is_array() {
+        m["content"] = json!([]);
+    }
+    m["content"].as_array_mut().expect("an array")
 }
 
 /// What the API's answer says: the words, the calls, the tokens - or its error.
@@ -411,6 +463,7 @@ pub fn turn_len(t: &Turn) -> usize {
         Turn::User(s) => s.len(),
         Turn::Assistant { text, calls } => text.len() + calls.iter().map(|c| c.args.to_string().len()).sum::<usize>(),
         Turn::Results(rs) => rs.iter().map(|(_, r)| r.len()).sum(),
+        Turn::Note(n) => n.len(),
     }
 }
 
@@ -640,6 +693,37 @@ mod tests {
         let r = parse_reply(Api::Anthropic, &a).unwrap();
         assert_eq!((r.calls[0].id.as_str(), r.tokens_in), ("t1", 120));
         assert_eq!(parse_reply(Api::Anthropic, &json!({"type": "error", "error": {"message": "overloaded"}})), Err("overloaded".into()));
+    }
+
+    /// A note at the end (a score request's question): the request before it is exactly the reply's - so a provider
+    /// that caches prefixes has it already when the reply's comes (the user, 2026-11-04: "I like prefix sharing").
+    #[test]
+    fn a_note_leaves_the_replys_request_as_it_is() {
+        let note = Turn::Note("[Rate it]".into());
+        for api in [Api::OpenAi, Api::Anthropic] {
+            let reply = body(api, "x", "m", "s", &trade(), &talk(), 300);
+            let mut with = talk();
+            with.push(note.clone());
+            let score = body(api, "x", "m", "s", &trade(), &with, 36);
+            let (r, s) = (reply["messages"].as_array().unwrap(), score["messages"].as_array().unwrap());
+            assert_eq!(r.len(), s.len(), "{api:?}: the note in the last message, no message of its own");
+            assert_eq!(r[..r.len() - 1], s[..s.len() - 1], "{api:?}: every message before the last the same");
+            assert_eq!(reply["tools"], score["tools"]);
+            assert_eq!(reply.get("system"), score.get("system"));
+            match api {
+                Api::OpenAi => {
+                    let (a, b) = (r.last().unwrap()["content"].as_str().unwrap(), s.last().unwrap()["content"].as_str().unwrap());
+                    assert_eq!(b, format!("{a}\n\n[Rate it]"), "the reply's last message, then the note");
+                }
+                Api::Anthropic => {
+                    let (a, b) = (r.last().unwrap()["content"].as_array().unwrap(), s.last().unwrap()["content"].as_array().unwrap());
+                    assert_eq!(b[..a.len()], a[..], "the reply's blocks, the cache mark on its last");
+                    assert_eq!(a.last().unwrap()["cache_control"]["type"], "ephemeral");
+                    assert_eq!(b.last().unwrap(), &json!({"type": "text", "text": "[Rate it]"}), "the note after it, unmarked");
+                    assert!(s.last().unwrap().get("note").is_none(), "no field of ours left in the request");
+                }
+            }
+        }
     }
 
     /// No thinking: each provider's own field to turn it off, none for a server nobody knows; and no thinking ever in

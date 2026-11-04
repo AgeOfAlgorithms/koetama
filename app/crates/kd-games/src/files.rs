@@ -795,6 +795,7 @@ pub(crate) fn as_used(mut feed: Feed, p: &Profile) -> Feed {
         feed.to_agent.clear();
         feed.agent_results.clear();
         feed.agent_forget.clear();
+        feed.agent_decisions.clear();
     }
     feed
 }

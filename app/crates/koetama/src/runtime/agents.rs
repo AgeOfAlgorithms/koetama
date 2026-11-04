@@ -37,16 +37,21 @@ pub(super) fn start(
         Arc::new(move |e| {
             let game = slot.lock().unwrap().clone();
             match e {
-                kd_llm::Event::Reply { ids, agent, text, calls, error, why } => {
+                kd_llm::Event::Reply { ids, agent, text, calls, error, why, skipped } => {
                     let calls: Vec<(String, String, serde_json::Value)> =
                         calls.into_iter().map(|c| (c.id, c.name, c.args)).collect();
                     if let Some(g) = game {
-                        g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &calls, error, &why, true));
+                        g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &calls, error, &why, true, skipped));
                     }
                 }
                 kd_llm::Event::Partial { ids, agent, text } => {
                     if let Some(g) = game {
-                        g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &[], "", "", false));
+                        g.lock().unwrap().send_object(kd_games::api::agent_reply(&ids, &agent, &text, &[], "", "", false, false));
+                    }
+                }
+                kd_llm::Event::Scores { agent, turn, ids, scores } => {
+                    if let Some(g) = game {
+                        g.lock().unwrap().send_object(kd_games::api::agent_scores(&agent, turn, &ids, &scores));
                     }
                 }
                 kd_llm::Event::Known(list) => {

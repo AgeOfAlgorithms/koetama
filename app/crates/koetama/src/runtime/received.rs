@@ -1,5 +1,5 @@
 //! What of the game's requests Koetama has (PROTOCOL.md "received"): the feed resends its lines for the agents, the
-//! results of their calls and the lines to translate until it is told they arrived.
+//! results of their calls, the decisions on scored turns and the lines to translate until it is told they arrived.
 use super::Sink;
 use std::collections::HashSet;
 
@@ -9,6 +9,7 @@ pub(super) struct Received {
     sid: Option<i64>,
     lines: HashSet<i64>,
     results: HashSet<String>,
+    decisions: HashSet<i64>,
     translate: HashSet<i64>,
 }
 
@@ -23,16 +24,18 @@ impl Sink {
         }
         let mut lines = Vec::new();
         let mut results = Vec::new();
+        let mut decisions = Vec::new();
         let mut translate = Vec::new();
         if self.agents.is_some() {
             lines = feed.to_agent.iter().map(|l| l.id).filter(|id| r.lines.insert(*id)).collect();
             results = feed.agent_results.iter().map(|(c, _)| c.clone()).filter(|c| r.results.insert(c.clone())).collect();
+            decisions = feed.agent_decisions.iter().map(|d| d.turn).filter(|t| r.decisions.insert(*t)).collect();
         }
         if self.translator.is_some() && feed.translate {
             translate = feed.to_translate.iter().map(|(id, _)| *id).filter(|id| r.translate.insert(*id)).collect();
         }
-        if !lines.is_empty() || !results.is_empty() || !translate.is_empty() {
-            self.receipts.lock().unwrap().push(kd_games::api::received(&lines, &results, &translate));
+        if !lines.is_empty() || !results.is_empty() || !decisions.is_empty() || !translate.is_empty() {
+            self.receipts.lock().unwrap().push(kd_games::api::received(&lines, &results, &decisions, &translate));
         }
     }
 }

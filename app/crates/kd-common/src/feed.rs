@@ -397,6 +397,9 @@ pub struct Feed {
     pub agent_results: Vec<(String, String)>,
     #[serde(default)]
     pub agent_forget: Vec<String>,
+    /// the game's decisions on the turns Koetama sent scores for (agent_scores): answer them or not
+    #[serde(default)]
+    pub agent_decisions: Vec<AgentDecision>,
     /// a hub's player's feed as JSON, as the hub sends it to that player's Koetama (the host's room, region and
     /// session put in where it has none of its own, "me" its id); "" for any other feed
     #[serde(skip)]
@@ -419,6 +422,26 @@ pub struct AgentDef {
     pub functions: Vec<AgentFunction>,
     pub max_words: i64,
     pub voice: String,
+    /// what a turn is scored on (none: never scored): before a turn of only players' lines and context events goes to
+    /// the model, a short request rates it on each, 0..1, and the game decides from the scores whether it is answered
+    pub criteria: Vec<AgentCriterion>,
+}
+
+/// One thing an agent's turns are scored on: a name (MAX_CRITERION_NAME of a-z 0-9 _) and what it means, in words (at
+/// most MAX_CRITERION_BYTES).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentCriterion {
+    pub name: String,
+    pub description: String,
+}
+
+/// The game's decision on a scored turn (`agent_decisions`): the agent, the turn's number (agent_scores' `turn`), and
+/// whether it is answered.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentDecision {
+    pub agent: String,
+    pub turn: i64,
+    pub answer: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -430,7 +453,7 @@ pub struct AgentFunction {
 }
 
 /// A line for an agent (`to_agent`): what a player said to it (or an event, without `from`), what the game says is going
-/// on, and who heard it.
+/// on, and whether an event is only context.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentLine {
     pub id: i64,
@@ -439,6 +462,16 @@ pub struct AgentLine {
     pub from_id: Option<PlayerId>,
     pub from_name: String,
     pub state: String,
+    /// an event that is only context ("Alex petted you"): it goes with the turn, but is no reason by itself to answer -
+    /// a scored agent's turn of players' lines and context events is scored, one with any other event is not
+    pub context: bool,
+}
+
+impl AgentLine {
+    /// Something the game tells the agent (no `from`), not a player's words.
+    pub fn is_event(&self) -> bool {
+        self.from_id.is_none() && self.from_name.is_empty()
+    }
 }
 
 /// the most agents a feed defines, and their limits (docs/llm-agents.md; engine/games/teardown.py - keep the same)
@@ -451,9 +484,33 @@ pub const MAX_AGENT_LINES: usize = 8;
 pub const MAX_STATE_BYTES: usize = 2048;
 pub const MAX_RESULTS: usize = 16;
 pub const MAX_RESULT_BYTES: usize = 1024;
+/// an agent's criteria: at most so many, a name's most bytes, a description's most bytes (a longer one is cut at a
+/// character)
+pub const MAX_CRITERIA: usize = 8;
+pub const MAX_CRITERION_NAME: usize = 32;
+pub const MAX_CRITERION_BYTES: usize = 300;
+/// the most decisions one feed keeps
+pub const MAX_DECISIONS: usize = 32;
 /// an agent's longest reply in words: when not given, and at most
 pub const DEFAULT_WORDS: i64 = 80;
 pub const MAX_WORDS: i64 = 1000;
+
+/// `s` cut to at most `most` bytes, at a character's start (never inside one).
+pub fn cut_bytes(s: &str, most: usize) -> &str {
+    if s.len() <= most {
+        return s;
+    }
+    let mut end = most;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// A criterion's name: 1 to MAX_CRITERION_NAME of a-z 0-9 _
+pub fn criterion_name_ok(s: &str) -> bool {
+    (1..=MAX_CRITERION_NAME).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
 
 /// An agent's id (and a function call's): 1 to 64 of A-Z a-z 0-9 _ . : -
 pub fn agent_id_ok(s: &str) -> bool {
@@ -650,6 +707,20 @@ mod tests {
         // (an announced range comes as f32: 25.1 as f32 is a hair above 25.1)
         let far = 25.1f32 as f64;
         assert!(far > 25.1 && heard_range(Some((1.0, far)), None, None, 25.1) == (1.0, far));
+    }
+
+    #[test]
+    fn a_description_is_cut_at_a_character() {
+        assert_eq!(cut_bytes("treats", MAX_CRITERION_BYTES), "treats");
+        let long = "é".repeat(200);
+        assert_eq!(cut_bytes(&long, MAX_CRITERION_BYTES), "é".repeat(150), "400 bytes: 300");
+        let odd = format!("a{long}");
+        assert_eq!(cut_bytes(&odd, MAX_CRITERION_BYTES), format!("a{}", "é".repeat(149)), "not inside the 150th é");
+        assert_eq!(cut_bytes("😀", 3), "");
+        assert!(criterion_name_ok("topic") && criterion_name_ok("well_being2") && criterion_name_ok(&"a".repeat(32)));
+        for bad in ["", "Topic", "well-being", "a b", &"a".repeat(33)] {
+            assert!(!criterion_name_ok(bad), "{bad:?}");
+        }
     }
 
     #[test]

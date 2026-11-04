@@ -100,13 +100,14 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
         .iter()
         .map(|l| {
             serde_json::json!({"id": l.id, "agent": l.agent, "text": l.text, "from_id": l.from_id.as_ref().map(p),
-                "from_name": l.from_name, "state": l.state})
+                "from_name": l.from_name, "state": l.state, "context": l.context})
         })
         .collect();
     assert_eq!(Value::Array(lines), want["to_agent"], "{text}: to_agent");
     let results: Vec<Value> = f.agent_results.iter().map(|(c, r)| serde_json::json!([c, r])).collect();
     assert_eq!(Value::Array(results), want["agent_results"], "{text}: agent_results");
     assert_eq!(serde_json::to_value(&f.agent_forget).unwrap(), want["agent_forget"], "{text}: agent_forget");
+    assert_eq!(serde_json::to_value(&f.agent_decisions).unwrap(), want["agent_decisions"], "{text}: agent_decisions");
     let sp = want["speakers"].as_object().unwrap();
     assert_eq!(f.speakers.len(), sp.len(), "{text}");
     for (k, v) in sp {
@@ -154,7 +155,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 86);
+    assert_eq!(cases.len(), 89);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -233,6 +234,38 @@ fn objects_byte_identical() {
     assert_eq!(fx["TEXT_MAX"].as_u64().unwrap() as usize, TEXT_MAX);
     assert_eq!(fx["TRANSLATION_MAX"].as_u64().unwrap() as usize, TRANSLATION_MAX);
     assert_eq!(fx["PROTOCOL"].as_u64().unwrap(), api::PROTOCOL);
+}
+
+/// agent_reply: every field, `skipped` (a turn the game decided not to answer) last; text and why cut to their limits.
+#[test]
+fn agent_replies() {
+    let calls = vec![("call_1".to_string(), "offer_trade".to_string(), serde_json::json!({"price": 12}))];
+    let o: Value = serde_json::from_str(&api::agent_reply(&[41], "pig_king", "Twelve.", &calls, "", "", true, false)).unwrap();
+    assert_eq!(
+        o,
+        serde_json::json!({"type": "agent_reply", "ids": [41], "agent": "pig_king", "text": "Twelve.",
+            "calls": [{"call": "call_1", "name": "offer_trade", "args": {"price": 12}}], "error": "", "why": "", "final": true,
+            "skipped": false})
+    );
+    let s = api::agent_reply(&[1, 2], "mochi", "", &[], "", "", true, true);
+    let o: Value = serde_json::from_str(&s).unwrap();
+    assert_eq!((o["skipped"].as_bool(), o["text"].as_str(), o["final"].as_bool()), (Some(true), Some(""), Some(true)));
+    let long: Value = serde_json::from_str(&api::agent_reply(&[1], "x", &"é".repeat(3000), &[], "failed", &"w".repeat(900), true, false)).unwrap();
+    assert_eq!((long["text"].as_str().unwrap().chars().count(), long["why"].as_str().unwrap().len()), (api::MAX_AGENT_REPLY_CHARS, 500));
+}
+
+/// agent_scores, and received with the decisions it has.
+#[test]
+fn agent_scores_and_receipts() {
+    let scores = vec![("topic".to_string(), 0.9), ("interest".to_string(), 0.1), ("wellbeing".to_string(), 0.0)];
+    let o: Value = serde_json::from_str(&api::agent_scores("mochi", 7, &[41, 42], &scores)).unwrap();
+    assert_eq!(
+        o,
+        serde_json::json!({"type": "agent_scores", "agent": "mochi", "turn": 7, "ids": [41, 42],
+            "scores": {"topic": 0.9, "interest": 0.1, "wellbeing": 0.0}})
+    );
+    let r: Value = serde_json::from_str(&api::received(&[41], &[], &[7, 8], &[])).unwrap();
+    assert_eq!(r, serde_json::json!({"type": "received", "to_agent": [41], "agent_decisions": [7, 8]}), "empty lists left out");
 }
 
 /// test_helper.py's feed checks

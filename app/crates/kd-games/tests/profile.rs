@@ -346,8 +346,10 @@ fn llm_games() {
     assert!(!kind.llm && !kd_games::api::features(&kind.profile).contains(&"llm"));
     let on = kind.with_llm(true);
     assert!(on.llm && kd_games::api::features(&on.profile).contains(&"llm"));
+    assert!(kd_games::api::features(&on.profile).contains(&"agent_scores"), "with llm: this Koetama scores agents' turns");
     let off = on.with_llm(false);
     assert!(!off.llm && !kd_games::api::features(&off.profile).contains(&"llm"), "the host has it off");
+    assert!(!kd_games::api::features(&off.profile).contains(&"agent_scores"));
     let any = kd_games::GameKind::from_profile(parse(&socket_profile()).unwrap(), false, None);
     let on = any.with_llm(true);
     assert!(on.llm && kd_games::api::features(&on.profile).contains(&"llm"), "any mod, once the host turns it on");

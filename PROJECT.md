@@ -162,6 +162,16 @@ A new key (only if the old one is lost or leaked): `cargo run -p kd-update --exa
   view. The host sets tokens in and out a month (default 5M / 500k), the card shows the month's tokens (Reset), and
   agent_status sends tokens_in / tokens_out / limit_in / limit_out. OpenRouter's price list and kd-llm prices.rs are
   gone (no fetch at all); --llm-budget / --llm-price became --llm-limit IN,OUT.
+  **Scores (2026-11-04, unreleased; for the Mochi corgi mod, which hears every line near the dog; the user:
+  scores the mod judges itself):** an agent's `criteria` (up to 8, name + description, cut at
+  300 bytes) and to_agent's `context` (an event only for it to know); a turn of only players' lines and context
+  events first goes to a short request rating it 0..1 on each (16 + 10 tokens a criterion, at most 128; prefix
+  sharing - the user, 2026-11-04, "I like prefix sharing": the reply's own request with the question at the end, so
+  the answer's request, when it comes, hits the provider's prefix cache); `agent_scores` (a turn number) to the game, which answers `agent_decisions` (acked in
+  received; 3 s at most, then answered); not answered: agent_reply `skipped: true`, the lines kept (12 at most) and
+  put before its next answered turn; no scores (none parsed, a failed request): answered. The hello's
+  `agent_scores`. Python reference (parse_agent, parse_agent_fields) and feed.json fixtures too; tests in kd-llm
+  (the fake LLM). Not tried with a real model yet.
 
 - **Voices too quiet (2026-10-21; the user's friends tried it: "I could barely hear their voice and they could barely
   hear mine", Mic boost at +20 dB and the mod's volume at most to be heard).** Measured (tools/mic_levels.py, and

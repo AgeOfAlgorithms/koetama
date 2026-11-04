@@ -283,6 +283,9 @@ impl kd_common::feed::FeedSink for Sink {
         if let Some(n) = &self.agents {
             // (every feed: the service answers each line once, and a new session starts its agents over)
             n.feed(feed.sid, &feed.agents, &feed.to_agent, &feed.agent_results, &feed.agent_forget);
+            if !feed.agent_decisions.is_empty() {
+                n.decide(&feed.agent_decisions);
+            }
         }
         self.acknowledge(&feed);
         if let Some(t) = &self.translator {

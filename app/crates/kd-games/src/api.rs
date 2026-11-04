@@ -42,7 +42,9 @@ pub fn features(profile: &Profile) -> Vec<&'static str> {
         f.push("translate");
     }
     if profile.llm {
-        f.push("llm");
+        // (agent_scores: this Koetama scores an agent's turns on its criteria and waits for the game's decision -
+        //  agents' `criteria`, to_agent's `context`, agent_scores, agent_decisions)
+        f.extend(["llm", "agent_scores"]);
     }
     f
 }
@@ -121,10 +123,11 @@ pub fn translation(id: i64, text: &str, rule: Option<(&str, &str)>) -> String {
 pub const MAX_AGENT_REPLY_CHARS: usize = 2000;
 
 /// {"type":"agent_reply","ids":[..],"agent":..,"text":..,"calls":[{"call":..,"name":..,"args":{..}}],"error":..,"why":..,
-/// "final":..}: an agent's reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it calls
-/// (the game checks and runs them, and answers with agent_results), or why there is none: `error` a code
+/// "final":..,"skipped":..}: an agent's reply to the game's lines `ids` (docs/llm-agents.md) - its words, the functions it
+/// calls (the game checks and runs them, and answers with agent_results), or why there is none: `error` a code
 /// (kd_llm::error: budget, unknown_agent, failed, cancelled, queue_full) and `why` in words. final false: the words so
-/// far of a streaming agent (no calls yet; the whole reply follows with final true).
+/// far of a streaming agent (no calls yet; the whole reply follows with final true). skipped true: the game decided on
+/// the turn's scores that it is not answered (no words, no calls, no error).
 #[allow(clippy::too_many_arguments)]
 pub fn agent_reply(
     ids: &[i64],
@@ -134,13 +137,14 @@ pub fn agent_reply(
     error: &str,
     why: &str,
     last: bool,
+    skipped: bool,
 ) -> String {
     let text: String = text.chars().take(MAX_AGENT_REPLY_CHARS).collect();
     let why: String = why.chars().take(500).collect();
     let calls: Vec<serde_json::Value> =
         calls.iter().map(|(id, name, args)| serde_json::json!({"call": id, "name": name, "args": args})).collect();
     serde_json::json!({"type": "agent_reply", "ids": ids, "agent": agent, "text": text, "calls": calls, "error": error,
-        "why": why, "final": last})
+        "why": why, "final": last, "skipped": skipped})
     .to_string()
 }
 
@@ -151,15 +155,26 @@ pub fn agents_known(agents: &[(String, i64)]) -> String {
     serde_json::json!({"type": "agents_known", "agents": a}).to_string()
 }
 
-/// {"type":"received","to_agent":[..],"agent_results":[..],"to_translate":[..]}: what of the feed's requests Koetama
-/// now has (the game may stop sending them; their answers come as before). Lists that are empty are left out.
-pub fn received(to_agent: &[i64], agent_results: &[String], to_translate: &[i64]) -> String {
+/// {"type":"agent_scores","agent":..,"turn":..,"ids":[..],"scores":{name: 0..1}}: an agent's turn (the lines `ids`)
+/// scored on its criteria (those the model rated); the turn waits for the game's agent_decisions on `turn`.
+pub fn agent_scores(agent: &str, turn: i64, ids: &[i64], scores: &[(String, f64)]) -> String {
+    let s: serde_json::Map<String, Value> = scores.iter().map(|(k, v)| (k.clone(), serde_json::json!(v))).collect();
+    serde_json::json!({"type": "agent_scores", "agent": agent, "turn": turn, "ids": ids, "scores": s}).to_string()
+}
+
+/// {"type":"received","to_agent":[..],"agent_results":[..],"agent_decisions":[..],"to_translate":[..]}: what of the
+/// feed's requests Koetama now has (the game may stop sending them; their answers come as before; decisions by their
+/// turn). Lists that are empty are left out.
+pub fn received(to_agent: &[i64], agent_results: &[String], agent_decisions: &[i64], to_translate: &[i64]) -> String {
     let mut o = serde_json::json!({"type": "received"});
     if !to_agent.is_empty() {
         o["to_agent"] = serde_json::json!(to_agent);
     }
     if !agent_results.is_empty() {
         o["agent_results"] = serde_json::json!(agent_results);
+    }
+    if !agent_decisions.is_empty() {
+        o["agent_decisions"] = serde_json::json!(agent_decisions);
     }
     if !to_translate.is_empty() {
         o["to_translate"] = serde_json::json!(to_translate);
@@ -489,7 +504,9 @@ fn fits(v: Option<&Value>, most: usize) -> Option<&str> {
 }
 
 /// An `agents` item, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most MAX_FUNCTIONS
-/// functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an object.
+/// functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an object; at most
+/// MAX_CRITERIA criteria, each a good name (once) and a description of 1 or more bytes (a longer one than
+/// MAX_CRITERION_BYTES cut at a character).
 fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
     let id = o.as_object()?.get("id")?.as_str().filter(|s| feed::agent_id_ok(s))?;
     let flag = |k: &str, def: bool| match o.get(k) {
@@ -502,6 +519,22 @@ fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
         None | Some(Value::Null) => "",
         x => fits(x, feed::MAX_PERSONA_BYTES)?,
     };
+    let cs: &[Value] = match o.get("criteria") {
+        None | Some(Value::Null) => &[],
+        Some(x) => list(x).filter(|a| a.len() <= feed::MAX_CRITERIA)?,
+    };
+    let mut criteria: Vec<feed::AgentCriterion> = Vec::new();
+    for c in cs {
+        let name = c.as_object()?.get("name")?.as_str().filter(|n| feed::criterion_name_ok(n))?;
+        let description = c.get("description")?.as_str().filter(|d| !d.is_empty())?;
+        if criteria.iter().any(|x| x.name == name) {
+            return None;
+        }
+        criteria.push(feed::AgentCriterion {
+            name: name.into(),
+            description: feed::cut_bytes(description, feed::MAX_CRITERION_BYTES).into(),
+        });
+    }
     let fs: &[Value] = match o.get("functions") {
         None | Some(Value::Null) => &[],
         Some(x) => list(x).filter(|a| a.len() <= feed::MAX_FUNCTIONS)?,
@@ -532,13 +565,19 @@ fn parse_agent(o: &Value) -> Option<feed::AgentDef> {
         functions,
         max_words: o.get("max_words").and_then(whole).map_or(feed::DEFAULT_WORDS, |w| w.clamp(1, feed::MAX_WORDS)),
         voice: short_text(o.get("voice")),
+        criteria,
     })
 }
 
 /// A `to_agent` item, or None (left out): an id as to_translate's, a good agent id, a text of 1 to MAX_REQUEST_BYTES;
-/// `from` and `state` (at most MAX_STATE_BYTES, else "") optional.
+/// `from`, `state` (at most MAX_STATE_BYTES, else "") and `context` (a bool) optional.
 fn parse_agent_line(o: &Value) -> Option<feed::AgentLine> {
     o.as_object()?;
+    let context = match o.get("context") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return None,
+    };
     let id = o.get("id").and_then(whole).filter(|n| (1..=feed::MAX_REQUEST_ID).contains(n))?;
     let agent = o.get("agent")?.as_str().filter(|s| feed::agent_id_ok(s))?;
     let text = fits(o.get("text"), feed::MAX_REQUEST_BYTES).filter(|t| !t.is_empty())?;
@@ -551,6 +590,7 @@ fn parse_agent_line(o: &Value) -> Option<feed::AgentLine> {
         from_id,
         from_name: short_text(from.and_then(|f| f.get("name"))),
         state: fits(o.get("state"), feed::MAX_STATE_BYTES).unwrap_or("").into(),
+        context,
     })
 }
 
@@ -563,9 +603,11 @@ fn agent_list<'a>(v: &'a Value, k: &str, most: usize) -> Result<&'a [Value], Str
 }
 
 /// What the top feed says for agents (parse_agent_fields).
-type AgentFields = (Vec<feed::AgentDef>, Vec<feed::AgentLine>, Vec<(String, String)>, Vec<String>);
+type AgentFields =
+    (Vec<feed::AgentDef>, Vec<feed::AgentLine>, Vec<(String, String)>, Vec<String>, Vec<feed::AgentDecision>);
 
-/// The top feed's agents, to_agent, agent_results and agent_forget: each agent and line id once (the first), each call once.
+/// The top feed's agents, to_agent, agent_results, agent_forget and agent_decisions: each agent and line id once (the
+/// first), each call once, each decision's turn once (a good agent id, a turn as a line's id, `answer` a bool).
 fn parse_agent_fields(v: &Value) -> Result<AgentFields, String> {
     let mut agents: Vec<feed::AgentDef> = Vec::new();
     for o in agent_list(v, "agents", feed::MAX_AGENTS)? {
@@ -598,7 +640,17 @@ fn parse_agent_fields(v: &Value) -> Result<AgentFields, String> {
             }
         }
     }
-    Ok((agents, lines, results, forget))
+    let mut decisions: Vec<feed::AgentDecision> = Vec::new();
+    for o in agent_list(v, "agent_decisions", 64)? {
+        let agent = o.get("agent").and_then(Value::as_str).filter(|a| feed::agent_id_ok(a));
+        let turn = o.get("turn").and_then(whole).filter(|n| (1..=feed::MAX_REQUEST_ID).contains(n));
+        if let (Some(agent), Some(turn), Some(answer)) = (agent, turn, o.get("answer").and_then(Value::as_bool)) {
+            if !decisions.iter().any(|d| d.turn == turn) && decisions.len() < feed::MAX_DECISIONS {
+                decisions.push(feed::AgentDecision { agent: agent.into(), turn, answer });
+            }
+        }
+    }
+    Ok((agents, lines, results, forget, decisions))
 }
 
 /// A short text field (a name): control characters out, at most 64 characters.
@@ -934,7 +986,8 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         }
         Some(_) => return Err("\"to_translate\" must be a list of at most 64 lines".into()),
     };
-    let (agents, to_agent, agent_results, agent_forget) = if inherit.is_none() { parse_agent_fields(v)? } else { Default::default() };
+    let (agents, to_agent, agent_results, agent_forget, agent_decisions) =
+        if inherit.is_none() { parse_agent_fields(v)? } else { Default::default() };
     Ok(Feed {
         seq: int("seq")?,
         vol: num(v, "volume", 1.0)?.clamp(0.0, 1.0),
@@ -964,6 +1017,7 @@ fn parse_one(v: &Value, inherit: Option<&(String, String, String)>) -> Result<Fe
         to_agent,
         agent_results,
         agent_forget,
+        agent_decisions,
         raw: String::new(),
     })
 }

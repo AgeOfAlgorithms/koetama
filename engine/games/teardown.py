@@ -117,12 +117,14 @@ def parse_requests(items):
     return out
 
 
-# Agents through an LLM (docs/llm-agents.md): the feed's agents, to_agent, agent_results and agent_forget, the top
-# feed only (Rust: kd_games::api - keep the same)
+# Agents through an LLM (docs/llm-agents.md): the feed's agents, to_agent, agent_results, agent_forget and
+# agent_decisions, the top feed only (Rust: kd_games::api - keep the same)
 agent_ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
 FUNCTION_NAME = re.compile(r'[A-Za-z0-9_-]{1,64}')
 MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 16, 1024
 MAX_AGENT_LINES, MAX_STATE_BYTES, MAX_RESULTS, MAX_RESULT_BYTES = 8, 2048, 16, 1024
+CRITERION_NAME = re.compile(r'[a-z0-9_]{1,32}')
+MAX_CRITERIA, MAX_CRITERION_BYTES, MAX_DECISIONS = 8, 300, 32
 DEFAULT_WORDS, MAX_WORDS = 80, 1000
 NO_PARAMETERS = {'type': 'object', 'properties': {}}
 
@@ -136,10 +138,16 @@ def _fits(v, most):
     return isinstance(v, str) and len(v.encode('utf-8')) <= most
 
 
+def cut_bytes(s, most):
+    """s cut to at most `most` bytes of UTF-8, at a character's start (never inside one)"""
+    return s.encode('utf-8')[:most].decode('utf-8', 'ignore')
+
+
 def parse_agent(o):
     """an agents item -> dict, or None (left out): a good id, a persona of at most MAX_PERSONA_BYTES, at most
     MAX_FUNCTIONS functions, each a good name (once), a description of at most MAX_FUNCTION_BYTES, parameters an
-    object (JSON Schema; absent: none)"""
+    object (JSON Schema; absent: none); at most MAX_CRITERIA criteria, each a good name (once) and a description of 1
+    or more bytes (one longer than MAX_CRITERION_BYTES cut at a character)"""
     if not isinstance(o, dict) or _agent_id(o.get('id')) is None:
         return None
     character = True if o.get('character') is None else o['character']
@@ -149,6 +157,16 @@ def parse_agent(o):
     persona = '' if o.get('persona') is None else o['persona']
     if not _fits(persona, MAX_PERSONA_BYTES):
         return None
+    cs = [] if o.get('criteria') is None or o.get('criteria') == {} else o['criteria']
+    if not isinstance(cs, list) or len(cs) > MAX_CRITERIA:
+        return None
+    criteria = []
+    for c in cs:
+        if not isinstance(c, dict) or not isinstance(c.get('name'), str) or not CRITERION_NAME.fullmatch(c['name']) \
+                or not isinstance(c.get('description'), str) or c['description'] == '' \
+                or c['name'] in [x['name'] for x in criteria]:
+            return None
+        criteria.append(dict(name=c['name'], description=cut_bytes(c['description'], MAX_CRITERION_BYTES)))
     fs = [] if o.get('functions') is None or o.get('functions') == {} else o['functions']
     if not isinstance(fs, list) or len(fs) > MAX_FUNCTIONS:
         return None
@@ -164,15 +182,18 @@ def parse_agent(o):
         functions.append(dict(name=f['name'], description=desc, parameters=params))
     version, words = _whole(o.get('version')), _whole(o.get('max_words'))
     return dict(id=o['id'], version=max(0, version) if version is not None else 0, character=character, stream=stream, persona=persona,
-                functions=functions, voice=_short(o.get('voice')),
+                functions=functions, voice=_short(o.get('voice')), criteria=criteria,
                 max_words=min(MAX_WORDS, max(1, words)) if words is not None else DEFAULT_WORDS)
 
 
 def parse_agent_line(o):
     """a to_agent item -> dict, or None (left out): an id as to_translate's, a good agent id, a text of 1 to
-    MAX_REQUEST_BYTES; `from` (who said it: an id and a name) and `state` (at most MAX_STATE_BYTES, else '') are
-    optional"""
+    MAX_REQUEST_BYTES; `from` (who said it: an id and a name), `state` (at most MAX_STATE_BYTES, else '') and
+    `context` (a bool: an event that is only context) are optional"""
     if not isinstance(o, dict):
+        return None
+    context = False if o.get('context') is None else o['context']
+    if not isinstance(context, bool):
         return None
     rid = _whole(o.get('id'))
     if rid is None or not 1 <= rid <= 999999999999999 or _agent_id(o.get('agent')) is None:
@@ -183,12 +204,13 @@ def parse_agent_line(o):
     f = o.get('from') if isinstance(o.get('from'), dict) else {}
     who = player_id(f['id']) if f.get('id') is not None else None
     return dict(id=rid, agent=o['agent'], text=text, from_id=who, from_name=_short(f.get('name')),
-                state=o['state'] if _fits(o.get('state'), MAX_STATE_BYTES) else '')
+                state=o['state'] if _fits(o.get('state'), MAX_STATE_BYTES) else '', context=context)
 
 
 def parse_agent_fields(v):
-    """the top feed's agents, to_agent, agent_results, agent_forget -> a dict of them; raises ValueError for a field that is
-    not a list or is too long. Each agent and line id once (the first), results by call once"""
+    """the top feed's agents, to_agent, agent_results, agent_forget, agent_decisions -> a dict of them; raises ValueError
+    for a field that is not a list or is too long. Each agent and line id once (the first), results by call once,
+    decisions by turn once (a good agent id, a turn as a line's id, `answer` a bool)"""
     agents = []
     for o in _list(v, 'agents', MAX_AGENTS):
         n = parse_agent(o)
@@ -208,7 +230,16 @@ def parse_agent_fields(v):
     for o in _list(v, 'agent_forget', 64):
         if _agent_id(o) and o not in forget and len(forget) < MAX_AGENTS:
             forget.append(o)
-    return dict(agents=agents, to_agent=lines, agent_results=results, agent_forget=forget)
+    decisions = []
+    for o in _list(v, 'agent_decisions', 64):
+        if not isinstance(o, dict):
+            continue
+        turn = _whole(o.get('turn'))
+        if _agent_id(o.get('agent')) and turn is not None and 1 <= turn <= 999999999999999 \
+                and isinstance(o.get('answer'), bool) and turn not in [d['turn'] for d in decisions] \
+                and len(decisions) < MAX_DECISIONS:
+            decisions.append(dict(agent=o['agent'], turn=turn, answer=o['answer']))
+    return dict(agents=agents, to_agent=lines, agent_results=results, agent_forget=forget, agent_decisions=decisions)
 
 
 def _whole(v):
@@ -600,7 +631,7 @@ def _parse_one(v, inherit=None):
                 translate=_flag(v, 'translate', True), to_translate=parse_requests(lines), me_id=me_id,
                 name=_short(v.get('name')), range=my_range, max_range=_positive(v.get('max_range')), clashes=clashes,
                 transmit_all=transmit_all, players=[],
-                **(parse_agent_fields(v) if inherit is None else dict(agents=[], to_agent=[], agent_results=[], agent_forget=[])))
+                **(parse_agent_fields(v) if inherit is None else dict(agents=[], to_agent=[], agent_results=[], agent_forget=[], agent_decisions=[])))
 
 
 def parse_feed(text):
