@@ -228,6 +228,19 @@ impl GameKind {
         k
     }
 
+    /// This game with the voice chat off (the player's switch; `on` true: as its profile says): the hello does not name
+    /// "voices" or "rooms", the feed's speakers are dropped - no room, no voices played or sent.
+    pub fn with_voices(&self, on: bool) -> GameKind {
+        let mut k = self.clone();
+        if k.profile.voices && !on {
+            let mut p = (*k.profile).clone();
+            p.voices = false;
+            k.profile = Arc::new(p);
+            k.voices = false;
+        }
+        k
+    }
+
     /// The game's module: (the feed's sink: the mixer; the log; a folder for the game's files instead of the usual
     /// ones - --io-dir, files connector only). Cheap: nothing runs until Game::start.
     pub fn make(&self, sink: Arc<dyn FeedSink>, log: Log, io_dir: Option<PathBuf>) -> Box<dyn Game> {

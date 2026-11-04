@@ -5,16 +5,22 @@ impl App {
     /// "Large Language Models": the host's LLM for this game's mod, its agents (docs/llm-agents.md): on for this game or
     /// not, the API, address, model, key, the month's limit in tokens in and out, requests a minute; the tokens used
     /// this month, and its state.
-    /// Turning it on or off (or it becoming usable) starts the game link again (the hello names "llm" or not).
+    /// The card's switch lets the game's mod use it (the window's ui()); turning it on or off (or it becoming usable)
+    /// starts the game link again (the hello names "llm" or not).
     pub(super) fn llm_ui(&mut self, ui: &mut egui::Ui) {
         let game = self.kind.id.clone();
         let before = self.llm.config_for(&game).is_some();
         let mut changed = false;
-        let mut on = self.llm.on_for(&game);
-        if ui.checkbox(&mut on, format!("Let the {} mod use my language model", self.kind.mod_name)).changed() {
-            self.llm.set_on(&game, on);
-            changed = true;
-        }
+        let on = self.llm.on_for(&game);
+        ui.label(
+            RichText::new(if on {
+                format!("On: the {} mod may use your language model.", self.kind.mod_name)
+            } else {
+                format!("Off: the {} mod may not use your language model (the switch turns it on).", self.kind.mod_name)
+            })
+            .size(12.5)
+            .color(if on { theme::FG } else { theme::MUTED }),
+        );
         ui.label(
             RichText::new(
                 "For the host: what the mod sends (what players say to its characters) goes with your key to the \
@@ -109,15 +115,20 @@ impl App {
             }
         }
         if changed {
-            self.llm.save(&mut self.settings);
-            self.settings.save();
-            let after = self.llm.config_for(&game);
-            if before != after.is_some() {
-                // (on or off for this game: the game link starts again, its hello naming "llm" or not)
-                self.switch_game(&game);
-            } else if let (Some(cfg), Some(rt)) = (after, self.rt.as_mut()) {
-                rt.set_llm(cfg);
-            }
+            self.llm_changed(&game, before);
+        }
+    }
+
+    /// The setting changed (`before`: it was usable for the game): saved; on or off for the game, the game link starts
+    /// again (its hello naming "llm" or not), else the running agents take the new setting.
+    pub(super) fn llm_changed(&mut self, game: &str, before: bool) {
+        self.llm.save(&mut self.settings);
+        self.settings.save();
+        let after = self.llm.config_for(game);
+        if before != after.is_some() {
+            self.switch_game(game);
+        } else if let (Some(cfg), Some(rt)) = (after, self.rt.as_mut()) {
+            rt.set_llm(cfg);
         }
     }
 
@@ -188,7 +199,7 @@ fn thousands(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);

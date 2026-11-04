@@ -138,6 +138,12 @@ struct App {
     /// the language the game's chat is translated into ("": off), whether models download when needed, and the
     /// languages offered (Mozilla's list as kept on this PC)
     translate_into: String,
+    /// the language translation goes into when it is on (kept while it is off: `translate_into` is "" then)
+    translate_lang: String,
+    /// the cards' switches (the user, 2026-11-03): the voice chat, speech to text - and the cards folded (their ids)
+    voice_on: bool,
+    speech_on: bool,
+    folded: Vec<String>,
     translate_downloads: bool,
     /// languages the player speaks but has translated anyway ("translate_also")
     translate_also: Vec<String>,
@@ -223,6 +229,10 @@ impl App {
             langs: Vec::new(),
             choosing_langs: false,
             translate_into: String::new(),
+            translate_lang: String::new(),
+            voice_on: true,
+            speech_on: true,
+            folded: Vec::new(),
             translate_downloads: true,
             translate_also: Vec::new(),
             targets: kd_translate::catalog::offered_targets(&kd_translate::catalog::root()),
@@ -250,6 +260,20 @@ impl App {
         };
         app.kinds = kd_games::games();
         app.translate_into = app.settings.str("translate_into").unwrap_or_default();
+        app.translate_lang = app
+            .settings
+            .str("translate_lang")
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| if app.translate_into.is_empty() { "en".into() } else { app.translate_into.clone() });
+        app.voice_on = app.settings.bool("voice_on", true);
+        app.speech_on = app.settings.bool("speech_on", true);
+        app.folded = app
+            .settings
+            .0
+            .get("folded")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect())
+            .unwrap_or_default();
         app.translate_downloads = app.settings.bool("translate_downloads", true);
         app.translate_also = app
             .settings
@@ -303,6 +327,8 @@ impl App {
             // (the agents' LLM: the host's, for a game whose profile uses it and that they turned it on for)
             llm: if self.joined.is_none() { self.llm.config_for(&kind.id) } else { None },
             llm_ledger: Some(self.llm_ledger.clone()),
+            voice_off: !self.voice_on,
+            transcribe: self.speech_on,
             ..Default::default()
         };
         let rt = Runtime::start(kind.clone(), self.logger(), opts, None);
@@ -328,9 +354,28 @@ impl App {
         }
     }
 
+    /// A card is open (not folded by the player).
+    fn open(&self, id: &str) -> bool {
+        !self.folded.iter().any(|f| f == id)
+    }
+
+    /// The player folded or unfolded a card: remembered.
+    fn set_open(&mut self, id: &str, open: bool) {
+        if open == self.open(id) {
+            return;
+        }
+        self.folded.retain(|f| f != id);
+        if !open {
+            self.folded.push(id.to_string());
+        }
+        self.settings.set("folded", serde_json::Value::from(self.folded.clone()));
+        self.settings.save();
+    }
+
     /// The player changed the translation setting: saved, and the translator follows.
     fn set_translation(&mut self) {
         self.settings.set("translate_into", self.translate_into.clone());
+        self.settings.set("translate_lang", self.translate_lang.clone());
         self.settings.set("translate_downloads", self.translate_downloads);
         self.settings.set("translate_also", serde_json::Value::from(self.translate_also.clone()));
         self.settings.save();
@@ -346,20 +391,22 @@ impl App {
         let mut changed = false;
         egui::Grid::new("translation-setting").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label(RichText::new("Translate chat into").color(theme::MUTED));
-            let shown = if self.translate_into.is_empty() { "Off".to_string() } else { lang_name(&self.translate_into) };
+            let shown = lang_name(&self.translate_lang);
             egui::ComboBox::from_id_salt("translate-into").width(330.0).selected_text(shown).show_ui(ui, |ui| {
-                changed |= ui.selectable_value(&mut self.translate_into, String::new(), "Off").changed();
                 for code in &self.targets {
-                    changed |= ui.selectable_value(&mut self.translate_into, code.to_string(), lang_name(code)).changed();
+                    changed |= ui.selectable_value(&mut self.translate_lang, code.to_string(), lang_name(code)).changed();
                 }
             });
+            if changed && !self.translate_into.is_empty() {
+                self.translate_into = self.translate_lang.clone();
+            }
             ui.end_row();
             ui.label("");
             changed |= ui.checkbox(&mut self.translate_downloads, "Download translation models when needed").changed();
             ui.end_row();
             // (the languages the player speaks: left as they are unless unticked here - then translated like any other)
-            let mine: Vec<String> = self.langs.iter().filter(|l| **l != self.translate_into).cloned().collect();
-            if !mine.is_empty() && !self.translate_into.is_empty() {
+            let mine: Vec<String> = self.langs.iter().filter(|l| **l != self.translate_lang).cloned().collect();
+            if !mine.is_empty() {
                 ui.label(RichText::new("Don't translate").color(theme::MUTED));
                 ui.horizontal_wrapped(|ui| {
                     for l in &mine {
@@ -381,7 +428,7 @@ impl App {
         }
         if self.translate_into.is_empty() {
             ui.label(
-                RichText::new("Off: the game's chat is shown as it is, and nothing is downloaded.")
+                RichText::new("Off: the game's chat is shown as it is, and nothing is downloaded. Turn it on with the switch.")
                     .size(12.5)
                     .color(theme::MUTED),
             );
@@ -779,7 +826,21 @@ impl eframe::App for App {
 
                         // ---- sound
                         // (a translate-only game mod: no sound to set)
-                        if self.kind.voices || self.kind.speech { theme::card(ui, "Sound", |ui| {
+                        // (the long notes go under the grid: a grid's cells do not wrap, and one too wide widens
+                        //  every card past the window - the user, 2026-11-03: "text lines shouldn't be cutting off")
+                        let mut notes: Vec<(String, Color32)> = Vec::new();
+                        if self.kind.voices || self.kind.speech {
+                        let mut open = self.open("sound");
+                        let mut on = self.voice_on;
+                        let title = if self.kind.voices { "Voice chat" } else { "Microphone" };
+                        let flipped = theme::folding_card(ui, title, &mut open, self.kind.voices.then_some(&mut on), |ui| {
+                            if self.kind.voices && !self.voice_on {
+                                ui.label(
+                                    RichText::new("Off: your voice is not sent and other players' voices are not played.")
+                                        .size(12.5)
+                                        .color(theme::MUTED),
+                                );
+                            }
                             egui::Grid::new("sound")
                                 .num_columns(3)
                                 .spacing([12.0, 8.0])
@@ -832,13 +893,10 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                     });
                                     ui.end_row();
                                     if testing.is_some() {
-                                        ui.label("");
-                                        ui.label(
-                                            RichText::new("Talk normally: the bar should reach about two thirds. What you say shows under \"You said\".")
-                                                .size(12.0)
-                                                .color(theme::MUTED),
-                                        );
-                                        ui.end_row();
+                                        notes.push((
+                                            "Talk normally: the bar should reach about two thirds. What you say shows under \"You said\".".into(),
+                                            theme::MUTED,
+                                        ));
                                     }
                                     if self.kind.voices {
                                         // (the voice sent: its automatic gain evens players out; this makes this
@@ -859,17 +917,14 @@ ui.label(RichText::new("Microphone").color(theme::MUTED));
                                         ui.end_row();
                                         // (a quiet microphone: raised a long way, its room noise too - say where to fix it)
                                         if let Some(g) = self.status.as_ref().and_then(|s| s.mic_gain_db).filter(|g| *g > QUIET_MIC_DB) {
-                                            ui.label("");
-                                            ui.label(
-                                                RichText::new(format!(
+                                            notes.push((
+                                                format!(
                                                     "Your microphone is quiet: Koetama raises it by {g:+.0} dB, and the noise around you \
                                                      with it. Turn its level up in Windows (Settings > Sound > your microphone > \
                                                      Input volume), or with the gain knob on your audio interface."
-                                                ))
-                                                .size(12.0)
-                                                .color(theme::WARN),
-                                            );
-                                            ui.end_row();
+                                                ),
+                                                theme::WARN,
+                                            ));
                                         }
                                         // (noise suppression for the voice sent: docs/noise-suppression.md)
                                         ui.label(RichText::new("Noise suppression").color(theme::MUTED));
@@ -937,14 +992,40 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                                     }
 }
                                 });
-                        }); }
+                            for (text, colour) in std::mem::take(&mut notes) {
+                                ui.label(RichText::new(text).size(12.0).color(colour));
+                            }
+                        });
+                        self.set_open("sound", open);
+                        if flipped {
+                            // (the voice chat on or off: the game link starts again, with or without voices)
+                            self.voice_on = on;
+                            self.settings.set("voice_on", on);
+                            self.settings.save();
+                            let id = self.game_id.clone();
+                            self.switch_game(&id);
+                        }
+                        }
                         if ui.ctx().input(|i| i.pointer.any_released()) {
                             self.settings.save(); // (the volume: saved when the slider is let go)
                         }
                         ui.add_space(2.0);
 
                         // ---- speech to text
-                        if self.kind.speech { theme::card(ui, "Speech to text", |ui| {
+                        if self.kind.speech {
+                        let mut open = self.open("speech");
+                        let mut on = self.speech_on;
+                        let flipped = theme::folding_card(ui, "Speech to text", &mut open, Some(&mut on), |ui| {
+                            if !self.speech_on {
+                                ui.label(
+                                    RichText::new(
+                                        "Off: what you say is not written in the chat, and no speech model is loaded. The \
+                                         voice chat still hears your microphone.",
+                                    )
+                                    .size(12.5)
+                                    .color(theme::MUTED),
+                                );
+                            }
                             self.languages_ui(ui);
                             ui.add_space(2.0);
                             self.models_ui(ui);
@@ -1001,18 +1082,42 @@ ui.label(RichText::new("Speakers").color(theme::MUTED));
                                     });
                                 });
                             }
-                        }); }
+                        });
+                        self.set_open("speech", open);
+                        if flipped {
+                            self.speech_on = on;
+                            self.settings.set("speech_on", on);
+                            self.settings.save();
+                            if let Some(rt) = self.rt.as_mut() {
+                                rt.set_transcribe(on);
+                            }
+                        }
+                        }
                         ui.add_space(2.0);
 
                         // ---- translation (a game that uses it: the player's own setting, here)
                         if self.kind.translate {
-                            theme::card(ui, "Translation", |ui| self.translation_ui(ui));
+                            let mut open = self.open("translation");
+                            let mut on = !self.translate_into.is_empty();
+                            if theme::folding_card(ui, "Translation", &mut open, Some(&mut on), |ui| self.translation_ui(ui)) {
+                                self.translate_into = if on { self.translate_lang.clone() } else { String::new() };
+                                self.set_translation();
+                            }
+                            self.set_open("translation", open);
                             ui.add_space(2.0);
                         }
 
                         // ---- large language models (a game whose profile uses "llm": its agents and more; the host's setting)
                         if self.joined.is_none() {
-                            theme::card(ui, "Large Language Models", |ui| self.llm_ui(ui));
+                            let game = self.kind.id.clone();
+                            let before = self.llm.config_for(&game).is_some();
+                            let mut open = self.open("llm");
+                            let mut on = self.llm.on_for(&game);
+                            if theme::folding_card(ui, "Large Language Models", &mut open, Some(&mut on), |ui| self.llm_ui(ui)) {
+                                self.llm.set_on(&game, on);
+                                self.llm_changed(&game, before);
+                            }
+                            self.set_open("llm", open);
                             ui.add_space(2.0);
                         }
 

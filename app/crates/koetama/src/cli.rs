@@ -486,6 +486,8 @@ pub fn main(argv: Vec<String>) -> i32 {
             }
         },
         llm_ledger: None,
+        voice_off: false,
+        transcribe: true,
         llm: match llm_config(&args) {
             Ok(c) => c,
             Err(e) => {

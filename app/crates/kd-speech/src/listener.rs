@@ -39,6 +39,8 @@ struct State {
     pending: Vec<f32>, // not yet a whole VAD window
     tail: usize,       // (push to talk: samples taken since the key was let go)
     line: Option<RollingLine>,
+    /// (not transcribing: the speech detector hears speech now - talking() for the voice chat, no line)
+    speaking: bool,
     utt: u32,
     last_lang: String, // (auto: the language of the line before - a short line's fallback)
 }
@@ -50,6 +52,7 @@ struct Inner {
     lang: Mutex<String>,
     cands: Mutex<Vec<String>>, // ("auto": the languages it chooses between)
     live: AtomicBool, // (false: no live words, only the finished line - less CPU)
+    transcribe: AtomicBool, // (false: the speech detector only - talking() - no lines, no speech models)
     talking: AtomicBool,
     ptt: AtomicU8, // PTT_OFF (the speech detector decides), PTT_UP, PTT_HELD
     state: Mutex<State>,
@@ -78,6 +81,7 @@ impl Listener {
             lang: Mutex::new("en".into()),
             cands: Mutex::new(MIXED_LANGS.iter().map(|l| l.to_string()).collect()),
             live: AtomicBool::new(live),
+            transcribe: AtomicBool::new(true),
             talking: AtomicBool::new(false),
             ptt: AtomicU8::new(PTT_OFF),
             state: Mutex::new(State {
@@ -87,6 +91,7 @@ impl Listener {
                 pending: Vec::new(),
                 tail: 0,
                 line: None,
+                speaking: false,
                 utt: 0,
                 last_lang: "en".into(),
             }),
@@ -125,6 +130,17 @@ impl Listener {
     }
 
     /// Live words on or off (off: only the finished line - less CPU); the next line uses it.
+    /// Speech to text on or off (the player's switch): off, the speech detector still hears when they talk
+    /// (talking(): the voice chat marks its packets with it) but no line is made - no callbacks, no speech model used.
+    /// A line going on when it is turned off still ends.
+    pub fn set_transcribe(&self, on: bool) {
+        self.0.transcribe.store(on, Ordering::Relaxed);
+    }
+
+    pub fn transcribing(&self) -> bool {
+        self.0.transcribe.load(Ordering::Relaxed)
+    }
+
     pub fn set_live(&self, on: bool) {
         self.0.live.store(on, Ordering::Relaxed);
     }
@@ -290,7 +306,12 @@ impl Inner {
         while st.pending.len() - at >= st.win {
             st.vad.accept_waveform(&st.pending[at..at + st.win]);
             at += st.win;
-            if st.line.is_none() && st.vad.detected() && self.ptt.load(Ordering::Relaxed) != PTT_UP {
+            if st.line.is_none() && !st.speaking && st.vad.detected() && self.ptt.load(Ordering::Relaxed) != PTT_UP {
+                if !self.transcribe.load(Ordering::Relaxed) {
+                    st.speaking = true;
+                    self.talking.store(true, Ordering::Relaxed);
+                    continue;
+                }
                 st.utt += 1;
                 let lang = lock(&self.lang).clone();
                 let cands = lock(&self.cands).clone();
@@ -316,7 +337,7 @@ impl Inner {
         // push to talk, the key let go: the line ends a moment later, and the speech detector starts over (its
         // segment going on is not the next line's)
         if self.ptt.load(Ordering::Relaxed) == PTT_UP {
-            if st.line.is_some() {
+            if st.line.is_some() || st.speaking {
                 st.tail += x.len();
                 if st.tail >= (RATE as f64 * PTT_TAIL) as usize {
                     self.end(st);
@@ -330,6 +351,9 @@ impl Inner {
     }
 
     fn end(&self, st: &mut State) {
+        if std::mem::take(&mut st.speaking) {
+            self.talking.store(false, Ordering::Relaxed);
+        }
         let Some(mut line) = st.line.take() else { return };
         self.talking.store(false, Ordering::Relaxed);
         match line.finish() {

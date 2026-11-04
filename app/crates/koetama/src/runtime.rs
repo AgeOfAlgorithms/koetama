@@ -63,6 +63,11 @@ pub struct Options {
     pub llm: Option<kd_llm::Config>,
     /// what the host's LLM has cost this month (shared with the window's "Try it"; None: a ledger of this run's own)
     pub llm_ledger: Option<Arc<kd_llm::Ledger>>,
+    /// the player's switches (the window's cards): the voice chat off (the game link starts without voices: no room, no
+    /// voices played or sent); speech to text off (the microphone still opens for the voice chat, the speech detector
+    /// marks its packets, but no line is made and no speech model loads)
+    pub voice_off: bool,
+    pub transcribe: bool,
 }
 
 /// Where the mixer plays: a sound device, or a wav file (Options::out_wav).
@@ -98,6 +103,8 @@ impl Default for Options {
             noise: kd_voice::denoise::Level::Standard,
             llm: None,
             llm_ledger: None,
+            voice_off: false,
+            transcribe: true,
         }
     }
 }
@@ -311,7 +318,7 @@ impl Runtime {
         mic_source: Option<MicSource>,
     ) -> Runtime {
         // (the agents' LLM only with the host's setting on: else the hello does not name it and the feed's agents are dropped)
-        let kind = kind.with_llm(opts.llm.is_some());
+        let kind = kind.with_llm(opts.llm.is_some()).with_voices(kind.voices && !opts.voice_off);
         let mixer: SharedMixer = Arc::new(Mutex::new(Mixer::new(HashMap::new())));
         mixer.lock().unwrap().volume = opts.volume.clamp(0.0, 1.0);
         // (real voices: for a game that plays voices; the relay is KOETAMA_RELAY or Koetama's own)
@@ -473,6 +480,7 @@ impl Runtime {
         };
         match Listener::new(cb, models, true) {
             Ok(l) => {
+                l.set_transcribe(self.opts.transcribe);
                 self.mic = Some(match mic_source {
                     Some(make) => make(l.clone(), self.log.clone(), self.voice.clone()),
                     None => Box::new(
@@ -523,6 +531,16 @@ impl Runtime {
             (st.model, st.limit) = (cfg.model.clone(), cfg.limit);
         }
         self.opts.llm = Some(cfg);
+    }
+
+    /// The player's speech-to-text switch: off, no line is made (the microphone still serves the voice chat); on, the
+    /// speech models load the next time the game wants the microphone.
+    pub fn set_transcribe(&mut self, on: bool) {
+        self.opts.transcribe = on;
+        if let Some(l) = &self.listener {
+            l.set_transcribe(on);
+        }
+        self.tell_status();
     }
 
     pub fn set_volume(&mut self, v: f64) {
@@ -733,7 +751,7 @@ impl Runtime {
 
     /// Whether Koetama can hear the player yet (a standing object): the speech models, the microphone.
     fn tell_status(&mut self) {
-        let speech = if self.listener.is_none() {
+        let speech = if self.listener.is_none() || !self.opts.transcribe {
             "off"
         } else {
             match *self.ready.lock().unwrap() {
@@ -798,14 +816,14 @@ impl Runtime {
             self.seen_since = std::time::Instant::now();
         }
         let settled = self.seen_since.elapsed().as_secs_f64() >= 1.5;
-        if want && ready == Ready::NotAsked && !warming {
+        if want && ready == Ready::NotAsked && !warming && self.opts.transcribe {
             // (load the models first: downloaded the first time)
             *self.ready.lock().unwrap() = Ready::Loading;
             (self.log)(&format!(
                 "loading the speech models for {key} (the first time they are downloaded)..."
             ));
             self.warm(langs.clone());
-        } else if ready == Ready::Loaded && key != self.loaded_key && !warming && settled {
+        } else if ready == Ready::Loaded && key != self.loaded_key && !warming && settled && self.opts.transcribe {
             // (other languages: their models in the background; the ones no longer needed let go)
             (self.log)(&format!("languages: {key}"));
             self.warm(langs.clone());
@@ -815,7 +833,8 @@ impl Runtime {
         l.set_push_to_talk(ptt);
         let ready = *self.ready.lock().unwrap();
         let Some(mic) = self.mic.as_mut() else { return };
-        if want && ready == Ready::Loaded && !mic.is_open() {
+        // (speech to text off: the microphone opens without the speech models - the voice chat needs it)
+        if want && (ready == Ready::Loaded || !self.opts.transcribe) && !mic.is_open() {
             if lang == "auto" || !self.mic_is_source {
                 l.set_languages(&langs);
             } else {

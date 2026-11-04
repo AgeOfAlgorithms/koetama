@@ -96,8 +96,18 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_style_of(egui::Theme::Dark, style);
 }
 
-/// A section: a rounded card with a small upper-case title.
-pub fn card<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+/// A section that folds, and may be switched on and off (the user, 2026-11-03: "each section should be collapsible and
+/// toggleable (on or off) - toggle should be very visible"): its title row - a chevron and the title (click to fold or
+/// unfold) and, with `on`, a big switch at the right - then, unfolded, what `add` draws. Returns whether the switch
+/// was flipped.
+pub fn folding_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    open: &mut bool,
+    on: Option<&mut bool>,
+    add: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let mut flipped = false;
     egui::Frame::new()
         .fill(CARD)
         .stroke(Stroke::new(1.0, LINE))
@@ -105,16 +115,52 @@ pub fn card<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(
-                RichText::new(title.to_uppercase())
-                    .size(11.5)
-                    .color(MUTED)
-                    .family(semibold()),
-            );
-            ui.add_space(2.0);
-            add(ui)
-        })
-        .inner
+            ui.horizontal(|ui| {
+                let off = on.as_ref().is_some_and(|o| !**o);
+                let text = format!("{}  {}", if *open { "▾" } else { "▸" }, title.to_uppercase());
+                let colour = if off { MUTED.gamma_multiply(0.7) } else { MUTED };
+                let r = ui
+                    .add(egui::Label::new(RichText::new(text).size(12.5).color(colour).family(semibold())).sense(Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(if *open { "Fold" } else { "Unfold" });
+                if r.clicked() {
+                    *open = !*open;
+                }
+                if let Some(on) = on {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        flipped = switch(ui, on).changed();
+                    });
+                }
+            });
+            if *open {
+                ui.add_space(4.0);
+                add(ui);
+            }
+        });
+    flipped
+}
+
+/// An on/off switch that cannot be missed: a wide track with ON or OFF in it, the knob at that end (the accent when
+/// on, grey when off).
+pub fn switch(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
+    let size = Vec2::new(62.0, 26.0);
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let t = ui.ctx().animate_bool_responsive(resp.id, *on);
+    let p = ui.painter();
+    let track = if *on { ACCENT } else { WIDGET_HOVER };
+    let track = if resp.hovered() { track.gamma_multiply(1.15) } else { track };
+    p.rect(rect, CornerRadius::same(13), track, Stroke::new(1.0, if *on { ACCENT_TEXT.gamma_multiply(0.6) } else { LINE }), egui::StrokeKind::Inside);
+    let r = rect.height() / 2.0 - 3.0;
+    let x = egui::lerp((rect.left() + 3.0 + r)..=(rect.right() - 3.0 - r), t);
+    p.circle_filled(Pos2::new(x, rect.center().y), r, Color32::WHITE);
+    // (the word on the side the knob is not)
+    let (word, at) = if *on { ("ON", rect.left() + 18.0) } else { ("OFF", rect.right() - 20.0) };
+    p.text(Pos2::new(at, rect.center().y), egui::Align2::CENTER_CENTER, word, FontId::new(11.5, semibold()), if *on { Color32::WHITE } else { FG });
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(if *on { "On: click to turn it off" } else { "Off: click to turn it on" })
 }
 
 /// A sunk box (the log, what is being heard).
