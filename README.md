@@ -41,6 +41,8 @@
 Koetama (声魂, "voice spirit" in Japanese) runs next to your game. It plays the other players' voices placed where they
 stand: louder when close, muffled behind walls. It also writes what you say as you say it, so the
 game can show your words in text to other players. By extension, your game or mod gains speech recognition capability, which easily lets you build speech-activated events in the game.
+And if the host wants, a mod's characters can talk back: Koetama connects the game to the host's large language
+model, so an NPC hears what players say near it and answers in character.
 
 **What kind of communications are possible with Koetama?**
 
@@ -94,6 +96,9 @@ bytes it cannot listen to, and only to the players close enough to hear you.
   game.
 - **Light on your PC.** Only the speech models for your languages load: about 0.9 GB of memory for one language, up
   to 1.5 GB for several. It runs on the CPU, below the game's priority, and stays idle while you are silent.
+- **Characters that talk back (optional).** The host can connect a large language model, so a mod's characters
+  answer what players say to them, by voice or typed, and act in the game through functions the mod checks.
+  [More below](#large-language-models-optional).
 - **Any game with a mod.** Games connect through small profile files, not plugins: anyone can add one.
 
 ## Install
@@ -122,7 +127,9 @@ with their size). The answer is Yes unless you choose No to keep them for a late
 
 | Game | Mod | Uses |
 |---|---|---|
-| Teardown | [Proximity Comms](https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496) | voices and speech to text |
+| Teardown | [Proximity Comms](https://steamcommunity.com/sharedfiles/filedetails/?id=3812301496) | voices, speech to text, translation, language-model characters for other mods |
+| Teardown | [Mochi the Corgi](https://steamcommunity.com/sharedfiles/filedetails/?id=3826771785) | a talking AI dog, through Proximity Comms (needs it, and a host with a language model) |
+| Don't Starve Together | [Proximity Comms](https://steamcommunity.com/sharedfiles/filedetails/?id=3819346216) | voices, speech to text, translation, language-model characters |
 
 **Adding a game:** a mod made for Koetama comes with a small profile file (`.json`). In the window, open the game
 mod list and choose **Add game mod...**. Koetama shows what the profile reads, writes and listens on before adding
@@ -130,7 +137,36 @@ it. A profile is not a program: it only points Koetama's built-in connectors at 
 and it can ask for voices, speech to text, or both.
 
 **Making a mod for Koetama:** see [PROTOCOL.md](PROTOCOL.md) for the profile format and the two connectors (files,
-or a local socket), with an example profile and test client in [`examples/`](examples/).
+or a local socket), with an example profile and test client in [`examples/`](examples/). For characters that talk
+through the host's language model, start with [docs/agents-guide.md](docs/agents-guide.md).
+
+## Large language models (optional)
+
+A game mod can give its characters a mind: players talk to an NPC, by voice through Koetama's speech to text or by
+typing, and it answers in character, in a speech bubble or the chat. It can also act through **functions** the mod
+defines (follow a player, offer a trade, open a gate). The mod checks every call against the game's rules before
+anything happens. A mod can use the model for other jobs too: a director that plans the next wave, a quest writer, a
+parser that turns what players say into commands.
+
+- **Only the host needs it.** The game already carries every player's words to the host, whose Koetama alone talks to
+  the model. The other players need nothing.
+- **Setting it up:** in the **Large Language Models** card, pick the API, then the address, the model and your key.
+  The API can be OpenAI-compatible (OpenAI, DeepSeek, OpenRouter, or a local server such as Ollama or LM Studio) or
+  Anthropic's. **Try it** sends the model a message. Then flip the card's switch to let that game's mod use it. It's
+  off unless you turn it on, for each game.
+- **You set the limits:** tokens in and out per month (5 million and 500,000 by default), and requests per minute.
+  The card shows this month's use, counted from what your provider reports.
+- **Quick replies:** thinking is turned off where the provider allows it, and a model's thinking never reaches the
+  game. A mod can stream a character's words as they are written.
+- **Characters that choose when to speak:** a mod can let a character hear everything said near it. The model rates
+  each line on what the character cares about, the mod decides whether it answers, and the second request is mostly
+  cached by your provider.
+- **Your key stays on your PC,** sealed by Windows, and is sent only to the API you chose. What players say to the
+  characters goes to that service with your key, under its privacy policy, and costs you. Tell your players the game
+  uses one.
+
+How it works for mod makers (agents, their lines, function calls, replies, scores): [PROTOCOL.md](PROTOCOL.md),
+"Large language models: agents", and the how-to with examples in [docs/agents-guide.md](docs/agents-guide.md).
 
 ## Languages
 
@@ -153,6 +189,7 @@ follows the game's own language setting.
 | Speech to text | The line so far is transcribed again every second; only words two passes agree on are shown. One more pass when you stop gives the finished line. |
 | Language detection | SpeechBrain's VoxLingua107 detector splits a mixed-language line into stretches, each written by its language's model. |
 | Engine | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and ONNX Runtime, on the CPU. |
+| Language models | The host's own, over its API (OpenAI-compatible chat completions, or Anthropic's messages): each character's conversation (its last 24 turns), lines that arrive while it answers sent together, function calls and their results, streaming, and the month's token limits. |
 
 ## For developers
 
@@ -181,7 +218,8 @@ python build.py                           # dist/Koetama/ and, with Inno Setup 6
 ## Privacy
 
 Speech to text runs on your PC, and Koetama has no accounts or telemetry. Your voice goes to the other players
-end-to-end encrypted through the voice relay; models and updates come from Hugging Face and GitHub. Details:
+end-to-end encrypted through the voice relay; models and updates come from Hugging Face and GitHub. If a host turns
+on a language model for a game, what players say to its characters goes to the service that host chose. Details:
 [PRIVACY.md](PRIVACY.md).
 
 ## Code signing policy
