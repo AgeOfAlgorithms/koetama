@@ -5,8 +5,8 @@
 <h1 align="center">Koetama</h1>
 
 <p align="center">
-  <b>Proximity voice chat with live speech-to-text, for game mods.</b><br>
-  Hear other players where they stand. Your words appear in the game as you say them.
+  <b>All your proximity communication needs, for game mods.</b><br>
+  Voice chat where players stand, live captions, translation, and characters that talk back.
 </p>
 
 <p align="center">
@@ -78,6 +78,13 @@ model, so an NPC hears what players say near it and answers in character.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/comms/5-command-dark.png">
   <img src="docs/comms/5-command-light.png" width="760" alt="Voice command: Player 1 says &quot;Open sesame&quot;, and the game opens a door">
+</picture>
+</p>
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/comms/6-character-dark.png">
+  <img src="docs/comms/6-character-light.png" width="760" alt="Voice to an AI character: Player 1 says &quot;Mochi, fetch the ball!&quot; on mic; Mochi, a corgi whose words come from the host's language model, says &quot;Woof! On it!&quot; and fetches the ball">
 </picture>
 </p>
 

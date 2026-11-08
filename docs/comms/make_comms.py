@@ -1,8 +1,9 @@
 """The README's "who gets what" pictures: one card per kind of message (voice, voice to text, text in proximity,
-voice with translation, a voice command), each drawn as a small HTML page and rendered by Edge (headless) to a PNG,
-light and dark (the README picks one by the reader's theme). Run from the repo root:
+voice with translation, a voice command, talking to an AI character), each drawn as a small HTML page and rendered by
+Edge (headless) to a PNG, light and dark (the README picks one by the reader's theme). Run from the repo root:
 
-    python docs/comms/make_comms.py
+    python docs/comms/make_comms.py                 (every card)
+    python docs/comms/make_comms.py 6-character     (only those named)
 
 Needs Microsoft Edge and Pillow; the fonts come from Google Fonts (network)."""
 import os
@@ -21,14 +22,14 @@ CSS = r'''
 :root {
   --page: transparent; --panel: #ffffff; --ink: #17202b; --muted: #5b6878; --line: #d5dce4;
   --audio: #c96a12; --audio-soft: #fbe9d6; --text: #0f7c80; --text-soft: #d7efef; --tr: #b03a74; --tr-soft: #f6dde9;
-  --avbg: #e9eef3; --badge: #ffffff; --door: #8a5a2b;
+  --avbg: #e9eef3; --badge: #ffffff; --door: #8a5a2b; --ai: #4f52c9; --ai-soft: #e3e3fa;
   --font-display: "Bricolage Grotesque", "Segoe UI", sans-serif; --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", Consolas, monospace; --font-bubble: "Pangolin", "Comic Sans MS", cursive;
 }
 :root[data-theme="dark"] {
   --panel: #161d26; --ink: #e6ebf1; --muted: #9aa7b6; --line: #2c3745;
   --audio: #f0a04b; --audio-soft: #3a2a18; --text: #4cc5c8; --text-soft: #15373a; --tr: #ee7fb3; --tr-soft: #3d1f2e;
-  --avbg: #233040; --badge: #161d26; --door: #c99260; color-scheme: dark;
+  --avbg: #233040; --badge: #161d26; --door: #c99260; --ai: #9a9cf5; --ai-soft: #262a52; color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: transparent; }
@@ -61,6 +62,10 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 2
 .c-text .wire { background: var(--text); color: var(--text); } .c-text .chip { background: var(--text-soft); color: var(--text); }
 .c-both .wire { background: linear-gradient(90deg, var(--audio) 0 50%%, var(--text) 50%% 100%%); color: var(--text); }
 .c-both .chip { background: var(--tr-soft); color: var(--tr); }
+.c-ai .wire { background: linear-gradient(90deg, var(--audio) 0 50%%, var(--ai) 50%% 100%%); color: var(--ai); }
+.c-ai .chip { background: var(--ai-soft); color: var(--ai); }
+.act { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ai); }
+.said { display: grid; gap: 8px; justify-items: start; }
 .far { opacity: .45; }
 .quiet .spoken { opacity: .6; font-size: 16px; }
 .quiet .wave i { transform: scaleY(.6); }
@@ -75,6 +80,7 @@ ICONS = {
     'ear': '<path d="M7 9.5a5 5 0 0 1 10 0c0 3-3 3.5-3 6.5a3 3 0 0 1-5.5 1.6"/><path d="M10 10a2 2 0 0 1 4 0"/>',
     'deaf': '<path d="M7 9.5a5 5 0 0 1 10 0c0 3-3 3.5-3 6.5a3 3 0 0 1-5.5 1.6"/><path d="M4 4l16 16"/>',
     'keys': '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/>',
+    'spark': '<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 16v4M16.5 18h4"/>',
 }
 
 
@@ -123,6 +129,25 @@ def door_avatar():
             '<circle cx="29" cy="29" r="1.6" fill="var(--door)"/></svg></div>')
 
 
+def dog_avatar():
+    """A corgi, an AI character (Mochi), with the spark badge: its words come from the host's language model."""
+    fur, white, ink, pink = '#e08a3c', '#fff6ea', '#2b2420', '#f2a7a0'
+    dog = ('<svg class="bust" viewBox="0 0 56 56"><defs><clipPath id="d"><circle cx="28" cy="28" r="28"/></clipPath></defs>'
+           '<g clip-path="url(#d)"><rect width="56" height="56" fill="var(--avbg)"/>'
+           '<path d="M8 58c0-11 8.5-17 20-17s20 6 20 17z" fill="%(fur)s"/>'
+           '<path d="M19.5 58c0-8 3.8-13 8.5-13s8.5 5 8.5 13z" fill="%(white)s"/>'
+           '<path d="M16.5 22.5L15.5 6.5 26.5 15.5z" fill="%(fur)s"/><path d="M39.5 22.5L40.5 6.5 29.5 15.5z" fill="%(fur)s"/>'
+           '<path d="M18.2 18.5L17.8 10.5 23.6 15.2z" fill="%(pink)s"/><path d="M37.8 18.5L38.2 10.5 32.4 15.2z" fill="%(pink)s"/>'
+           '<ellipse cx="28" cy="25.5" rx="11.5" ry="10.5" fill="%(fur)s"/>'
+           '<path d="M28 15.5v9" stroke="%(white)s" stroke-width="3.6" stroke-linecap="round"/>'
+           '<ellipse cx="28" cy="30.5" rx="6.8" ry="5.2" fill="%(white)s"/>'
+           '<circle cx="23.2" cy="23.6" r="1.35" fill="%(ink)s"/><circle cx="32.8" cy="23.6" r="1.35" fill="%(ink)s"/>'
+           '<ellipse cx="28" cy="28.4" rx="2.1" ry="1.5" fill="%(ink)s"/>'
+           '<path d="M25.3 31.3q2.7 2 5.4 0" fill="none" stroke="%(ink)s" stroke-width="1.1" stroke-linecap="round"/>'
+           '<path d="M26.6 32.6q1.4 2.6 2.8 0z" fill="%(pink)s"/></g></svg>') % dict(fur=fur, white=white, ink=ink, pink=pink)
+    return '<div class="av">%s<div class="badge">%s</div></div>' % (dog, icon('spark', 'var(--ai)'))
+
+
 WAVE = '<span class="wave">%s</span>' % ''.join('<i style="height:%dpx"></i>' % h for h in (7, 14, 10, 17, 8, 12))
 
 # the people (skin, hair, shirt, hair style, headset)
@@ -151,6 +176,11 @@ def bubble(t, tr=None):
 def receives(b):
     """what a receiver gets as text: "sees" and the bubble"""
     return '<span class="got"><span class="verb">sees</span>%s</span>' % b
+
+
+def answers(b, act):
+    """what an AI character does: "says" and its bubble, then what it does in the game"""
+    return '<div class="said"><span class="got"><span class="verb">says</span>%s</span><span class="act">%s</span></div>' % (b, act)
 
 
 def channel(kind, label):
@@ -189,6 +219,12 @@ CARDS = [
      channel('text', 'text'),
      who(door_avatar(), 'The game', '<span class="door">The door opens</span>'),
      'The game gets every finished line as text and can act on it: passwords, spells, orders.'),
+    ('6-character', 'Voice to an AI character', "Player 1 talks to a character; the host's language model answers for it.",
+     who(avatar(ANA, 'mic'), 'Player 1, on mic', spoken('"Mochi, fetch the ball!"')),
+     channel('ai', 'text \u2192 AI'),
+     who(dog_avatar(), "Mochi, an AI character", answers(bubble('Woof! On it!'), 'and fetches the ball')),
+     "The host's Koetama sends what was said near the character to the host's language model (optional, the host's "
+     "own); the mod shows the reply and checks every action against the game's rules first."),
 ]
 
 
@@ -218,7 +254,10 @@ def render(html, out):
 
 
 def main():
+    only = sys.argv[1:]
     for card in CARDS:
+        if only and card[0] not in only:
+            continue
         for theme in ('light', 'dark'):
             out = os.path.join(HERE, '%s-%s.png' % (card[0], theme))
             render(page(card, theme), out)
