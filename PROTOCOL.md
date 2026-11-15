@@ -385,7 +385,7 @@ its functions are how it acts); each agent's conversation is its last 24 turns (
 summarised); a new game session (`session`) starts every agent over. Anything players say to an agent ends up in its
 prompt: a persona can ask the model to refuse, only the game's checks of `calls` can enforce it.
 
-**Scores** (an agent with `criteria`; Koetama with `agent_scores` in the hello - unreleased). Scores let the game send
+**Scores** (an agent with `criteria`; Koetama with `agent_scores` in the hello: 0.5.14 and later). Scores let the game send
 an agent everything said near it, not only the lines that name it, and decide itself, by its own rules, which turns
 are answered:
 
