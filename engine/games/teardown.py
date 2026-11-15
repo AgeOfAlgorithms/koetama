@@ -121,7 +121,7 @@ def parse_requests(items):
 # agent_decisions, the top feed only (Rust: kd_games::api - keep the same)
 agent_ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
 FUNCTION_NAME = re.compile(r'[A-Za-z0-9_-]{1,64}')
-MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 16, 1024
+MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 32, 1024  # (functions: 16 before 0.5.15)
 MAX_AGENT_LINES, MAX_STATE_BYTES, MAX_RESULTS, MAX_RESULT_BYTES = 8, 2048, 16, 1024
 CRITERION_NAME = re.compile(r'[a-z0-9_]{1,32}')
 MAX_CRITERIA, MAX_CRITERION_BYTES, MAX_DECISIONS = 8, 300, 32
@@ -740,8 +740,11 @@ def json_secs(x):
 
 
 def hello(features):
-    return '{"type":"hello","app":%s,"version":%s,"protocol":%d,"features":%s}' % (
-        _js(paths.APP_NAME), _js(paths.VERSION), PROTOCOL, _js(list(features)))
+    """first, each session; with "llm", "agent_functions": the most functions an agent may have (MAX_FUNCTIONS - a game
+    sends more than 16 only when it is there)"""
+    extra = ',"agent_functions":%d' % MAX_FUNCTIONS if 'llm' in features else ''
+    return '{"type":"hello","app":%s,"version":%s,"protocol":%d,"features":%s%s}' % (
+        _js(paths.APP_NAME), _js(paths.VERSION), PROTOCOL, _js(list(features)), extra)
 
 
 def speech(kind, utt, text, times=None, ago=None):

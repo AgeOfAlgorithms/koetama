@@ -49,11 +49,14 @@ pub fn features(profile: &Profile) -> Vec<&'static str> {
     f
 }
 
-/// {"type":"hello","app":..,"version":..,"protocol":2,"features":[..]}: first, each session.
+/// {"type":"hello","app":..,"version":..,"protocol":2,"features":[..]}: first, each session. With "llm", also
+/// "agent_functions": the most functions an agent may have (feed::MAX_FUNCTIONS) - a game sends more than 16 (the
+/// limit before 0.5.15, and what a hello without the field means) only when this says it may.
 pub fn hello(features: &[&str]) -> String {
     let f: Vec<String> = features.iter().map(|x| js(x)).collect();
+    let extra = if features.contains(&"llm") { format!(",\"agent_functions\":{}", feed::MAX_FUNCTIONS) } else { String::new() };
     format!(
-        "{{\"type\":\"hello\",\"app\":{},\"version\":{},\"protocol\":{PROTOCOL},\"features\":[{}]}}",
+        "{{\"type\":\"hello\",\"app\":{},\"version\":{},\"protocol\":{PROTOCOL},\"features\":[{}]{extra}}}",
         js(paths::APP_NAME),
         js(paths::VERSION),
         f.join(",")
