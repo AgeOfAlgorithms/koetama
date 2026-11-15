@@ -256,6 +256,14 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.15: more room for AI characters
+
+- **A game's characters can have up to 32 actions** (functions), up from 16, so a mod can give them more to do:
+  trading, giving items, judging what they meet.
+- **For mod makers:** when the language model is on, the hello has `"agent_functions": 32`. Without it (Koetama
+  0.5.14 and older) the limit is 16, and an agent with more is left out, so send more than 16 only when the hello
+  says so. PROTOCOL.md, "Large language models: agents".
+
 ### 0.5.14: characters that choose when to answer
 
 - **A game's characters can listen to everything said near them** and answer only what concerns them. A mod gives
@@ -284,14 +292,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 - **No more cut-off text:** a long note (such as the quiet-microphone warning) or a long model row no longer makes
   the cards wider than the window. The speech model list now shows each model's languages on a small line under
   its name.
-
-### 0.5.12: language model limits in tokens
-
-- **Limit by tokens, not dollars.** The Large Language Models card now sets how many tokens in and out the mod may use
-  each month (5 million in and 500,000 out by default), and shows this month's use: "267,106 in, 9,800 out". These
-  are the same counts as on your provider's usage page. Koetama's dollar estimates could be far off (once about 90
-  times too high), so they're gone, and Koetama no longer downloads a price list.
-- **Reset** sets this month's count back to zero.
-- **Streamed replies are counted exactly** with DeepSeek and OpenRouter too, not estimated from their length.
-- **For mod makers:** `agent_status` now has `tokens_in`, `tokens_out`, `limit_in` and `limit_out` instead of `spent`
-  and `budget`. The `budget` state and error mean the month's tokens are used up.

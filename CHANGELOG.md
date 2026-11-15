@@ -2,6 +2,17 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.12: language model limits in tokens
+
+- **Limit by tokens, not dollars.** The Large Language Models card now sets how many tokens in and out the mod may use
+  each month (5 million in and 500,000 out by default), and shows this month's use: "267,106 in, 9,800 out". These
+  are the same counts as on your provider's usage page. Koetama's dollar estimates could be far off (once about 90
+  times too high), so they're gone, and Koetama no longer downloads a price list.
+- **Reset** sets this month's count back to zero.
+- **Streamed replies are counted exactly** with DeepSeek and OpenRouter too, not estimated from their length.
+- **For mod makers:** `agent_status` now has `tokens_in`, `tokens_out`, `limit_in` and `limit_out` instead of `spent`
+  and `budget`. The `budget` state and error mean the month's tokens are used up.
+
 ### 0.5.11: language model fixes
 
 - **A model's short name finds its price:** "deepseek-flash" at DeepSeek's address is now priced as DeepSeek's newest
