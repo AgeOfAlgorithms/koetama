@@ -187,7 +187,11 @@ pub fn body(api: Api, url: &str, model: &str, system: &str, functions: &[AgentFu
                 match t {
                     Turn::User(s) => messages.push(json!({"role": "user", "content": s})),
                     Turn::Assistant { text, calls } => {
-                        let mut m = json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { json!(text) }});
+                        // (null only beside calls: a reply with neither words nor calls is "" - DeepSeek refuses an
+                        //  assistant message with no content and no calls with a 400, and every later request of
+                        //  that agent with it - found by the DST villagers' test, 2026-11-16)
+                        let content = if text.is_empty() && !calls.is_empty() { Value::Null } else { json!(text) };
+                        let mut m = json!({"role": "assistant", "content": content});
                         if !calls.is_empty() {
                             m["tool_calls"] = calls
                                 .iter()
@@ -724,6 +728,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A reply with neither words nor calls stays in the conversation as "" - never a null content without calls,
+    /// which DeepSeek refuses (400) for every later request of that agent.
+    #[test]
+    fn an_empty_reply_is_an_empty_string() {
+        let turns = vec![
+            Turn::User("Wendy: hi".into()),
+            Turn::Assistant { text: String::new(), calls: vec![] },
+            Turn::User("Wendy: hello?".into()),
+        ];
+        let b = body(Api::OpenAi, "https://api.deepseek.com", "m", "s", &[], &turns, 10);
+        assert_eq!(b["messages"][2], json!({"role": "assistant", "content": ""}));
+        let with_call = vec![
+            Turn::User("a".into()),
+            Turn::Assistant { text: String::new(), calls: vec![Call { id: "c1".into(), name: "f".into(), args: json!({}) }] },
+            Turn::Results(vec![("c1".into(), "ok".into())]),
+        ];
+        let b = body(Api::OpenAi, "x", "m", "s", &[], &with_call, 10);
+        assert_eq!(b["messages"][2]["content"], Value::Null, "beside calls: null, as OpenAI's own sends it");
     }
 
     /// No thinking: each provider's own field to turn it off, none for a server nobody knows; and no thinking ever in
