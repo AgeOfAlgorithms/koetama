@@ -2,6 +2,19 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.13: cards that fold and switch
+
+- **Every card folds:** click its title to fold or unfold it. Koetama remembers which cards you folded.
+- **A clear on/off switch on each card:**
+  - **Voice chat** (was "Sound"): off, your voice isn't sent and other players' voices aren't played.
+  - **Speech to text:** off, nothing you say is written and no speech model loads. Voice chat still hears your
+    microphone.
+  - **Translation:** off, your chosen language is kept for when you turn it back on.
+  - **Large Language Models:** the switch lets the game's mod use your model (it was a checkbox).
+- **No more cut-off text:** a long note (such as the quiet-microphone warning) or a long model row no longer makes
+  the cards wider than the window. The speech model list now shows each model's languages on a small line under
+  its name.
+
 ### 0.5.12: language model limits in tokens
 
 - **Limit by tokens, not dollars.** The Large Language Models card now sets how many tokens in and out the mod may use

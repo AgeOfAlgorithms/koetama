@@ -256,6 +256,17 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.16: fewer wasted requests for AI characters
+
+- **A game can end a character's turn with its action.** When a character starts something long ("gather 6 grass"),
+  the game can mark the action's result as final, and Koetama no longer asks the model to say something more about
+  it. That second request was usually empty words, and it cost tokens from your monthly limit. In a test with three
+  village characters, about half of all requests were such follow-ups.
+- **A cap on requests per turn:** a game can say how many times a character may go back to the model in one turn.
+- **For mod makers:** `agent_results`' `"final": true`, agents' `max_rounds` (1 to 16), and `tokens_in`,
+  `tokens_out` and `tokens_cached` on each reply; the hello names `agent_final` when they're available. PROTOCOL.md,
+  "Large language models: agents".
+
 ### 0.5.15: more room for AI characters
 
 - **A game's characters can have up to 32 actions** (functions), up from 16, so a mod can give them more to do:
@@ -279,16 +290,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 - **For mod makers:** agents' `criteria`, `to_agent`'s `context` (an event that is only for the agent to know),
   `agent_scores`, the feed's `agent_decisions`, `agent_reply`'s `skipped`, and `agent_scores` in the hello's features:
   PROTOCOL.md, "Large language models: agents", "Scores".
-
-### 0.5.13: cards that fold and switch
-
-- **Every card folds:** click its title to fold or unfold it. Koetama remembers which cards you folded.
-- **A clear on/off switch on each card:**
-  - **Voice chat** (was "Sound"): off, your voice isn't sent and other players' voices aren't played.
-  - **Speech to text:** off, nothing you say is written and no speech model loads. Voice chat still hears your
-    microphone.
-  - **Translation:** off, your chosen language is kept for when you turn it back on.
-  - **Large Language Models:** the switch lets the game's mod use your model (it was a checkbox).
-- **No more cut-off text:** a long note (such as the quiet-microphone warning) or a long model row no longer makes
-  the cards wider than the window. The speech model list now shows each model's languages on a small line under
-  its name.
