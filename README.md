@@ -263,6 +263,8 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
   it. That second request was usually empty words, and it cost tokens from your monthly limit. In a test with three
   village characters, about half of all requests were such follow-ups.
 - **A cap on requests per turn:** a game can say how many times a character may go back to the model in one turn.
+- **Fixed: a character that once said nothing stopped answering.** If the model's reply had no words and no action,
+  DeepSeek refused every later request for that character for the rest of the session.
 - **For mod makers:** `agent_results`' `"final": true`, agents' `max_rounds` (1 to 16), and `tokens_in`,
   `tokens_out` and `tokens_cached` on each reply; the hello names `agent_final` when they're available. PROTOCOL.md,
   "Large language models: agents".
