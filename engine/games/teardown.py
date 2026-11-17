@@ -125,7 +125,7 @@ MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 32,
 MAX_AGENT_LINES, MAX_STATE_BYTES, MAX_RESULTS, MAX_RESULT_BYTES = 8, 2048, 16, 1024
 CRITERION_NAME = re.compile(r'[a-z0-9_]{1,32}')
 MAX_CRITERIA, MAX_CRITERION_BYTES, MAX_DECISIONS = 8, 300, 32
-DEFAULT_WORDS, MAX_WORDS = 80, 1000
+DEFAULT_WORDS, MAX_WORDS, MAX_ROUNDS = 80, 1000, 16
 NO_PARAMETERS = {'type': 'object', 'properties': {}}
 
 
@@ -180,10 +180,11 @@ def parse_agent(o):
         if not _fits(desc, MAX_FUNCTION_BYTES) or not isinstance(params, dict):
             return None
         functions.append(dict(name=f['name'], description=desc, parameters=params))
-    version, words = _whole(o.get('version')), _whole(o.get('max_words'))
+    version, words, rounds = _whole(o.get('version')), _whole(o.get('max_words')), _whole(o.get('max_rounds'))
     return dict(id=o['id'], version=max(0, version) if version is not None else 0, character=character, stream=stream, persona=persona,
                 functions=functions, voice=_short(o.get('voice')), criteria=criteria,
-                max_words=min(MAX_WORDS, max(1, words)) if words is not None else DEFAULT_WORDS)
+                max_words=min(MAX_WORDS, max(1, words)) if words is not None else DEFAULT_WORDS,
+                max_rounds=min(MAX_ROUNDS, max(1, rounds)) if rounds is not None else 0)
 
 
 def parse_agent_line(o):
@@ -221,11 +222,13 @@ def parse_agent_fields(v):
         line = parse_agent_line(o)
         if line and line['id'] not in [x['id'] for x in lines] and len(lines) < MAX_AGENT_LINES:
             lines.append(line)
-    results = []
+    results, finals = [], []
     for o in _list(v, 'agent_results', 64):
         if isinstance(o, dict) and _agent_id(o.get('call')) and _fits(o.get('result'), MAX_RESULT_BYTES) \
                 and o['call'] not in [c for c, _ in results] and len(results) < MAX_RESULTS:
             results.append((o['call'], o['result']))
+            if o.get('final') is True:  # (this result ends the turn: no follow-up request)
+                finals.append(o['call'])
     forget = []
     for o in _list(v, 'agent_forget', 64):
         if _agent_id(o) and o not in forget and len(forget) < MAX_AGENTS:
@@ -239,7 +242,8 @@ def parse_agent_fields(v):
                 and isinstance(o.get('answer'), bool) and turn not in [d['turn'] for d in decisions] \
                 and len(decisions) < MAX_DECISIONS:
             decisions.append(dict(agent=o['agent'], turn=turn, answer=o['answer']))
-    return dict(agents=agents, to_agent=lines, agent_results=results, agent_forget=forget, agent_decisions=decisions)
+    return dict(agents=agents, to_agent=lines, agent_results=results, agent_final=finals, agent_forget=forget,
+                agent_decisions=decisions)
 
 
 def _whole(v):
@@ -631,7 +635,7 @@ def _parse_one(v, inherit=None):
                 translate=_flag(v, 'translate', True), to_translate=parse_requests(lines), me_id=me_id,
                 name=_short(v.get('name')), range=my_range, max_range=_positive(v.get('max_range')), clashes=clashes,
                 transmit_all=transmit_all, players=[],
-                **(parse_agent_fields(v) if inherit is None else dict(agents=[], to_agent=[], agent_results=[], agent_forget=[], agent_decisions=[])))
+                **(parse_agent_fields(v) if inherit is None else dict(agents=[], to_agent=[], agent_results=[], agent_final=[], agent_forget=[], agent_decisions=[])))
 
 
 def parse_feed(text):

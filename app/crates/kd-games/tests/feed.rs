@@ -106,6 +106,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
     assert_eq!(Value::Array(lines), want["to_agent"], "{text}: to_agent");
     let results: Vec<Value> = f.agent_results.iter().map(|(c, r)| serde_json::json!([c, r])).collect();
     assert_eq!(Value::Array(results), want["agent_results"], "{text}: agent_results");
+    assert_eq!(serde_json::to_value(&f.agent_final).unwrap(), want["agent_final"], "{text}: agent_final");
     assert_eq!(serde_json::to_value(&f.agent_forget).unwrap(), want["agent_forget"], "{text}: agent_forget");
     assert_eq!(serde_json::to_value(&f.agent_decisions).unwrap(), want["agent_decisions"], "{text}: agent_decisions");
     let sp = want["speakers"].as_object().unwrap();
@@ -155,7 +156,7 @@ fn same_feed(f: &Feed, want: &Value, text: &str) {
 fn parse_as_python() {
     let fx = fixture();
     let cases = fx["parse"].as_array().unwrap();
-    assert_eq!(cases.len(), 89);
+    assert_eq!(cases.len(), 90);
     for c in cases {
         let text = c["text"].as_str().unwrap();
         let got = parse_feed(text);
@@ -240,17 +241,18 @@ fn objects_byte_identical() {
 #[test]
 fn agent_replies() {
     let calls = vec![("call_1".to_string(), "offer_trade".to_string(), serde_json::json!({"price": 12}))];
-    let o: Value = serde_json::from_str(&api::agent_reply(&[41], "pig_king", "Twelve.", &calls, "", "", true, false)).unwrap();
+    let o: Value = serde_json::from_str(&api::agent_reply(&[41], "pig_king", "Twelve.", &calls, "", "", true, false, Some((900, 12, 640)))).unwrap();
     assert_eq!(
         o,
         serde_json::json!({"type": "agent_reply", "ids": [41], "agent": "pig_king", "text": "Twelve.",
             "calls": [{"call": "call_1", "name": "offer_trade", "args": {"price": 12}}], "error": "", "why": "", "final": true,
-            "skipped": false})
+            "skipped": false, "tokens_in": 900, "tokens_out": 12, "tokens_cached": 640})
     );
-    let s = api::agent_reply(&[1, 2], "mochi", "", &[], "", "", true, true);
+    let s = api::agent_reply(&[1, 2], "mochi", "", &[], "", "", true, true, None);
     let o: Value = serde_json::from_str(&s).unwrap();
     assert_eq!((o["skipped"].as_bool(), o["text"].as_str(), o["final"].as_bool()), (Some(true), Some(""), Some(true)));
-    let long: Value = serde_json::from_str(&api::agent_reply(&[1], "x", &"é".repeat(3000), &[], "failed", &"w".repeat(900), true, false)).unwrap();
+    assert!(o.get("tokens_in").is_none(), "no request made it: no tokens");
+    let long: Value = serde_json::from_str(&api::agent_reply(&[1], "x", &"é".repeat(3000), &[], "failed", &"w".repeat(900), true, false, None)).unwrap();
     assert_eq!((long["text"].as_str().unwrap().chars().count(), long["why"].as_str().unwrap().len()), (api::MAX_AGENT_REPLY_CHARS, 500));
 }
 

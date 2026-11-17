@@ -110,7 +110,7 @@ fn config(api: Api, url: &str) -> Config {
 }
 
 fn pig(functions: Vec<AgentFunction>) -> AgentDef {
-    AgentDef { id: "pig".into(), version: 1, character: true, stream: false, persona: "You are the Pig King.".into(), functions, max_words: 40, voice: String::new(), criteria: vec![] }
+    AgentDef { id: "pig".into(), version: 1, character: true, stream: false, persona: "You are the Pig King.".into(), functions, max_words: 40, voice: String::new(), criteria: vec![], max_rounds: 0 }
 }
 
 fn line(id: i64, agent: &str, who: &str, text: &str) -> AgentLine {
@@ -215,6 +215,52 @@ fn function_calls_go_to_the_game_and_their_results_back() {
     assert_eq!(m[3], json!({"role": "tool", "tool_call_id": "call_1", "content": "ok: offered 1 football helmet for 12 meat"}));
     assert_eq!(seen[1].1["tools"][0]["function"]["name"], "offer_trade");
     drop(seen);
+    r.agents.stop();
+}
+
+/// A result marked final ends its turn: the results join the conversation, no follow-up is asked for, and the line
+/// that waited goes next; max_rounds caps a turn's requests the same way; a reply says what its request used (0.5.16:
+/// the DST villagers' calls start long tasks, and the follow-up after them was empty words at the price of a request).
+#[test]
+fn a_final_result_ends_the_turn() {
+    let call = json!({"choices": [{"message": {"content": "On it.", "tool_calls": [{"id": "call_1", "type": "function",
+        "function": {"name": "gather", "arguments": "{\"what\":\"grass\",\"count\":6}"}}]}}],
+        "usage": {"prompt_tokens": 900, "prompt_tokens_details": {"cached_tokens": 640}, "completion_tokens": 12}});
+    let c = call.clone();
+    let f = fake(Box::new(move |n, _| (200, if n == 0 { c.clone() } else { openai_text("Hello, Wes.") }, Duration::ZERO)));
+    let r = rig(config(Api::OpenAi, &f.url));
+    let gather = AgentFunction { name: "gather".into(), description: "Gather things".into(), parameters: json!({"type": "object"}) };
+    r.agents.feed(1, &[pig(vec![gather.clone()])], &[line(41, "pig", "Wendy", "get us 6 grass")], &[], &[]);
+    r.wait_replies(1);
+    r.agents.feed(1, &[], &[line(42, "pig", "Wes", "hi")], &[], &[]);
+    r.agents.finals(&["call_1".to_string()]);
+    r.agents.feed(1, &[], &[], &[("call_1".into(), "ok: gathering 6 grass".into())], &[]);
+    let got = r.wait_replies(2);
+    assert_eq!(got[1], (vec![42], "Hello, Wes.".into(), 0, String::new()), "no follow-up for 41: the line that waited went next");
+    {
+        let seen = f.seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "the call, then the next turn - no follow-up between");
+        let m = seen[1].1["messages"].as_array().unwrap();
+        assert_eq!(m[3], json!({"role": "tool", "tool_call_id": "call_1", "content": "ok: gathering 6 grass"}), "the result is in the conversation");
+        assert_eq!(m[4]["content"], "Wes: hi");
+    }
+    assert!(r.logged("agent pig: turn ended with its results (a final result)"));
+    let tokens: Vec<Option<(u64, u64, u64)>> =
+        r.events.0.lock().unwrap().iter().filter_map(|e| match e { Event::Reply { tokens, .. } => Some(*tokens), _ => None }).collect();
+    assert_eq!(tokens, vec![Some((900, 12, 640)), Some((100, 20, 0))], "each reply: what its request used");
+    r.agents.stop();
+
+    // (max_rounds 1: the turn's one request - its results never asked about, final or not)
+    let c = call.clone();
+    let f = fake(Box::new(move |_, _| (200, c.clone(), Duration::ZERO)));
+    let r = rig(config(Api::OpenAi, &f.url));
+    let one = AgentDef { max_rounds: 1, ..pig(vec![gather]) };
+    r.agents.feed(1, &[one], &[line(41, "pig", "Wendy", "get us 6 grass")], &[], &[]);
+    r.wait_replies(1);
+    r.agents.feed(1, &[], &[], &[("call_1".into(), "ok".into())], &[]);
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(f.seen.lock().unwrap().len(), 1, "no follow-up past max_rounds");
+    assert!(r.logged("agent pig: turn ended with its results (max_rounds)"));
     r.agents.stop();
 }
 

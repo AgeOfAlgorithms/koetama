@@ -75,7 +75,17 @@ pub enum Event {
     /// the reply to lines `ids` of agent `agent`: its words and function calls (the game runs them and answers with
     /// agent_results); `error` (an error:: code) and `why` when it is not one - then text and calls are empty;
     /// `skipped`: the game decided on the turn's scores not to answer these lines (no words, no calls, no error)
-    Reply { ids: Vec<i64>, agent: String, text: String, calls: Vec<Call>, error: &'static str, why: String, skipped: bool },
+    /// `tokens`: what the request that made it used, (in, out, cached of in) - none for a reply no request made
+    Reply {
+        ids: Vec<i64>,
+        agent: String,
+        text: String,
+        calls: Vec<Call>,
+        error: &'static str,
+        why: String,
+        skipped: bool,
+        tokens: Option<(u64, u64, u64)>,
+    },
     /// the turn `turn` (the lines `ids`) of agent `agent` scored on its criteria (those the model rated, 0..1, in the
     /// criteria's order): it waits for the game's decision (Agents::decide)
     Scores { agent: String, turn: i64, ids: Vec<i64>, scores: Vec<(String, f64)> },
@@ -98,6 +108,8 @@ enum Msg {
     Scored { agent: String, gen: u64, result: Result<Reply, String> },
     /// the game's decisions on scored turns
     Decide(Vec<AgentDecision>),
+    /// the calls whose results (in the feed that follows) end their turn
+    Finals(Vec<String>),
     Partial { agent: String, gen: u64, text: String },
     Stop,
 }
@@ -124,6 +136,7 @@ impl Agents {
             agents: HashMap::new(),
             seen: HashSet::new(),
             seen_order: VecDeque::new(),
+            final_calls: HashSet::new(),
             sent: VecDeque::new(),
             gen: 0,
             turns: 0,
@@ -157,6 +170,14 @@ impl Agents {
         self.send(Msg::Decide(decisions.to_vec()));
     }
 
+    /// The calls whose results end their turn (the feed's agent_final; before that feed's feed()): once all of a turn's
+    /// calls are answered and one of them is final, the results join the conversation and no follow-up is asked for.
+    pub fn finals(&self, calls: &[String]) {
+        if !calls.is_empty() {
+            self.send(Msg::Finals(calls.to_vec()));
+        }
+    }
+
     /// Stops the thread (a request under way finishes on its own; its reply is dropped).
     pub fn stop(&self) {
         self.send(Msg::Stop);
@@ -166,8 +187,9 @@ impl Agents {
     }
 }
 
-/// Function calls waiting for the game's results: the lines they answer, the call ids, the results so far, since when.
-type Waiting = (Vec<i64>, Vec<String>, Vec<(String, String)>, Instant);
+/// Function calls waiting for the game's results: the lines they answer, the call ids, the results so far, since when,
+/// and whether one of the results is final (the turn ends with them: no follow-up).
+type Waiting = (Vec<i64>, Vec<String>, Vec<(String, String)>, Instant, bool);
 
 /// A request under way: its generation (a reply from an older one is dropped), the lines it answers, the history's
 /// length before it (put back if it fails), what the ledger holds for it, and how many kept lines its turn starts with
@@ -215,6 +237,8 @@ struct Agent {
     /// lines of turns the game decided not to answer (the newest MAX_KEPT, as a turn writes them): its next turn that
     /// goes starts with them
     kept: VecDeque<String>,
+    /// requests to the model in its turn now (the turn's first and each follow-up after results: max_rounds)
+    rounds: i64,
 }
 
 impl Agent {
@@ -241,6 +265,8 @@ struct Worker {
     agents: HashMap<String, Agent>,
     seen: HashSet<i64>,
     seen_order: VecDeque<i64>,
+    /// calls the game marked final (agent_final) whose results have not come yet
+    final_calls: HashSet<String>,
     /// when the last requests were sent (requests a minute)
     sent: VecDeque<Instant>,
     gen: u64,
@@ -394,6 +420,13 @@ impl Worker {
                 Ok(Msg::Feed { sid, agents, lines, results, forget }) => self.feed(sid, agents, lines, results, forget),
                 Ok(Msg::Done { agent, gen, result }) => self.done(&agent, gen, result),
                 Ok(Msg::Scored { agent, gen, result }) => self.scored(&agent, gen, result),
+                Ok(Msg::Finals(calls)) => {
+                    // (kept until their results come; a game that marks calls that never come back cannot fill it)
+                    if self.final_calls.len() > 256 {
+                        self.final_calls.clear();
+                    }
+                    self.final_calls.extend(calls);
+                }
                 Ok(Msg::Decide(decisions)) => {
                     for d in decisions {
                         self.decided(&d);
@@ -448,9 +481,10 @@ impl Worker {
         }
         for (call, result) in results {
             for n in self.agents.values_mut() {
-                if let Some((_, calls, got, _)) = n.waiting.as_mut() {
+                if let Some((_, calls, got, _, fin)) = n.waiting.as_mut() {
                     if calls.contains(&call) && !got.iter().any(|(c, _)| *c == call) {
                         got.push((call.clone(), result.clone()));
+                        *fin |= self.final_calls.remove(&call);
                     }
                 }
             }
@@ -459,7 +493,7 @@ impl Worker {
         let ready: Vec<String> = self
             .agents
             .iter()
-            .filter(|(_, n)| n.waiting.as_ref().is_some_and(|(_, calls, got, _)| got.len() >= calls.len()))
+            .filter(|(_, n)| n.waiting.as_ref().is_some_and(|(_, calls, got, ..)| got.len() >= calls.len()))
             .map(|(k, _)| k.clone())
             .collect();
         for k in ready {
@@ -503,11 +537,11 @@ impl Worker {
         let late: Vec<String> = self
             .agents
             .iter()
-            .filter(|(_, n)| n.waiting.as_ref().is_some_and(|(.., since)| since.elapsed() >= RESULTS_WAIT))
+            .filter(|(_, n)| n.waiting.as_ref().is_some_and(|(_, _, _, since, _)| since.elapsed() >= RESULTS_WAIT))
             .map(|(k, _)| k.clone())
             .collect();
         for k in late {
-            if let Some((_, calls, got, _)) = self.agents.get_mut(&k).and_then(|n| n.waiting.as_mut()) {
+            if let Some((_, calls, got, ..)) = self.agents.get_mut(&k).and_then(|n| n.waiting.as_mut()) {
                 for c in calls.iter() {
                     if !got.iter().any(|(g, _)| g == c) {
                         got.push((c.clone(), "(no result)".into()));
@@ -518,15 +552,25 @@ impl Worker {
         }
     }
 
-    /// The agent's calls are all answered: their results join its conversation and its follow-up is asked for.
+    /// The agent's calls are all answered: their results join its conversation and its follow-up is asked for - unless
+    /// one of them is final, or the turn has had max_rounds requests: then the turn ends with them (its words came with
+    /// the calls), and its next lines may go.
     fn results_back(&mut self, k: &str) {
         let Some(n) = self.agents.get_mut(k) else { return };
-        let Some((ids, calls, got, _)) = n.waiting.take() else { return };
+        let Some((ids, calls, got, _, fin)) = n.waiting.take() else { return };
         // (in the order the LLM made the calls)
         let ordered: Vec<(String, String)> =
             calls.iter().filter_map(|c| got.iter().find(|(g, _)| g == c).cloned()).collect();
         let before = n.history.len();
         n.history.push(Turn::Results(ordered));
+        let capped = n.def.max_rounds > 0 && n.rounds >= n.def.max_rounds;
+        if fin || capped {
+            (self.log)(&format!(
+                "agent {k}: turn ended with its results ({})",
+                if fin { "a final result" } else { "max_rounds" }
+            ));
+            return;
+        }
         self.ask(k, ids, before, 0);
     }
 
@@ -560,6 +604,7 @@ impl Worker {
         n.history = trimmed(std::mem::take(&mut n.history));
         let before = n.history.len();
         n.history.push(Turn::User(user_turn(&lines, &kept)));
+        n.rounds = 0; // (a new turn)
         self.ask(k, ids, before, kept.len());
     }
 
@@ -697,6 +742,7 @@ impl Worker {
             error: "",
             why: String::new(),
             skipped: true,
+            tokens: None,
         });
     }
 
@@ -737,6 +783,7 @@ impl Worker {
         }
         self.gen += 1;
         n.busy = Some(Busy { gen: self.gen, ids, before, held: most, kept });
+        n.rounds += 1;
         let (tx, agent, gen, stream) = (self.tx.clone(), k.to_string(), self.gen, n.def.stream);
         std::thread::spawn(move || {
             let result = if stream {
@@ -771,7 +818,7 @@ impl Worker {
                 n.kept.drain(..kept);
                 n.history.push(Turn::Assistant { text: r.text.clone(), calls: r.calls.clone() });
                 if !r.calls.is_empty() {
-                    n.waiting = Some((ids.clone(), r.calls.iter().map(|c| c.id.clone()).collect(), Vec::new(), Instant::now()));
+                    n.waiting = Some((ids.clone(), r.calls.iter().map(|c| c.id.clone()).collect(), Vec::new(), Instant::now(), false));
                 }
                 self.ledger.settle(held, r.tokens());
                 self.failed = None;
@@ -781,7 +828,8 @@ impl Worker {
                     r.tokens_out,
                     if r.calls.is_empty() { String::new() } else { format!(", {} function calls", r.calls.len()) }
                 ));
-                self.reply(ids, k, r.text, r.calls);
+                let tokens = (r.tokens_in, r.tokens_out, r.tokens_cached);
+                self.reply(ids, k, r.text, r.calls, tokens);
             }
             Err(e) => {
                 n.history.truncate(before);
@@ -793,8 +841,17 @@ impl Worker {
         }
     }
 
-    fn reply(&self, ids: Vec<i64>, agent: &str, text: String, calls: Vec<Call>) {
-        (self.on_event)(Event::Reply { ids, agent: agent.to_string(), text, calls, error: "", why: String::new(), skipped: false });
+    fn reply(&self, ids: Vec<i64>, agent: &str, text: String, calls: Vec<Call>, tokens: (u64, u64, u64)) {
+        (self.on_event)(Event::Reply {
+            ids,
+            agent: agent.to_string(),
+            text,
+            calls,
+            error: "",
+            why: String::new(),
+            skipped: false,
+            tokens: Some(tokens),
+        });
     }
 
     fn fail(&self, ids: Vec<i64>, agent: &str, code: &'static str, why: String) {
@@ -806,6 +863,7 @@ impl Worker {
             error: code,
             why,
             skipped: false,
+            tokens: None,
         });
     }
 

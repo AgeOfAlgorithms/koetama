@@ -224,6 +224,12 @@ def feed_cases():
                           dict(call='c 10', result='bad call id'), dict(call='c11', result='r' * 1025), dict(call='c12')],
              agent_forget=['pig_king', 'pig_king', 'bad id', 5, 'guard.1']),
         dict(agents={}, to_agent={}, agent_results={}, agent_forget={}),
+        # (0.5.16: a result that ends the turn - "final": true only; an agent's max_rounds, 1..16, 0 when absent)
+        dict(agents=[dict(id='r3', max_rounds=3), dict(id='r0', max_rounds=0), dict(id='r99', max_rounds=99),
+                     dict(id='rx', max_rounds='x'), dict(id='r2f', max_rounds=2.0)],
+             agent_results=[dict(call='g1', result='ok: gathering 6 grass', final=True), dict(call='g2', result='x', final='yes'),
+                          dict(call='g3', result='y', final=False), dict(call='g1', result='again', final=True),
+                          dict(call='g4', result='z')]),
         dict(agents='not a list'), dict(to_agent=[dict(id=1, agent='x', text='a')] * 65), dict(agents=[dict(id='n%d' % i) for i in range(33)]),
         # an agent's criteria (a description cut at 300 bytes, at a character; a broken list: the agent left out),
         # context events, the game's decisions on scored turns

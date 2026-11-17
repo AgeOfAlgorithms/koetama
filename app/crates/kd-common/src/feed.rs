@@ -395,6 +395,10 @@ pub struct Feed {
     /// (call id, result)
     #[serde(default)]
     pub agent_results: Vec<(String, String)>,
+    /// the calls among agent_results whose result is "final": once all of a turn's calls are answered and one of them
+    /// is, the turn ends there - no follow-up request (PROTOCOL.md "Large language models: agents", 0.5.16)
+    #[serde(default)]
+    pub agent_final: Vec<String>,
     #[serde(default)]
     pub agent_forget: Vec<String>,
     /// the game's decisions on the turns Koetama sent scores for (agent_scores): answer them or not
@@ -425,6 +429,10 @@ pub struct AgentDef {
     /// what a turn is scored on (none: never scored): before a turn of only players' lines and context events goes to
     /// the model, a short request rates it on each, 0..1, and the game decides from the scores whether it is answered
     pub criteria: Vec<AgentCriterion>,
+    /// the most requests to the model in one of its turns, follow-ups after function results included (1..MAX_ROUNDS;
+    /// 0: no limit, as before 0.5.16): at the limit, the results join its conversation and the turn ends
+    #[serde(default)]
+    pub max_rounds: i64,
 }
 
 /// One thing an agent's turns are scored on: a name (MAX_CRITERION_NAME of a-z 0-9 _) and what it means, in words (at
@@ -494,6 +502,8 @@ pub const MAX_DECISIONS: usize = 32;
 /// an agent's longest reply in words: when not given, and at most
 pub const DEFAULT_WORDS: i64 = 80;
 pub const MAX_WORDS: i64 = 1000;
+/// an agent's max_rounds at most
+pub const MAX_ROUNDS: i64 = 16;
 
 /// `s` cut to at most `most` bytes, at a character's start (never inside one).
 pub fn cut_bytes(s: &str, most: usize) -> &str {
