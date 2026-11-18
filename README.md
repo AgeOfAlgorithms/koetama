@@ -256,6 +256,13 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.17: bigger game messages, and no silent refusals
+
+- **A game can send Koetama up to 256 KB at once** (was 64 KB). Games with several AI characters send long
+  descriptions of them, and four characters were already over the old limit.
+- **A message that's too big is now reported** in Koetama's log, with its size. Before, it was refused without a
+  word, and the characters it carried simply never answered.
+
 ### 0.5.16: fewer wasted requests for AI characters
 
 - **A game can end a character's turn with its action.** When a character starts something long ("gather 6 grass"),
@@ -276,19 +283,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 - **For mod makers:** when the language model is on, the hello has `"agent_functions": 32`. Without it (Koetama
   0.5.14 and older) the limit is 16, and an agent with more is left out, so send more than 16 only when the hello
   says so. PROTOCOL.md, "Large language models: agents".
-
-### 0.5.14: characters that choose when to answer
-
-- **A game's characters can listen to everything said near them** and answer only what concerns them. A mod gives
-  a character a few things to look for ("is it about the dog?", "treats or the ball?", "is someone in danger?"). A
-  very short request to the language model rates what was said on each, and the mod decides from those scores and
-  what it knows of the game whether the character answers. What it lets pass is still remembered, so the character
-  knows what went on when it does speak.
-- **The second request is cheap:** the rating request is the reply's own request with one question added, so when
-  the character does answer, your provider has most of it cached already (DeepSeek and OpenAI by themselves,
-  Anthropic through a cache mark Koetama adds).
-- **No thinking:** the language model answers straight away instead of thinking first (DeepSeek thought by default),
-  and no model's thinking ever reaches a game mod, whatever the server.
-- **For mod makers:** agents' `criteria`, `to_agent`'s `context` (an event that is only for the agent to know),
-  `agent_scores`, the feed's `agent_decisions`, `agent_reply`'s `skipped`, and `agent_scores` in the hello's features:
-  PROTOCOL.md, "Large language models: agents", "Scores".

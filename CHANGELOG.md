@@ -2,6 +2,22 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.14: characters that choose when to answer
+
+- **A game's characters can listen to everything said near them** and answer only what concerns them. A mod gives
+  a character a few things to look for ("is it about the dog?", "treats or the ball?", "is someone in danger?"). A
+  very short request to the language model rates what was said on each, and the mod decides from those scores and
+  what it knows of the game whether the character answers. What it lets pass is still remembered, so the character
+  knows what went on when it does speak.
+- **The second request is cheap:** the rating request is the reply's own request with one question added, so when
+  the character does answer, your provider has most of it cached already (DeepSeek and OpenAI by themselves,
+  Anthropic through a cache mark Koetama adds).
+- **No thinking:** the language model answers straight away instead of thinking first (DeepSeek thought by default),
+  and no model's thinking ever reaches a game mod, whatever the server.
+- **For mod makers:** agents' `criteria`, `to_agent`'s `context` (an event that is only for the agent to know),
+  `agent_scores`, the feed's `agent_decisions`, `agent_reply`'s `skipped`, and `agent_scores` in the hello's features:
+  PROTOCOL.md, "Large language models: agents", "Scores".
+
 ### 0.5.13: cards that fold and switch
 
 - **Every card folds:** click its title to fold or unfold it. Koetama remembers which cards you folded.
