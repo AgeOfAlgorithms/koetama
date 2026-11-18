@@ -82,7 +82,10 @@ fn header<'a>(h: &'a [(String, String)], k: &str) -> Option<&'a str> {
 fn feeds_and_objects() {
     let port = free_port();
     let sink = Arc::new(Sink::default());
-    let mut g = HttpGame::new(profile(port, json!({})), false, sink.clone(), kd_common::null_log());
+    let said: std::sync::Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+    let s2 = said.clone();
+    let log: kd_common::Log = std::sync::Arc::new(move |l: &str| s2.lock().unwrap().push(l.to_string()));
+    let mut g = HttpGame::new(profile(port, json!({})), false, sink.clone(), log);
     assert!(!g.send_text("nobody yet"), "no game: nothing queued");
     g.start();
     let (status, _, info) = request(port, "GET", &[], "");
@@ -156,9 +159,15 @@ fn feeds_and_objects() {
     assert_eq!(s, 405);
     let (s, _, _) = request(port, "POST", &[("Transfer-Encoding", "chunked")], "");
     assert_eq!(s, 411);
-    let big = format!("{{\"x\":\"{}\"}}", "a".repeat(70 * 1024));
+    // (a 70 KB feed - four DST villagers' definitions - goes; over 256 KB is refused)
+    let fits = format!("{{\"x\":\"{}\"}}", "a".repeat(70 * 1024));
+    let (s, _, _) = request(port, "POST", &[], &fits);
+    assert_eq!(s, 200);
+    let big = format!("{{\"x\":\"{}\"}}", "a".repeat(300 * 1024));
     let (s, _, _) = request(port, "POST", &[], &big);
     assert_eq!(s, 413);
+    // (said where the host sees it, with the size: silent, a DST mod's villagers went unanswered for a day)
+    assert!(said.lock().unwrap().iter().any(|l| l.contains("a feed of 301 KB is over the 256 KB limit: refused")), "{:?}", said.lock().unwrap());
     gref.lock().unwrap().stop();
     assert!(TcpStream::connect(("127.0.0.1", port)).is_err(), "stopped: the port is closed");
 }

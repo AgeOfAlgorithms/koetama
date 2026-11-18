@@ -27,8 +27,9 @@ use std::time::{Duration, Instant};
 
 /// the longest an answer waits for an object ("wait"; the game still sends a feed at least once a second)
 pub const MAX_WAIT: f64 = 1.0;
-/// the largest request body
-pub const MAX_BODY: usize = 64 * 1024;
+/// the largest request body - a feed with agents' definitions can be tens of KB (8 KB of persona and up to 32
+/// functions each; the user, 2026-11-17: 64 KB "quadruple it", after 4 DST villagers' 70 KB feeds were refused)
+pub const MAX_BODY: usize = 256 * 1024;
 /// requests answered at once (more: 503)
 const MAX_OPEN: usize = 16;
 const RETRY: Duration = Duration::from_secs(2);
@@ -220,7 +221,27 @@ struct Request {
 }
 
 /// The request on a connection; Err: the status to answer with.
-fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
+/// The request, or the status refusing it and the body's length as it said (0 when it said none).
+fn read_request(stream: &mut TcpStream) -> Result<Request, (u16, usize)> {
+    read_request_status(stream).map_err(|e| match e {
+        Refused::Status(s) => (s, 0),
+        Refused::TooLarge(len) => (413, len),
+    })
+}
+
+/// Why a request was refused: a status, or a body over MAX_BODY (its length).
+enum Refused {
+    Status(u16),
+    TooLarge(usize),
+}
+
+impl From<u16> for Refused {
+    fn from(s: u16) -> Refused {
+        Refused::Status(s)
+    }
+}
+
+fn read_request_status(stream: &mut TcpStream) -> Result<Request, Refused> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     // (the whole request within REQUEST_TIME: a sender that trickles a byte at a time cannot hold one of the
@@ -239,11 +260,11 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
             break i;
         }
         if buf.len() > 16 * 1024 {
-            return Err(431);
+            return Err(431.into());
         }
         let n = read(stream, &mut chunk)?;
         if n == 0 {
-            return Err(400);
+            return Err(400.into());
         }
         buf.extend_from_slice(&chunk[..n]);
     };
@@ -258,14 +279,14 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
         }
     }
     if headers.get("transfer-encoding").is_some_and(|t| !t.eq_ignore_ascii_case("identity")) {
-        return Err(411); // (a body needs its Content-Length)
+        return Err(411.into()); // (a body needs its Content-Length)
     }
     let len: usize = match headers.get("content-length") {
         Some(v) => v.parse().map_err(|_| 400u16)?,
         None => 0,
     };
     if len > MAX_BODY {
-        return Err(413);
+        return Err(Refused::TooLarge(len));
     }
     let mut body = buf[head_end + 4..].to_vec();
     // (libcurl - Don't Starve Together's QueryServer - sends "Expect: 100-continue" with a body over 1 KB and holds
@@ -276,7 +297,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
     while body.len() < len {
         let n = read(stream, &mut chunk)?;
         if n == 0 {
-            return Err(400);
+            return Err(400.into());
         }
         body.extend_from_slice(&chunk[..n]);
     }
@@ -328,7 +349,16 @@ fn handle(mut stream: TcpStream, ctx: &Ctx) {
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let Request { method, path, headers, body } = match read_request(&mut stream) {
         Ok(r) => r,
-        Err(status) => {
+        Err((status, len)) => {
+            // (a feed too big is refused whole: said where the host sees it - silent, 3 of 4 DST villagers never
+            //  answered and it took a day to find, 2026-11-17)
+            if status == 413 {
+                ctx.say(&format!(
+                    "a feed of {} KB is over the {} KB limit: refused (a mod can send agents' definitions over several feeds)",
+                    len.div_ceil(1024),
+                    MAX_BODY / 1024
+                ));
+            }
             // (the rest of a refused body is read and dropped first: closing with unread data would reset the
             //  connection, and the client might never see the answer)
             let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));

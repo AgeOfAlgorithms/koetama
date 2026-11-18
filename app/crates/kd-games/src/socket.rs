@@ -25,8 +25,9 @@ use std::time::{Duration, Instant};
 
 /// The protocol's number (api::PROTOCOL).
 pub use crate::api::PROTOCOL;
-/// A line longer than this drops the connection (a feed is a few hundred bytes).
-pub const MAX_LINE: usize = 64 * 1024;
+/// A line longer than this drops the connection (a feed is a few hundred bytes - with agents' definitions tens of KB;
+/// 64 KB before 0.5.17, the user: "quadruple it").
+pub const MAX_LINE: usize = 256 * 1024;
 /// How often a busy port is tried again.
 pub const RETRY: Duration = Duration::from_secs(2);
 /// How long the thread waits for the client's bytes before looking for a new connection.

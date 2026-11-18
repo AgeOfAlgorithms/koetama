@@ -169,12 +169,12 @@ fn socket_end_to_end() {
     assert!(g.send_text("to the new one"));
     assert_eq!(c2.line()["text"], "to the new one");
     assert!(g.peer().is_none(), "the new client has not said hello");
-    // a line over 64 KB drops the connection
-    let _ = c2.w.write_all(&vec![b'x'; 70 * 1024]); // (Koetama may close before the last bytes)
+    // a line over 256 KB drops the connection (64 KB before 0.5.17)
+    let _ = c2.w.write_all(&vec![b'x'; 300 * 1024]); // (Koetama may close before the last bytes)
     assert!(c2.closed(), "dropped");
     wait_until("the client is gone", || !g.has_client());
     assert!(!g.send_text("nobody"));
-    assert!(lines.lock().unwrap().iter().any(|l| l.contains("over 64 KB")));
+    assert!(lines.lock().unwrap().iter().any(|l| l.contains("over 256 KB")));
     // stop: the connection and the port closed
     let mut c3 = Client::connect(port);
     c3.line();
