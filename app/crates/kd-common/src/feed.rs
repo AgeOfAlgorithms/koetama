@@ -484,8 +484,8 @@ impl AgentLine {
 
 /// the most agents a feed defines, and their limits (docs/llm-agents.md; engine/games/teardown.py - keep the same)
 pub const MAX_AGENTS: usize = 32;
-pub const MAX_PERSONA_BYTES: usize = 8192;
-pub const MAX_FUNCTIONS: usize = 32; // (16 before 0.5.15; the hello's "agent_functions" says it)
+pub const MAX_PERSONA_BYTES: usize = 32768; // (8192 before 0.5.19; the hello's "agent_persona" says it)
+pub const MAX_FUNCTIONS: usize = 64; // (16 before 0.5.15, 32 before 0.5.19; the hello's "agent_functions" says it)
 pub const MAX_FUNCTION_BYTES: usize = 1024;
 /// the most lines for agents one feed keeps, the game state's most bytes, the most function results and their size
 pub const MAX_AGENT_LINES: usize = 8;

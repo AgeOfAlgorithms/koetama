@@ -27,8 +27,8 @@ use std::time::{Duration, Instant};
 
 /// the longest an answer waits for an object ("wait"; the game still sends a feed at least once a second)
 pub const MAX_WAIT: f64 = 1.0;
-/// the largest request body - a feed with agents' definitions can be tens of KB (8 KB of persona and up to 32
-/// functions each; the user, 2026-11-17: 64 KB "quadruple it", after 4 DST villagers' 70 KB feeds were refused)
+/// the largest request body - a feed with agents' definitions can be tens of KB (32 KB of persona - 8 before 0.5.19 - and up to
+/// 64 functions each; the user, 2026-11-17: 64 KB "quadruple it", after 4 DST villagers' 70 KB feeds were refused)
 pub const MAX_BODY: usize = 256 * 1024;
 /// requests answered at once (more: 503)
 const MAX_OPEN: usize = 16;

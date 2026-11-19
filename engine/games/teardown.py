@@ -121,7 +121,7 @@ def parse_requests(items):
 # agent_decisions, the top feed only (Rust: kd_games::api - keep the same)
 agent_ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
 FUNCTION_NAME = re.compile(r'[A-Za-z0-9_-]{1,64}')
-MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 8192, 32, 1024  # (functions: 16 before 0.5.15)
+MAX_AGENTS, MAX_PERSONA_BYTES, MAX_FUNCTIONS, MAX_FUNCTION_BYTES = 32, 32768, 64, 1024  # (functions: 16 before 0.5.15, 32 before 0.5.19; persona: 8192 before 0.5.19)
 MAX_AGENT_LINES, MAX_STATE_BYTES, MAX_RESULTS, MAX_RESULT_BYTES = 8, 8192, 16, 1024  # (state: 2048 before 0.5.18)
 CRITERION_NAME = re.compile(r'[a-z0-9_]{1,32}')
 MAX_CRITERIA, MAX_CRITERION_BYTES, MAX_DECISIONS = 8, 300, 32
@@ -745,9 +745,10 @@ def json_secs(x):
 
 def hello(features):
     """first, each session; with "llm", "agent_functions": the most functions an agent may have (MAX_FUNCTIONS - a game
-    sends more than 16 only when it is there), and "agent_state": a line's state's most bytes (MAX_STATE_BYTES - 2048
-    when it is not there)"""
-    extra = ',"agent_functions":%d,"agent_state":%d' % (MAX_FUNCTIONS, MAX_STATE_BYTES) if 'llm' in features else ''
+    sends more than 16 only when it is there), "agent_persona": a persona's most bytes (MAX_PERSONA_BYTES - 8192 when
+    it is not there), and "agent_state": a line's state's most bytes (MAX_STATE_BYTES - 2048 when it is not there)"""
+    extra = (',"agent_functions":%d,"agent_persona":%d,"agent_state":%d' % (MAX_FUNCTIONS, MAX_PERSONA_BYTES, MAX_STATE_BYTES)
+             if 'llm' in features else '')
     return '{"type":"hello","app":%s,"version":%s,"protocol":%d,"features":%s%s}' % (
         _js(paths.APP_NAME), _js(paths.VERSION), PROTOCOL, _js(list(features)), extra)
 

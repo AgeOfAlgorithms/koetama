@@ -201,12 +201,12 @@ def feed_cases():
                                                         required=['item']))]),
                    dict(id='guard.1', persona='A guard.', functions={}, max_words=5000, version=-2),
                    dict(id='pig_king', persona='a second one: left out'), dict(id='bad id', persona='x'),
-                   dict(id='long', persona='p' * 8193), dict(id='fn-bad', functions=[dict(name='a b')]),
+                   dict(id='long', persona='p' * 32769), dict(id='fn-bad', functions=[dict(name='a b')]),
                    dict(id='fn-twice', functions=[dict(name='f'), dict(name='f')]),
                    dict(id='fn-params', functions=[dict(name='f', parameters=[1])]),
-                   # (32 functions: the most - 16 before 0.5.15; 33: left out)
-                   dict(id='fn-32', functions=[dict(name='f%d' % i) for i in range(32)]),
-                   dict(id='fn-33', functions=[dict(name='f%d' % i) for i in range(33)]),
+                   # (64 functions: the most - 16 before 0.5.15, 32 before 0.5.19; 65: left out)
+                   dict(id='fn-64', functions=[dict(name='f%d' % i) for i in range(64)]),
+                   dict(id='fn-65', functions=[dict(name='f%d' % i) for i in range(65)]),
                    dict(id='plain', max_words=0, voice=5), 'not an object', dict(persona='no id'),
                    dict(id='director', character=False, persona='Plan the next wave. Answer with function calls only.'),
                    dict(id='bad-character', character='no'), dict(id='talker', stream=True, persona='Chatty.'),

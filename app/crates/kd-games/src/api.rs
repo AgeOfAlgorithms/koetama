@@ -52,11 +52,21 @@ pub fn features(profile: &Profile) -> Vec<&'static str> {
 
 /// {"type":"hello","app":..,"version":..,"protocol":2,"features":[..]}: first, each session. With "llm", also
 /// "agent_functions": the most functions an agent may have (feed::MAX_FUNCTIONS) - a game sends more than 16 (the
-/// limit before 0.5.15, and what a hello without the field means) only when this says it may - and "agent_state": the
-/// most bytes of a line's `state` (feed::MAX_STATE_BYTES; 2048 before 0.5.18 and without the field).
+/// limit before 0.5.15, and what a hello without the field means) only when this says it may - "agent_persona": the
+/// most bytes of an agent's persona (feed::MAX_PERSONA_BYTES; 8192 before 0.5.19 and without the field), and
+/// "agent_state": the most bytes of a line's `state` (feed::MAX_STATE_BYTES; 2048 before 0.5.18 and without the field).
 pub fn hello(features: &[&str]) -> String {
     let f: Vec<String> = features.iter().map(|x| js(x)).collect();
-    let extra = if features.contains(&"llm") { format!(",\"agent_functions\":{},\"agent_state\":{}", feed::MAX_FUNCTIONS, feed::MAX_STATE_BYTES) } else { String::new() };
+    let extra = if features.contains(&"llm") {
+        format!(
+            ",\"agent_functions\":{},\"agent_persona\":{},\"agent_state\":{}",
+            feed::MAX_FUNCTIONS,
+            feed::MAX_PERSONA_BYTES,
+            feed::MAX_STATE_BYTES
+        )
+    } else {
+        String::new()
+    };
     format!(
         "{{\"type\":\"hello\",\"app\":{},\"version\":{},\"protocol\":{PROTOCOL},\"features\":[{}]{extra}}}",
         js(paths::APP_NAME),
