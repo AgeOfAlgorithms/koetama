@@ -256,6 +256,17 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.18: AI characters can know more of the game
+
+- **A game can tell a character up to 8 KB about what's going on** (was 2 KB): what's around it, nearest first,
+  the time, who is near, what it has done lately. Village characters in Don't Starve Together needed about 4 KB.
+- **Only the newest game state stays in a character's memory.** Before, each of the 24 turns a character remembers
+  kept its own copy, so a long state would have made every request several times bigger. Now a new state replaces
+  the old one, and your monthly token limit lasts as long as before.
+- **For mod makers:** when the language model is on, the hello has `"agent_state": 8192`. Without it (Koetama
+  0.5.17 and older) a `to_agent` line's `state` may be at most 2048 bytes; a longer one is dropped, not cut, so cut
+  it to the hello's limit. PROTOCOL.md, "Large language models: agents".
+
 ### 0.5.17: bigger game messages, and no silent refusals
 
 - **A game can send Koetama up to 256 KB at once** (was 64 KB). Games with several AI characters send long
@@ -276,10 +287,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
   `tokens_out` and `tokens_cached` on each reply; the hello names `agent_final` when they're available. PROTOCOL.md,
   "Large language models: agents".
 
-### 0.5.15: more room for AI characters
-
-- **A game's characters can have up to 32 actions** (functions), up from 16, so a mod can give them more to do:
-  trading, giving items, judging what they meet.
-- **For mod makers:** when the language model is on, the hello has `"agent_functions": 32`. Without it (Koetama
-  0.5.14 and older) the limit is 16, and an agent with more is left out, so send more than 16 only when the hello
-  says so. PROTOCOL.md, "Large language models: agents".

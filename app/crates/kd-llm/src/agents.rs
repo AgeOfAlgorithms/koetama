@@ -2,6 +2,8 @@
 //! its own; each request to the LLM on a thread of its own too.
 //!
 //! - Each agent keeps its conversation: the last MAX_TURNS turns (a fixed window - no summaries), its first a player's.
+//!   The game's state is only in its newest turn that had one: a new state takes the older one out (a state can be
+//!   8 KB - each of 24 turns with its own would be most of every request).
 //! - Its queue: a line that comes while the agent's request runs (or while its function calls wait for the game's
 //!   results) waits; once it is free, every waiting line goes in ONE turn, and the reply answers them all (`ids`).
 //! - Function calls: the reply's calls go to the game (Event::Reply with `calls`); the game runs them, checks them
@@ -239,6 +241,9 @@ struct Agent {
     kept: VecDeque<String>,
     /// requests to the model in its turn now (the turn's first and each follow-up after results: max_rounds)
     rounds: i64,
+    /// its turn in the conversation with the game's state, and that turn without it (taken out when a newer state
+    /// comes)
+    stated: Option<(String, String)>,
 }
 
 impl Agent {
@@ -311,9 +316,15 @@ fn kept_block(kept: &[String]) -> String {
 }
 
 /// The lines as one turn: the kept lines of turns not answered before (if any), the newest game state, then each line.
+#[cfg(test)]
 fn user_turn(lines: &[AgentLine], kept: &[String]) -> String {
+    turn_text(lines, kept, true)
+}
+
+/// The turn, with its newest game state or without any.
+fn turn_text(lines: &[AgentLine], kept: &[String], with_state: bool) -> String {
     let mut out = kept_block(kept);
-    if let Some(s) = lines.iter().rev().map(|l| l.state.as_str()).find(|s| !s.is_empty()) {
+    if let Some(s) = lines.iter().rev().map(|l| l.state.as_str()).find(|s| !s.is_empty() && with_state) {
         out.push_str(&format!("[the game: {s}]\n"));
     }
     for l in lines {
@@ -392,6 +403,31 @@ fn read_scores(text: &str, criteria: &[kd_common::feed::AgentCriterion]) -> Vec<
         i = j;
     }
     criteria.iter().filter_map(|c| got.iter().find(|(n, _)| *n == c.name).cloned()).collect()
+}
+
+/// The conversation with a new turn: the older state taken out when the turn has one (`stated`: the turn that had it,
+/// and it without), kept to MAX_TURNS, and the turn. Returns the new `stated`. The same for a turn's score request
+/// and its reply's request, so the two start alike (prefix sharing).
+fn with_turn(
+    history: Vec<Turn>,
+    stated: &Option<(String, String)>,
+    lines: &[AgentLine],
+    kept: &[String],
+) -> (Vec<Turn>, Option<(String, String)>) {
+    let (text, plain) = (turn_text(lines, kept, true), turn_text(lines, kept, false));
+    let mut h = history;
+    let mut now = stated.clone();
+    if text != plain {
+        if let Some((with, without)) = stated {
+            if let Some(t) = h.iter_mut().rev().find(|t| matches!(t, Turn::User(s) if s == with)) {
+                *t = Turn::User(without.clone());
+            }
+        }
+        now = Some((text.clone(), plain));
+    }
+    let mut h = trimmed(h);
+    h.push(Turn::User(text));
+    (h, now)
 }
 
 /// The history kept to MAX_TURNS, starting with a player's turn (never with a reply or results cut from theirs).
@@ -508,6 +544,7 @@ impl Worker {
         let Some(n) = self.agents.get_mut(k) else { return };
         n.history.clear();
         n.kept.clear();
+        n.stated = None;
         let mut ids: Vec<i64> = Vec::new();
         if let Some(b) = n.busy.take() {
             ids.extend(b.ids);
@@ -601,9 +638,9 @@ impl Worker {
         let Some(n) = self.agents.get_mut(k) else { return };
         let ids = lines.iter().map(|l| l.id).collect();
         let kept: Vec<String> = n.kept.iter().cloned().collect();
-        n.history = trimmed(std::mem::take(&mut n.history));
-        let before = n.history.len();
-        n.history.push(Turn::User(user_turn(&lines, &kept)));
+        let (h, stated) = with_turn(std::mem::take(&mut n.history), &n.stated, &lines, &kept);
+        (n.history, n.stated) = (h, stated);
+        let before = n.history.len() - 1;
         n.rounds = 0; // (a new turn)
         self.ask(k, ids, before, kept.len());
     }
@@ -622,8 +659,7 @@ impl Worker {
     fn score(&mut self, k: &str, lines: Vec<AgentLine>) {
         let Some(n) = self.agents.get_mut(k) else { return };
         let kept: Vec<String> = n.kept.iter().cloned().collect();
-        let mut turns = trimmed(n.history.clone());
-        turns.push(Turn::User(user_turn(&lines, &kept)));
+        let (mut turns, _) = with_turn(n.history.clone(), &n.stated, &lines, &kept);
         turns.push(Turn::Note(score_question(&n.def)));
         let (cfg, sys, functions) = (self.cfg.clone(), system(&n.def), n.def.functions.clone());
         let max_tokens = score_max_tokens(&n.def);
@@ -994,5 +1030,27 @@ mod tests {
         assert_eq!(t.last(), Some(&Turn::Assistant { text: "a29".into(), calls: vec![] }));
         let odd = trimmed(vec![Turn::Results(vec![]), Turn::Assistant { text: "x".into(), calls: vec![] }, Turn::User("u".into())]);
         assert_eq!(odd, vec![Turn::User("u".into())]);
+    }
+
+    #[test]
+    fn only_the_newest_state_stays() {
+        let reply = |t: &str| Turn::Assistant { text: t.into(), calls: vec![] };
+        let (mut h, stated) = with_turn(vec![], &None, &[line(1, Some("Wes"), "hi", "day 1")], &[]);
+        assert_eq!(h, vec![Turn::User("[the game: day 1]
+Wes: hi".into())]);
+        h.push(reply("Hello."));
+        // (a turn without a state: the older one stays)
+        let (mut h, stated) = with_turn(h, &stated, &[line(2, Some("Wes"), "what day?", "")], &[]);
+        assert_eq!(h[0], Turn::User("[the game: day 1]
+Wes: hi".into()));
+        h.push(reply("Day 1."));
+        // (a new state: the older one is taken out)
+        let (h, stated) = with_turn(h, &stated, &[line(3, Some("Wes"), "and now?", "day 2")], &[]);
+        assert_eq!(h[0], Turn::User("Wes: hi".into()));
+        assert_eq!(h[2], Turn::User("Wes: what day?".into()));
+        assert_eq!(h[4], Turn::User("[the game: day 2]
+Wes: and now?".into()));
+        assert_eq!(stated, Some(("[the game: day 2]
+Wes: and now?".into(), "Wes: and now?".into())));
     }
 }

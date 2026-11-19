@@ -2,6 +2,14 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.15: more room for AI characters
+
+- **A game's characters can have up to 32 actions** (functions), up from 16, so a mod can give them more to do:
+  trading, giving items, judging what they meet.
+- **For mod makers:** when the language model is on, the hello has `"agent_functions": 32`. Without it (Koetama
+  0.5.14 and older) the limit is 16, and an agent with more is left out, so send more than 16 only when the hello
+  says so. PROTOCOL.md, "Large language models: agents".
+
 ### 0.5.14: characters that choose when to answer
 
 - **A game's characters can listen to everything said near them** and answer only what concerns them. A mod gives

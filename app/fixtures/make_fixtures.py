@@ -217,7 +217,7 @@ def feed_cases():
                      dict(id=42, agent='guard.1', text='the museum alarm went off'),
                      dict(id=41, agent='guard.1', text='a second 41: left out'), dict(id=0, agent='x', text='a'),
                      dict(id=43, agent='bad agent', text='a'), dict(id=44, agent='x', text=''),
-                     dict(id=45, agent='x', text='é' * 201), dict(id=46, agent='x', text='ok', state='s' * 2049),
+                     dict(id=45, agent='x', text='é' * 201), dict(id=46, agent='x', text='ok', state='s' * 8193),
                      dict(id=47.0, agent='x', text='from a Lua number', **{'from': dict(id=7.0)}),
                      dict(id=48, agent='x', text=5)] + [dict(id=100 + i, agent='x', text='more %d' % i) for i in range(8)],
              agent_results=[dict(call='c9', result='ok: offered'), dict(call='c9', result='again'),

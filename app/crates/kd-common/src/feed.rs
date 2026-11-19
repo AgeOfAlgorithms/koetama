@@ -489,7 +489,7 @@ pub const MAX_FUNCTIONS: usize = 32; // (16 before 0.5.15; the hello's "agent_fu
 pub const MAX_FUNCTION_BYTES: usize = 1024;
 /// the most lines for agents one feed keeps, the game state's most bytes, the most function results and their size
 pub const MAX_AGENT_LINES: usize = 8;
-pub const MAX_STATE_BYTES: usize = 2048;
+pub const MAX_STATE_BYTES: usize = 8192; // (2048 before 0.5.18; the hello's "agent_state" says it)
 pub const MAX_RESULTS: usize = 16;
 pub const MAX_RESULT_BYTES: usize = 1024;
 /// an agent's criteria: at most so many, a name's most bytes, a description's most bytes (a longer one is cut at a

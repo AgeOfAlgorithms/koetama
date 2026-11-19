@@ -356,6 +356,7 @@ fn llm_games() {
     // (the hello says how many functions an agent may have - with "llm" only; none: 16, as before 0.5.15)
     let hello: serde_json::Value = serde_json::from_str(&kd_games::api::hello(&kd_games::api::features(&on.profile))).unwrap();
     assert_eq!(hello["agent_functions"], 32);
+    assert_eq!(hello["agent_state"], 8192, "and a line's state's most bytes (2048 before 0.5.18)");
     let plain: serde_json::Value = serde_json::from_str(&kd_games::api::hello(&kd_games::api::features(&off.profile))).unwrap();
-    assert!(plain.get("agent_functions").is_none(), "no llm: no field");
+    assert!(plain.get("agent_functions").is_none() && plain.get("agent_state").is_none(), "no llm: no field");
 }
