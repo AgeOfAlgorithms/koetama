@@ -2,6 +2,19 @@
 
 The three newest versions are in [README.md](README.md#whats-new); each release moves the oldest of them here.
 
+### 0.5.16: fewer wasted requests for AI characters
+
+- **A game can end a character's turn with its action.** When a character starts something long ("gather 6 grass"),
+  the game can mark the action's result as final, and Koetama no longer asks the model to say something more about
+  it. That second request was usually empty words, and it cost tokens from your monthly limit. In a test with three
+  village characters, about half of all requests were such follow-ups.
+- **A cap on requests per turn:** a game can say how many times a character may go back to the model in one turn.
+- **Fixed: a character that once said nothing stopped answering.** If the model's reply had no words and no action,
+  DeepSeek refused every later request for that character for the rest of the session.
+- **For mod makers:** `agent_results`' `"final": true`, agents' `max_rounds` (1 to 16), and `tokens_in`,
+  `tokens_out` and `tokens_cached` on each reply; the hello names `agent_final` when they're available. PROTOCOL.md,
+  "Large language models: agents".
+
 ### 0.5.15: more room for AI characters
 
 - **A game's characters can have up to 32 actions** (functions), up from 16, so a mod can give them more to do:

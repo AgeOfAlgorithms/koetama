@@ -256,6 +256,17 @@ MIT, see [LICENSE](LICENSE). The models and libraries Koetama uses are listed wi
 
 The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
 
+### 0.5.19: AI characters with more rules and more actions
+
+- **A character's description can be up to 32 KB** (was 8 KB): its personality and all the rules it plays by.
+  Village characters in Don't Starve Together had filled the old limit, and each new rule meant cutting another.
+- **Up to 64 actions per character** (was 32).
+- **Mind the cost:** the description and the actions go with every request a character makes, and your monthly
+  token limit counts all of them. A full 32 KB description is about 8,000 tokens per request.
+- **For mod makers:** when the language model is on, the hello has `"agent_persona": 32768` and
+  `"agent_functions": 64`. Without them (older Koetamas) the limits are 8192 bytes and 32 functions (16 before
+  0.5.15). An agent over the limit is left out, not cut. PROTOCOL.md, "Large language models: agents".
+
 ### 0.5.18: AI characters can know more of the game
 
 - **A game can tell a character up to 8 KB about what's going on** (was 2 KB): what's around it, nearest first,
@@ -273,17 +284,3 @@ The three newest versions; every older one is in [CHANGELOG.md](CHANGELOG.md).
   descriptions of them, and four characters were already over the old limit.
 - **A message that's too big is now reported** in Koetama's log, with its size. Before, it was refused without a
   word, and the characters it carried simply never answered.
-
-### 0.5.16: fewer wasted requests for AI characters
-
-- **A game can end a character's turn with its action.** When a character starts something long ("gather 6 grass"),
-  the game can mark the action's result as final, and Koetama no longer asks the model to say something more about
-  it. That second request was usually empty words, and it cost tokens from your monthly limit. In a test with three
-  village characters, about half of all requests were such follow-ups.
-- **A cap on requests per turn:** a game can say how many times a character may go back to the model in one turn.
-- **Fixed: a character that once said nothing stopped answering.** If the model's reply had no words and no action,
-  DeepSeek refused every later request for that character for the rest of the session.
-- **For mod makers:** `agent_results`' `"final": true`, agents' `max_rounds` (1 to 16), and `tokens_in`,
-  `tokens_out` and `tokens_cached` on each reply; the hello names `agent_final` when they're available. PROTOCOL.md,
-  "Large language models: agents".
-
